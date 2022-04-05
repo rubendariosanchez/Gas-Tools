@@ -1,0 +1,54 @@
+{
+  "name": "Google Apps Script Tools",
+  "version": "0.0.1",
+  "manifest_version": 3,
+  "author": "Rubén Sánchez",
+  "description": "It is an extension that adds functionalities to the new development environment of Google Apps Script",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "background": {
+    "service_worker": "js/background.js"
+  },
+  "content_scripts": [{
+    "matches": [
+      "https://script.google.com/home/projects/*/edit*"
+    ],
+    "js": [
+      "js/mainFunctions.js"
+    ],
+    "all_frames": false,
+    "run_at": "document_end"
+  }],
+  "web_accessible_resources": [{
+    "resources": [
+      "html/optionToogle.html",
+      "html/optionWrapLine.html",
+      "html/themeList.html",
+      "css/gasToolsStyle.css",
+      "html/modalSearch.html",
+      "js/gasTools.js",
+      "js/library.js",
+      "js/popover.js",
+      "themes/*"
+    ],
+    "matches": ["<all_urls>"]
+  }],
+  "action": {
+    "default_title": "Google Apps Script Tools",
+    "default_icon": "icon128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'",
+    "sandbox": "sandbox allow-scripts; script-src 'self' 'https://apis.google.com/' 'https://www.gstatic.com/' 'https://*.firebaseio.com' 'https://www.googleapis.com' 'https://ajax.googleapis.com'; object-src 'self'"
+  },
+  "permissions": [
+    "declarativeContent",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://script.google.com/home/projects/*/edit*"
+  ]
+}
