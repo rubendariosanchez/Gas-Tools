@@ -1,7 +1,7 @@
 # Google Apps Script Tools
 [![Chrome Web Store](https://img.shields.io/badge/Google%20Apps%20Script-Tools-blue)](https://github.com/rubendariosanchez/Gas-Tools)
 
-Se trata de un proyecto que he iniciado con el objetivo de ir agregando funcionalidades al nuevo entorno de desarrollo (IDE) de Google Apps Script. En su primera versión se crea como extensión para Google Chrome y se comparte el código en búsqueda de recibir realimentación de otros desarrolladores y así mismo ir mejorando lo constantemente.
+Se trata de un proyecto que he iniciado con el objetivo de ir agregando funcionalidades al nuevo entorno de desarrollo (IDE) de Google Apps Script. En su primera versión se crea como extensión para Google Chrome y se comparte el código en búsqueda de recibir realimentación de otros desarrolladores y así mismo ir adicionando nuevas carácteristicas.
 
 
 [![Google Apps Script Tools](https://innovationtechweb.com/resources/chrome-extensions/GasTools%20-%20Captura%20de%20pantalla.png)](https://github.com/rubendariosanchez/Gas-Tools)
