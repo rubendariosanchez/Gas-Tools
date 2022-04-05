@@ -1,6 +1,6 @@
 /**
  * Librería con funciones genericas para su uso del complemento
- * @autor Equipo de Desarrollo Sinova S.A.S.
+ * @autor Rubén Sánchez (sanchezramirez.rubendario@gmail.com | rubencho.dev@gmail.com)
  */
 var apiRub = {
 
