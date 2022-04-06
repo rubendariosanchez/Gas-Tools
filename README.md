@@ -19,7 +19,7 @@ Las características que posee actualmente la extensión son las siguientes:
 ### Instalación
 
 
-Desde el navegador de Google Chrome acceder al [Chrome Web Store](https://chrome.google.com/webstore/detail/google-apps-script-tools/iigobcdpmngdgiacebgenbccmdacnjhp) y realizar la instalación de la extensión.
+Desde el navegador de Google Chrome acceder al [Chrome Web Store](https://chrome.google.com/webstore/detail/google-apps-script-tools/iigobcdpmngdgiacebgenbccmdacnjhp) y realizar la instalación de la extensión. Este complemento puede ser usado con otro complemento muy bueno llamado [AppsScript Color](https://chrome.google.com/webstore/detail/appsscript-color/ciggahcpieccaejjdpkllokejakhkome), los cuales se complementan muy bien para sacar el mayor provecho del nuevo IDE de Google Apps Script
 
 
 ### Agradecimientos
