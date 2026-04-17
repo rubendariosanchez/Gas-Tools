@@ -33,13 +33,13 @@
       "js/gasTools.js",
       "js/library.js",
       "js/popover.js",
-      "themes/*"
+      "themes/*.json"
     ],
     "matches": ["<all_urls>"]
   }],
   "action": {
     "default_title": "Google Apps Script Tools",
-    "default_popup": "html/index.html",
+    "default_popup": "src/html/index.html",
     "default_icon": "resources/icons/icon128.png"
   },
   "content_security_policy": {

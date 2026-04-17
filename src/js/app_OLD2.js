@@ -1,13 +1,13 @@
 // Importación de componentes Web y constantes globales
-import { OptionToggle } from '../src/components/OptionToggle.js';
-import { SnippetCard } from '../src/components/SnippetCard.js';
-import { ThemeCard } from '../src/components/ThemeCard.js';
-import { SnippetModal } from '../src/components/SnippetModal.js';
-import { ThemeModal } from '../src/components/ThemeModal.js';
-import { ConfirmDialog } from '../src/js/utils/ConfirmDialog.js';
-import { Toast } from '../src/js/utils/Toast.js';
-import { DEFAULT_SNIPPETS } from '../src/js/utils/Variables.js';
-import { THEME_LIST } from '../src/js/utils/Themes.js';
+import { OptionToggle } from '../components/OptionToggle.js';
+import { SnippetCard } from '../components/SnippetCard.js';
+import { ThemeCard } from '../components/ThemeCard.js';
+import { SnippetModal } from '../components/SnippetModal.js';
+import { ThemeModal } from '../components/ThemeModal.js';
+import { ConfirmDialog } from '../js/utils/ConfirmDialog.js';
+import { Toast } from '../js/utils/Toast.js';
+import { DEFAULT_SNIPPETS } from '../js/utils/Variables.js';
+import { THEME_LIST } from '../js/utils/Themes.js';
 
 // Nombre de la propiedad raíz usada en chrome.storage
 const G_PROPERTY_NAME = 'QualityCode';

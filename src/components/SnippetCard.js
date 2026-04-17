@@ -1,13 +1,24 @@
+// Componente personalizado para mostrar un snippet de código con su información relevante.
 export class SnippetCard extends HTMLElement {
+
+  /**
+   * Constructor del componente, donde se adjunta el shadow DOM para encapsular estilos y estructura.
+   */
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
   }
 
+  /**
+   * Cuando el elemento se conecta al DOM, renderiza su contenido basado en los atributos proporcionados.
+   */
   connectedCallback() {
     this.render_();
   }
 
+  /**
+   * Renderiza el contenido del snippet card basado en los atributos proporcionados.
+   */
   render_() {
     const title_ = this.getAttribute('title') || 'Snippet';
     const lang_ = this.getAttribute('lang') || 'JS';
@@ -82,10 +93,12 @@ export class SnippetCard extends HTMLElement {
     `;
 
     // Eventos de botones
-    this.shadowRoot.querySelector('.edit').onclick = () => this.dispatchEvent(new CustomEvent('edit-snippet'));
     if (!isProtected_) {
+      this.shadowRoot.querySelector('.edit').onclick = () => this.dispatchEvent(new CustomEvent('edit-snippet'));
       this.shadowRoot.querySelector('.delete').onclick = () => this.dispatchEvent(new CustomEvent('delete-snippet'));
     }
   }
 }
+
+// Creamos el respectivo componente personalizado
 customElements.define('snippet-card', SnippetCard);

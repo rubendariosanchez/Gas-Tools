@@ -84,6 +84,7 @@ body {
   height: 400px;
   overflow-y: auto;
   padding: 0 16px;
+  position: relative;
 }
 
 .qc__page {
@@ -143,7 +144,7 @@ body {
 }
 
 /* Estilos para el botón de añadir Snippet */
-#addSnippetBtn {
+.qc__btn-add-item {
   background: transparent;
   border: none;
   cursor: pointer;
@@ -153,10 +154,9 @@ body {
   padding: 4px;
   border-radius: 6px;
   transition: background 0.2s;
-  margin-top: 12px; /* Alineación con el título de sección */
 }
 
-#addSnippetBtn:hover {
+.qc__btn-add-item:hover {
   background: rgba(59, 130, 246, 0.1);
 }
 
@@ -244,16 +244,12 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  
-  /* Esto hace la magia */
   position: sticky;
-  top: 0;
-  z-index: 10; /* Asegura que pase por encima de las tarjetas */
-  background-color: var(--qc__bg-main, #121212); /* Obligatorio: si es transparente, se verá el texto debajo */
-  
-  padding: 16px 0; /* Ajustamos el margen como padding para que el fondo cubra todo */
-  margin-top: 0; 
-  margin-bottom: 8px;
+  top: 0; /* Pegado al borde superior del main */
+  z-index: 20; 
+  background-color: var(--qc__bg-main);
+  padding: 16px 0 8px 0;
+  margin: 0;
 }
 
 /* Opcional: una línea sutil al hacer scroll para separar el buscador del contenido */
@@ -431,4 +427,65 @@ body {
   font-size: 12px;
   color: var(--qc__text-dim);
   margin-left: 8px;
+}
+
+.qc__sub-tabs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid var(--qc__border);
+  position: sticky;
+  top: 54px;
+  z-index: 19;
+  background-color: var(--qc__bg-main);
+  margin-bottom: 16px;
+  padding: 7px 0px;
+}
+
+.qc__sub-tab {
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  color: #6b7280;
+  transition: all 0.2s;
+  background: #1e1e1e;
+  border: 1px solid transparent;
+}
+
+.qc__sub-tab:hover {
+  background: #252526;
+  color: #fff;
+}
+
+.qc__sub-tab.qc__active {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.3);
+  font-weight: 600;
+}
+
+/* El nuevo botón alineado a la derecha */
+.qc__add-inline-btn {
+  margin-left: auto; /* Empuja el botón al final de la fila */
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--qc__primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.qc__add-inline-btn:hover {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.qc__add-inline-btn .material-symbols-outlined {
+  font-size: 20px;
+  font-weight: bold;
 }

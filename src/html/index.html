@@ -7,7 +7,7 @@
 </head>
 <body>
   <header class="qc__header">
-    <img src="../resources/icons/icon48.png" width="28" alt="Logo">
+    <img src="../../resources/icons/icon48.png" width="28" alt="Logo">
     <div>
       <div style="font-weight: 600; font-size: 15px;">GAS Tools Pro</div>
       <div style="color: var(--qc__text-dim); font-size: 10px;">Quality Code Enhancement</div>
@@ -52,13 +52,25 @@
 
     </div>
 
+    <!-- Pestaña de snippets -->
     <div class="qc__page" id="snippets">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div class="qc__themes-header">
         <div class="qc__section-title">Code Snippets</div>
-        <button id="addSnippetBtn" class="qc__action-btn" style="color: var(--qc__primary)">
-            <span class="material-symbols-outlined">add</span>
+        <div class="qc__search-container">
+          <span class="material-symbols-outlined qc__search-icon">search</span>
+          <input type="text" id="snippetSearch" class="qc__search-input" placeholder="Search...">
+        </div>
+      </div>
+
+      <div class="qc__sub-tabs">
+        <div class="qc__sub-tab qc__active" data-filter="default">Default</div>
+        <div class="qc__sub-tab" data-filter="custom">Custom</div>
+        
+        <button id="addSnippetBtn" class="qc__add-inline-btn qc__btn-add-item" title="Add Snippet">
+          <span class="material-symbols-outlined">add</span>
         </button>
       </div>
+
       <div id="snippets-list"></div> 
     </div>
     
@@ -66,11 +78,19 @@
     <div class="qc__page" id="themes">
       <div class="qc__themes-header">
         <div class="qc__section-title">Themes</div>
-        
         <div class="qc__search-container">
           <span class="material-symbols-outlined qc__search-icon">search</span>
-          <input type="text" id="themeSearch" class="qc__search-input" placeholder="Search themes...">
+          <input type="text" id="themeSearch" class="qc__search-input" placeholder="Search...">
         </div>
+      </div>
+
+      <div class="qc__sub-tabs">
+        <div class="qc__sub-tab qc__active" data-filter="default">Default</div>
+        <div class="qc__sub-tab" data-filter="custom">Custom</div>
+        
+        <button id="addThemeBtn" class="qc__add-inline-btn qc__btn-add-item" title="Add Snippet">
+          <span class="material-symbols-outlined">add</span>
+        </button>
       </div>
       
       <div id="themes-grid" class="qc__themes-grid"></div>
@@ -79,7 +99,7 @@
     <!-- Créditos -->
     <div class="qc__page" id="about">
       <div class="qc__about-header">
-        <img src="../resources/icons/icon128.png" class="qc__about-logo" alt="Logo">
+        <img src="../../resources/icons/icon128.png" class="qc__about-logo" alt="Logo">
         <div class="qc__about-title">GAS Tools Pro</div>
         <div class="qc__about-version">Rubén Sánchez</div>
         <div class="qc__about-version">Version 0.0.5</div>
@@ -104,8 +124,12 @@
           <span id="stat-snippets-count" class="qc__stat-value">0</span>
         </div>
         <div class="qc__stat-item">
-          <span>Last Sync</span>
-          <span id="stat-last-sync" class="qc__stat-label">Never</span>
+          <span>Custom Themes</span>
+          <span id="stat-themes-count" class="qc__stat-value">0</span>
+        </div>
+        <div class="qc__stat-item">
+          <span>Last Update</span>
+          <span id="stat-last-update" class="qc__stat-label">Never</span>
         </div>
       </div>
     </div>
@@ -133,6 +157,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Modal para la creación o edición de temas -->
+  <theme-modal id="themeModal"></theme-modal>
 
   <script type="module" src="../js/app.js"></script>
 </body>
