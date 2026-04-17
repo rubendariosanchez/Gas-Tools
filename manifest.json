@@ -1,16 +1,17 @@
 {
   "name": "Google Apps Script Tools",
-  "version": "0.0.1",
+  "version": "0.0.5",
   "manifest_version": 3,
   "author": "Rubén Sánchez",
-  "description": "It is an extension that adds functionalities to the new development environment of Google Apps Script",
+  "description": "Enhanced development environment for Google Apps Script with custom themes and tools.",
   "icons": {
-    "16": "icon16.png",
-    "48": "icon48.png",
-    "128": "icon128.png"
+    "16": "resources/icons/icon16.png",
+    "48": "resources/icons/icon48.png",
+    "128": "resources/icons/icon128.png"
   },
   "background": {
-    "service_worker": "js/background.js"
+    "service_worker": "js/background.js",
+    "type": "module"
   },
   "content_scripts": [{
     "matches": [
@@ -38,7 +39,8 @@
   }],
   "action": {
     "default_title": "Google Apps Script Tools",
-    "default_icon": "icon128.png"
+    "default_popup": "html/index.html",
+    "default_icon": "resources/icons/icon128.png"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'",
