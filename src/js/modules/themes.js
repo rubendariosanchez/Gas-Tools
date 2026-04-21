@@ -3,7 +3,9 @@ import { THEME_LIST } from '../utils/Themes.js';
 import { Toast } from '../utils/Toast.js';
 import { ConfirmDialog } from '../utils/ConfirmDialog.js';
 import { DB } from '../utils/Storage.js';
-let currentThemeCategory = 'default';
+
+// Estado local del módulo para filtros
+let currentThemeCategory = 'custom'; // 'default' o 'custom'
 
 /**
  * Orquestador del módulo de temas.
@@ -12,7 +14,41 @@ export function initThemeModule() {
     initThemeNavigation_();
     initThemeSearch_();
     initThemeActions_();
+    initThemeModal_();
     renderThemes_();
+}
+
+/**
+ * Inicializa el modal de temas y sus botones de disparo
+ */
+function initThemeModal_() {
+    const modal = document.getElementById('themeModal');
+    const addBtn = document.getElementById('addThemeBtn'); // Asegúrate de tener este ID en tu HTML
+
+    // Usar el método .open_() que definiste en la clase ThemeModal
+    addBtn?.addEventListener('click', () => modal.open_()); 
+
+    // Escuchar el evento correcto: 'save-theme'
+    modal?.addEventListener('save-theme', async (e) => {
+        try {
+            const themeData = e.detail;
+            
+            // Para IndexedDB, necesitamos un ID consistente. 
+            // Tu modal ya genera uno en getFormData_: this._editingId || `theme-${Date.now()}`
+            // Pero IndexedDB suele requerir que el campo 'id' esté en la raíz del objeto.
+            themeData.id = themeData.value; 
+
+            await DB.set('themes', themeData);
+            Toast.show("Theme saved successfully", "success");
+            
+            // Forzar vista a 'custom' para ver el resultado
+            currentThemeCategory = 'custom';
+            renderThemes_();
+        } catch (err) {
+            console.error(err);
+            Toast.show("Error saving theme", "error");
+        }
+    })
 }
 
 /**
@@ -72,88 +108,107 @@ export async function renderThemes_(filter = '', category = currentThemeCategory
 }
 
 /**
- * Acciones de duplicar, editar y borrar.
+ * Inicializa los escuchadores de eventos para las acciones de temas.
+ * Utiliza delegación de eventos sobre el contenedor principal.
  */
 function initThemeActions_() {
     const container = document.querySelector('#themes');
 
     // Delegación de eventos para acciones en tarjetas de tema
-    container.addEventListener('duplicate-theme', async (e) => {
-        const sourceValue = e.detail.value;
-        console.log("sourceValue:", sourceValue);
+    container.addEventListener('edit-theme', (e) => handleEditTheme_(e.detail.value));
+    container.addEventListener('duplicate-theme', (e) => handleDuplicateTheme_(e.detail.value));
+    container.addEventListener('delete-theme', (e) => handleDeleteTheme_(e.detail.value));
+}
 
-        // Buscar si el origen es un tema default o uno personalizado
-        let themeBase = THEME_LIST.find(t => t.value === sourceValue);
-        if (!themeBase) {
-            const allCustom = await DB.getAll('themes');
-            themeBase = allCustom.find(t => t.value === sourceValue);
+/**
+ * Maneja la lógica para abrir el editor de un tema personalizado.
+ * @param {string} themeValue - El identificador único (value) del tema.
+ */
+async function handleEditTheme_(themeValue) {
+    const modal = document.getElementById('themeModal');
+    const allCustom = await DB.getAll('themes');
+    const targetTheme = allCustom.find(t => t.value === themeValue);
+
+    if (targetTheme) {
+        modal.open_(targetTheme);
+    } else {
+        Toast.show("Cannot edit system themes. Try duplicating it first.", "error");
+    }
+}
+
+/**
+ * Crea una copia de un tema existente (sistema o personalizado).
+ * @param {string} sourceValue - El valor del tema origen a duplicar.
+ */
+async function handleDuplicateTheme_(sourceValue) {
+    // 1. Buscar el tema base
+    let themeBase = THEME_LIST.find(t => t.value === sourceValue);
+    if (!themeBase) {
+        const allCustom = await DB.getAll('themes');
+        themeBase = allCustom.find(t => t.value === sourceValue);
+    }
+
+    if (!themeBase) return;
+
+    // 2. Si es protegido, obtener definición JSON física
+    let themeData = null;
+    if (themeBase.protected) {
+        themeData = await fetchThemeDefinition_(themeBase.text);
+        if (!themeData) {
+            return Toast.show("Error: Base JSON not found", "error");
         }
-        console.log("themeBase:", themeBase);
+    }
 
-        if (!themeBase) return;
-        let themeData = null;
+    // 3. Preparar el nuevo objeto
+    const timestamp = Date.now();
+    const newTheme = {
+        ...themeBase,
+        id: `theme-${timestamp}`,
+        text: `${themeBase.text} (Copy)`,
+        value: `theme-copy-${timestamp}`,
+        protected: false,
+        data: themeData || themeBase.data
+    };
 
-        // Si es protegido, buscamos su JSON físico
-        if (themeBase?.protected) {
-            console.log("Buscando definición JSON para tema protegido...");
-            console.log("themeBase.text:", themeBase.text);
-            themeData = await fetchThemeDefinition_(themeBase.text);
-            console.log("themeData:", themeData);
-            if (!themeData) {
-                Toast.show("Error: Base JSON not found", "error");
-                return;
-            }
+    // 4. Guardar y actualizar UI
+    try {
+        await DB.set('themes', newTheme);
+        Toast.show("Theme duplicated", "success");
+        
+        // Redirigir a pestaña de personalizados
+        const customTab = document.querySelector('#themes .qc__sub-tab[data-filter="custom"]');
+        if (customTab) {
+            customTab.click();
+        } else {
+            renderThemes_();
         }
+    } catch (err) {
+        console.error("Error duplicating theme:", err);
+        Toast.show("Failed to duplicate", "error");
+    }
+}
 
-        const timestamp = Date.now();
-        let newTheme = {
-            ...themeBase,
-            id: `theme-${timestamp}`,
-            text: `${themeBase.text} (Copy)`,
-            value: `theme-copy-${timestamp}`,
-            protected: false // Adjuntar definición si existe
-        };
+/**
+ * Elimina un tema personalizado después de una confirmación.
+ * @param {string} themeValue - El identificador único (value) del tema.
+ */
+async function handleDeleteTheme_(themeValue) {
+    const isConfirmed = await ConfirmDialog("Delete this custom theme?");
+    if (!isConfirmed) return;
 
-        // Se valida si existe datos del tema
-        if(themeData){
-            newTheme["data"] = themeData;
+    try {
+        const allCustom = await DB.getAll('themes');
+        const target = allCustom.find(t => t.value === themeValue);
+        
+        if (target) {
+            await DB.delete('themes', target.id);
+            Toast.show("Theme deleted", "success");
+            renderThemes_();
         }
-
-        try {
-            await DB.set('themes', newTheme);
-            Toast.show("Theme duplicated", "success");
-            
-            // Cambiar a la pestaña de personalizados
-            currentThemeCategory = 'custom';
-            const customTab = document.querySelector('#themes .qc__sub-tab[data-filter="custom"]');
-            if (customTab) customTab.click();
-            else renderThemes_();
-        } catch (err) {
-            console.error("Error duplicating theme:", err);
-            Toast.show("Failed to duplicate", "error");
-        }
-    });
-
-    // Evento para eliminar un tema personalizado
-    container.addEventListener('delete-theme', async (e) => {
-
-        const themeValue = e.detail.value;
-        if (await ConfirmDialog("Delete this custom theme?")) {
-            try {
-                // Buscamos el ID por el value (o puedes usar el value como ID directamente)
-                const allCustom = await DB.getAll('themes');
-                const target = allCustom.find(t => t.value === themeValue);
-                
-                if (target) {
-                    await DB.delete('themes', target.id);
-                    Toast.show("Theme deleted", "success");
-                    renderThemes_();
-                }
-            } catch (err) {
-                Toast.show("Error deleting theme", "error");
-            }
-        }
-    });
+    } catch (err) {
+        console.error("Error deleting theme:", err);
+        Toast.show("Error deleting theme", "error");
+    }
 }
 
 /**

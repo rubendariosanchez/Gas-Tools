@@ -5,7 +5,7 @@ import { Toast } from '../utils/Toast.js';
 import { ConfirmDialog } from '../utils/ConfirmDialog.js';
 
 // Estado local del módulo para filtros
-let currentSnippetFilter = 'default';
+let currentSnippetFilter = 'custom'; // 'default' o 'custom'
 
 /**
  * Inicializa el módulo de Snippets: navegación, modal y carga inicial.
