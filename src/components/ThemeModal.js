@@ -516,9 +516,6 @@ export class ThemeModal extends HTMLElement {
     ThemeModal.MONACO_COLORS
       .filter(c => this._activeColorIds.has(c.id))
       .forEach(colorConfig => {
-        console.log('colorConfig', colorConfig);
-        console.log('Rendering color item:', colorConfig.id);
-        console.log('Current value:', this._colorValues[colorConfig.id], 'Default:', colorConfig.default);
         const value = this.cleanColor_(this._colorValues[colorConfig.id] || colorConfig.default);
         const item = document.createElement('div');
         item.className = 'qc__color-item';
@@ -637,6 +634,7 @@ export class ThemeModal extends HTMLElement {
   open_(theme = null) {
     this.classList.add('qc__active');
     this._editingId = theme?.value || null;
+    this._editingDbId = theme?.id || null;
 
     const get = (id) => this.shadowRoot.getElementById(id);
     const body = get('modal-body');
@@ -653,7 +651,6 @@ export class ThemeModal extends HTMLElement {
     // muestra exactamente esos; si no, el set por defecto.
     const themeColors = theme?.data?.colors || {};
     const savedIds = Object.keys(themeColors);
-    console.log("Saved color IDs in theme:", savedIds);
     this._colorValues = {};
 
     if (savedIds.length > 0) {
@@ -661,7 +658,7 @@ export class ThemeModal extends HTMLElement {
       this._activeColorIds = new Set(savedIds.filter(id =>
         ThemeModal.MONACO_COLORS.some(c => c.id === id)
       ));
-      console.log("Active color IDs for editing:", this._activeColorIds);
+
       // Carga valores guardados
       ThemeModal.MONACO_COLORS.forEach(c => {
         this._colorValues[c.id] = themeColors[c.id] || c.default;
@@ -765,6 +762,7 @@ export class ThemeModal extends HTMLElement {
 
     return {
       protected: false,
+      id: this._editingDbId || `theme-${Date.now()}`,
       text: get('theme-name').value.trim(),
       value: this._editingId || `theme-${Date.now()}`,
       colors: [bg, syntax, fg, accent].join(','),

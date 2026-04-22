@@ -5,12 +5,14 @@ import { DB } from '../utils/Storage.js';
  * Gestiona el sistema de pestañas (Tabs) principales de la aplicación.
  */
 export function initTabs_() {
+    const footer = document.querySelector('.qc__footer');
     const tabs = document.querySelectorAll('.qc__tab');
     const pages = document.querySelectorAll('.qc__page');
 
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
             const target = tab.dataset.target;
+            console.log(`Tab clicked: ${target}`);
 
             // Limpiar estados activos previos
             tabs.forEach(t => t.classList.remove('qc__active'));
@@ -23,6 +25,11 @@ export function initTabs_() {
             // Actualizar estadísticas si es la pestaña "About"
             if (target === 'about') {
                 updateAboutStats_();
+            }
+
+            // Control adicional para mostrar/ocultar footer basado en la pestaña seleccionada
+            if (footer) {
+                footer.style.display = (target === 'options') ? 'flex' : 'none';
             }
         });
     });

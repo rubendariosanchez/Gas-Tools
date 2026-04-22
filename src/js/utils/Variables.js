@@ -4,6 +4,7 @@ export const G_PROPERTY_NAME = 'QualityCode';
 // Configuración por defecto para las opciones de usuario
 export const DEFAULT_SETTINGS_OPTIONS = {
     'global-enable': true,
+    'load-snippets': true,
     'showMinimap': true,
     'wordWrap': false,
     'bracketPairs': true,
@@ -16,140 +17,204 @@ export const DEFAULT_SETTINGS_OPTIONS = {
 
 // Archivo de configuración para variables globales y constantes
 export const DEFAULT_SNIPPETS = [
+  // ── UTILIDADES DE CONSOLA ──────────────────────────
   {
-    id: 'base-logger',
-    title: 'Logger Function',
-    prefix: 'log',
-    lang: 'JavaScript',
-    code: 'function Logger(message) {\n  console.log("[LOG]", message);\n}',
+    id: 'js-console-log',
+    title: 'Log to console',
+    prefix: 'clog', // Cambiado para evitar conflicto con 'log'
+    lang: 'javascript',
+    code: 'console.log(${1:variable});',
     protected: true
   },
+  {
+    id: 'gas-logger',
+    title: 'GAS Logger',
+    prefix: 'log',
+    lang: 'javascript',
+    code: 'Logger.log(${1:message});',
+    protected: true
+  },
+
+  // ── GOOGLE APPS SCRIPT ESPECÍFICOS ──────────────────
+  {
+    id: 'gas-get-ss',
+    title: 'Get Active Spreadsheet',
+    prefix: 'gss',
+    lang: 'javascript',
+    code: 'const ss = SpreadsheetApp.getActiveSpreadsheet();\nconst sheet = ss.getSheetByName("${1:Sheet1}");\n$0',
+    protected: true
+  },
+  {
+    id: 'gas-get-values',
+    title: 'Get Range Values',
+    prefix: 'getval',
+    lang: 'javascript',
+    code: 'const ${1:data} = sheet.getRange("${2:A2:C}").getValues();\n$0',
+    protected: true
+  },
+  {
+    id: 'gas-ui-alert',
+    title: 'Browser Alert',
+    prefix: 'alert',
+    lang: 'javascript',
+    code: 'SpreadsheetApp.getUi().alert("${1:Message}");',
+    protected: true
+  },
+
+  // ── ESTRUCTURAS DE CONTROL ──────────────────────────
   {
     id: 'js-for',
     title: 'For Loop',
     prefix: 'for',
-    lang: 'JavaScript',
-    code: 'for (let ${1:index} = 0; ${1:index} < ${2:array}.length; ${1:index}++) {\n\tconst ${3:element} = ${2:array}[${1:index}];\n\t${0}\n}',
-    protected: true
-  },
-  {
-    id: 'js-for-backward',
-    title: 'For Loop Backward',
-    prefix: 'forbackward',
-    lang: 'JavaScript',
-    code: 'for (let ${1:index} = ${2:array}.length - 1; ${1:index} >= 0; ${1:index}--) {\n\tconst ${3:element} = ${2:array}[${1:index}];\n\t${0}\n}',
+    lang: 'javascript',
+    code: 'for (let i = 0; i < ${1:array}.length; i++) {\n\tconst item = ${1:array}[i];\n\t$0\n}',
     protected: true
   },
   {
     id: 'js-for-of',
-    title: 'For-Of Loop',
+    title: 'For-Of Loop (Modern)',
     prefix: 'forof',
-    lang: 'JavaScript',
-    code: 'for (const ${1:iterator} of ${2:array}) { \n\t${0}\n}',
-    protected: true
-  },
-  {
-    id: 'js-for-in',
-    title: 'For-In Loop',
-    prefix: 'forin',
-    lang: 'JavaScript',
-    code: 'for (const ${1:key} in ${2:object}) {\n\tconst ${3:element} = ${2:object}[${1:key}];\n\t${0}\n}',
+    lang: 'javascript',
+    code: 'for (const ${1:item} of ${2:array}) {\n\t$0\n}',
     protected: true
   },
   {
     id: 'js-foreach',
     title: 'For-Each Loop',
-    prefix: 'forEach',
-    lang: 'JavaScript',
-    code: '${1:array}.forEach(${2:element} => {\n\t${0}\n});',
+    prefix: 'fe',
+    lang: 'javascript',
+    code: '${1:array}.forEach(${2:item} => {\n\t$0\n});',
     protected: true
   },
   {
-    id: 'js-map',
-    title: 'Map Loop',
-    prefix: 'map',
-    lang: 'JavaScript',
-    code: '${1:array}.map(${2:element} => {\n\treturn ${2:element}${0}\n});',
-    protected: true
-  },
-  {
-    id: 'js-filter',
-    title: 'Filter Loop',
-    prefix: 'filter',
-    lang: 'JavaScript',
-    code: '${1:array}.filter(${2:element} => {\n\treturn ${2:element}${0}\n});',
-    protected: true
-  },
-  {
-    id: 'js-reduce',
-    title: 'Array Reducer',
-    prefix: 'reduce',
-    lang: 'JavaScript',
-    code: '${1:array}.reduce((${2:previousItem}, ${3:currentItem}) => {\n\t${0}\n\treturn ${2:previousItem}\n}, ${4:initialValue});',
-    protected: true
-  },
-  {
-    id: 'js-switch',
-    title: 'Switch Statement',
-    prefix: 'switch',
-    lang: 'JavaScript',
-    code: 'switch (${1:expr}) {\n\tcase ${2:value}:\n\t\t${0}\n\t\tbreak; \t\t\n\n\tdefault:\n\t\t\n\t\tbreak;\n}',
-    protected: true
-  },
-  {
-    id: 'js-function',
-    title: 'Function Statement',
-    prefix: 'function',
-    lang: 'JavaScript',
-    code: 'function ${1:name}(${2:params}) {\n\t${0}\n}',
-    protected: true
-  },
-  {
-    id: 'js-if',
-    title: 'If Statement',
-    prefix: 'if',
-    lang: 'JavaScript',
-    code: 'if (${1:condition}) {\n\t${0}\n}',
-    protected: true
-  },
-  {
-    id: 'js-ifelse',
+    id: 'js-if-else',
     title: 'If-Else Statement',
-    prefix: 'ifelse',
-    lang: 'JavaScript',
-    code: 'if (${1:condition}) {\n\t${0}\n} else {\n\t\n}',
+    prefix: 'ife',
+    lang: 'javascript',
+    code: 'if (${1:condition}) {\n\t$2\n} else {\n\t$0\n}',
     protected: true
   },
   {
     id: 'js-trycatch',
-    title: 'Try-Catch Statement',
-    prefix: 'trycatch',
-    lang: 'JavaScript',
-    code: 'try {\n\t${0}\n} catch (${1:error}) {\n\t\n}',
+    title: 'Try-Catch GAS',
+    prefix: 'try',
+    lang: 'javascript',
+    code: 'try {\n\t$1\n} catch (e) {\n\tLogger.log("Error: " + e.toString());\n}',
+    protected: true
+  },
+
+  // ── ARRAYS Y TRANSFORMACIÓN ───────────────────────
+  {
+    id: 'js-map',
+    title: 'Map Array',
+    prefix: 'map',
+    lang: 'javascript',
+    code: 'const ${1:newArray} = ${2:oldArray}.map(${3:item} => {\n\treturn $0\n});',
     protected: true
   },
   {
-    id: 'js-console-log',
-    title: 'Log to console',
-    prefix: 'log',
-    lang: 'JavaScript',
-    code: 'console.log(${1:message});',
+    id: 'js-filter',
+    title: 'Filter Array',
+    prefix: 'filter',
+    lang: 'javascript',
+    code: 'const ${1:filtered} = ${2:array}.filter(${3:item} => ${4:item.id === 1});',
+    protected: true
+  },
+
+  // ── DOCUMENTACIÓN Y COMENTARIOS ─────────────────────
+  {
+    id: 'js-comment-block',
+    title: 'JSDoc Comment',
+    prefix: 'doc',
+    lang: 'javascript',
+    code: '/**\n * ${1:Description}\n * @param {${2:Type}} ${3:paramName}\n * @return {${4:Type}}\n */',
     protected: true
   },
   {
     id: 'js-todo',
     title: 'To-Do Comment',
     prefix: 'todo',
-    lang: 'JavaScript',
-    code: '// TODO: ${1:pending_task}',
+    lang: 'javascript',
+    code: '// TODO: ${1:pending_task} - ${CURRENT_DATE}', 
+    protected: true
+  },
+
+  {
+    id: 'html-gas-base',
+    title: 'GAS HTML Base',
+    prefix: 'htmlgas',
+    lang: 'html',
+    code: '<!DOCTYPE html>\n<html>\n  <head>\n    <base target="_top">\n    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">\n    <?!= include("Stylesheet"); ?>\n  </head>\n  <body>\n    ${1:<h1>Hola Mundo</h1>}\n    \n    <?!= include("JavaScript"); ?>\n  </body>\n</html>',
+    protected: true
+  },
+
+  // ── FORMULARIOS Y ENTRADAS ────────────────────────
+  {
+    id: 'html-input-group',
+    title: 'Input Group with Label',
+    prefix: 'field',
+    lang: 'html',
+    code: '<div class="field-group">\n  <label for="${1:id}">${2:Label}</label>\n  <input type="${3:text}" id="${1:id}" name="${1:id}" placeholder="${4:Enter value...}">\n</div>',
     protected: true
   },
   {
-    id: 'js-comment-block',
-    title: 'JSDoc Comment',
-    prefix: 'comment',
-    lang: 'JavaScript',
-    code: '/**\n * ${1:Description}\n */',
+    id: 'html-button',
+    title: 'Styled Button',
+    prefix: 'btn',
+    lang: 'html',
+    code: '<button type="button" id="${1:btnId}" class="btn-primary">\n  ${2:Click Me}\n</button>',
+    protected: true
+  },
+  {
+    id: 'html-select',
+    title: 'Select Dropdown',
+    prefix: 'select',
+    lang: 'html',
+    code: '<label for="${1:id}">${2:Choose:}</label>\n<select id="${1:id}" name="${1:id}">\n  <option value="${3:val1}">${4:Option 1}</option>\n  <option value="${5:val2}">${6:Option 2}</option>\n</select>',
+    protected: true
+  },
+
+  // ── COMPONENTES DE INTERFAZ ────────────────────────
+  {
+    id: 'html-div-container',
+    title: 'Div Container',
+    prefix: 'divc',
+    lang: 'html',
+    code: '<div class="${1:container}">\n  $0\n</div>',
+    protected: true
+  },
+  {
+    id: 'html-table',
+    title: 'Professional Table',
+    prefix: 'table',
+    lang: 'html',
+    code: '<table class="data-table">\n  <thead>\n    <tr>\n      <th>${1:Header 1}</th>\n      <th>${2:Header 2}</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>$3</td>\n      <td>$4</td>\n    </tr>\n  </tbody>\n</table>',
+    protected: true
+  },
+
+  // ── CARGA Y SCRIPTS ──────────────────────────────
+  {
+    id: 'html-script-include',
+    title: 'GAS Script Include',
+    prefix: 'incjs',
+    lang: 'html',
+    code: '<?!= include("${1:JavaScript}"); ?>',
+    protected: true
+  },
+  {
+    id: 'html-css-include',
+    title: 'GAS CSS Include',
+    prefix: 'incss',
+    lang: 'html',
+    code: '<?!= include("${1:Stylesheet}"); ?>',
+    protected: true
+  },
+  {
+    id: 'html-spinner',
+    title: 'Loading Spinner',
+    prefix: 'loader',
+    lang: 'html',
+    code: '<div id="loader" class="spinner" style="display:none;">\n  <div class="double-bounce1"></div>\n  <div class="double-bounce2"></div>\n  <p>Cargando...</p>\n</div>',
     protected: true
   }
 ];

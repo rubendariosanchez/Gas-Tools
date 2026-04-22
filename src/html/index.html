@@ -36,19 +36,20 @@
   <main class="qc__content-area">
     <div class="qc__page qc__active" id="options">
       <div class="qc__section-title">Extension</div>
-      <option-toggle id="global-enable" title="Enable Extension" description="Activate or deactivate features globally" checked></option-toggle>
+      <option-toggle id="global-enable" title="Enable extension" description="Activate or deactivate features globally" checked></option-toggle>
+      <option-toggle id="load-snippets" title="Load default snippets" description="Load custom snippets at startup" checked></option-toggle>
 
       <div class="qc__section-title">Visuals & Layout</div>
-      <option-toggle id="showMinimap" title="Show Minimap" description="Display a high-level overview of your code on the side" checked></option-toggle>
-      <option-toggle id="wordWrap" title="Word Wrap" description="Wrap long lines to fit within the editor width"></option-toggle>
-      <option-toggle id="bracketPairs" title="Bracket Pair Colorization" description="Highlight matching brackets with unique colors" checked></option-toggle>
-      <option-toggle id="smoothScrolling" title="Smooth Scrolling" description="Animate scrolling for a more fluid experience"></option-toggle>
+      <option-toggle id="showMinimap" title="Show minimap" description="Display a high-level overview of your code on the side" checked></option-toggle>
+      <option-toggle id="wordWrap" title="Word wrap" description="Wrap long lines to fit within the editor width"></option-toggle>
+      <option-toggle id="bracketPairs" title="Bracket pair colorization" description="Highlight matching brackets with unique colors" checked></option-toggle>
+      <option-toggle id="smoothScrolling" title="Smooth scrolling" description="Animate scrolling for a more fluid experience"></option-toggle>
 
       <div class="qc__section-title">Behavior & Features</div>
-      <option-toggle id="tabCompletion" title="Tab Completion" description="Enable tab key to complete code suggestions" checked></option-toggle>
-      <option-toggle id="scrollBeyondLastLine" title="Scroll Beyond Last Line" description="Allows scrolling further than the final line of code" checked></option-toggle>
-      <option-toggle id="peekWidget" title="Peek Widget" description="Enable inline preview for definitions and references" checked></option-toggle>
-      <option-toggle id="formatOnSave" title="Format on Save" description="Automatically format code structure when saving" checked></option-toggle>
+      <option-toggle id="tabCompletion" title="Tab completion" description="Enable tab key to complete code suggestions" checked></option-toggle>
+      <option-toggle id="scrollBeyondLastLine" title="Scroll beyond last line" description="Allows scrolling further than the final line of code" checked></option-toggle>
+      <option-toggle id="peekWidget" title="Peek widget" description="Enable inline preview for definitions and references" checked></option-toggle>
+      <option-toggle id="formatOnSave" title="Format on save" description="Automatically format code structure when saving" checked></option-toggle>
 
     </div>
 
@@ -120,15 +121,15 @@
       <div class="qc__section-title">Statistics</div>
       <div class="qc__stats-card">
         <div class="qc__stat-item">
-          <span>Custom Snippets</span>
+          <span>Custom snippets</span>
           <span id="stat-snippets-count" class="qc__stat-value">0</span>
         </div>
         <div class="qc__stat-item">
-          <span>Custom Themes</span>
+          <span>Custom themes</span>
           <span id="stat-themes-count" class="qc__stat-value">0</span>
         </div>
         <div class="qc__stat-item">
-          <span>Last Update</span>
+          <span>Last update</span>
           <span id="stat-last-update" class="qc__stat-label">Never</span>
         </div>
       </div>
@@ -136,7 +137,7 @@
 
   </main>
 
-  <footer class="qc__footer">
+  <footer class="qc__footer" style="display: flex;">
     <button class="qc__btn qc__btn--secondary" id="resetBtn">Reset</button>
     <button class="qc__btn qc__btn--primary" id="saveBtn">Save Changes</button>
   </footer>

@@ -12,8 +12,18 @@ export class StorageAPI {
      * Abre la conexión con la base de datos.
      */
     async open() {
-        if (this.db) return this.db;
+        // Si la conexión fue cerrada por Chrome, reabrimos
+        if (this.db) {
+            try {
+                // Prueba rápida para ver si la conexión sigue viva
+                this.db.transaction('settings', 'readonly').abort();
+                return this.db;
+            } catch {
+                this.db = null; // conexión muerta, forzamos reapertura
+            }
+        }
 
+        // Si no hay conexión, abrimos una nueva
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(this.dbName, this.version);
 

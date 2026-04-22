@@ -20,6 +20,11 @@ export class OptionToggle extends HTMLElement {
     }
   }
 
+  /**
+   * Cuando el elemento se conecta al DOM, renderiza su contenido basado en los atributos proporcionados.
+   * Esto asegura que el toggle se muestre correctamente incluso si los atributos se establecen antes de añadirlo al DOM.
+   * @private
+   */
   connectedCallback() {
     this.render_();
   }
@@ -68,6 +73,7 @@ export class OptionToggle extends HTMLElement {
       </div>
     `;
 
+    // Escuchar cambios en el checkbox para actualizar el atributo 'checked' del componente y emitir un evento personalizado
     this.shadowRoot.querySelector('input').addEventListener('change', (e_) => {
       if (e_.target.checked) {
         this.setAttribute('checked', '');
@@ -75,6 +81,7 @@ export class OptionToggle extends HTMLElement {
         this.removeAttribute('checked');
       }
 
+      // Emitimos un evento personalizado con el nuevo estado del toggle para que app.js pueda reaccionar a este cambio
       this.dispatchEvent(new CustomEvent('toggle', {
         detail: { checked: e_.target.checked },
         bubbles: true,

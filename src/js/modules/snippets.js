@@ -3,6 +3,7 @@ import { DEFAULT_SNIPPETS } from '../utils/Variables.js';
 import { DB } from '../utils/Storage.js';
 import { Toast } from '../utils/Toast.js';
 import { ConfirmDialog } from '../utils/ConfirmDialog.js';
+import { notifyEditors } from '../utils/Notify.js';
 
 // Estado local del módulo para filtros
 let currentSnippetFilter = 'custom'; // 'default' o 'custom'
@@ -122,6 +123,7 @@ async function saveSnippet_(newSnip, modalInstance) {
 
         // Almacenamos los datos en IndexedDB para optimizar rendimiento y evitar bloqueos
         await DB.set('snippets', newSnip); // Guarda o actualiza directamente
+        notifyEditors('snippets');
 
         // Después de guardar, cerramos el modal y recargamos la lista para reflejar cambios
         modalInstance.close_();
@@ -143,6 +145,7 @@ async function deleteSnippet_(id) {
 
         // Refrescar la interfaz
         loadSnippets_();
+        notifyEditors('snippets');
         
         // Feedback al usuario
         Toast.show('Snippet deleted from IndexedDB', 'success');

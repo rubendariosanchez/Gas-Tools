@@ -211,7 +211,13 @@ export class ThemeCard extends HTMLElement {
     
     // Evento de selección (evita dispararse si se pulsa un botón de acción)
     card.onclick = (e) => {
+      // Si el clic fue en un botón de acción, no hacemos nada aquí
       if (e.target.closest('.qc__action-btn')) return;
+
+      // Esto activará el attributeChangedCallback y re-renderizará la tarjeta
+      this.setAttribute('selected', '');
+
+      // Creamos evento personalizado para notificar la selección del tema, con su value y name como detalle
       this.dispatchEvent(new CustomEvent('select-theme', {
         detail: { value: this.getAttribute('value'), name: this.getAttribute('name') },
         bubbles: true, composed: true

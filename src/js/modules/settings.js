@@ -3,6 +3,7 @@ import { Toast } from '../utils/Toast.js';
 import { ConfirmDialog } from '../utils/ConfirmDialog.js';
 import { updateAboutStats_ } from './ui.js';
 import { DB } from '../utils/Storage.js';
+import { notifyEditors } from '../utils/Notify.js';
 
 /**
  * Inicializa el módulo de configuración: carga datos y bindea botones.
@@ -39,7 +40,7 @@ async function loadQualityCodeSettings_() {
 
         // Definir los IDs de las opciones para mapear con el DOM
         const optionIds = [
-            'global-enable', 'showMinimap', 'wordWrap', 'bracketPairs',
+            'global-enable', 'load-snippets', 'showMinimap', 'wordWrap', 'bracketPairs',
             'smoothScrolling', 'tabCompletion', 'scrollBeyondLastLine',
             'peekWidget', 'formatOnSave'
         ];
@@ -105,6 +106,9 @@ async function saveSettings_() {
         // Guardamos en IndexedDB
         await DB.set('settings', payload);
 
+        // Notificar a los editores sobre el cambio de configuración para que puedan reaccionar en consecuencia (ej. recargar snippets/themes)
+        notifyEditors('settings');
+
         // Actualizar estadísticas en la pestaña "About" si está abierta
         updateAboutStats_();
 
@@ -145,6 +149,9 @@ async function resetSettings_() {
 
             // Guardamos en IndexedDB
             await DB.set('settings', payload);
+
+            // Notificar a los editores sobre el cambio de configuración para que puedan reaccionar
+            notifyEditors('settings');
 
             // Refrescar UI sin recargar toda la página
             loadQualityCodeSettings_();

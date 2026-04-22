@@ -3,6 +3,7 @@ import { THEME_LIST } from '../utils/Themes.js';
 import { Toast } from '../utils/Toast.js';
 import { ConfirmDialog } from '../utils/ConfirmDialog.js';
 import { DB } from '../utils/Storage.js';
+import { notifyEditors } from '../utils/Notify.js';
 
 // Estado local del módulo para filtros
 let currentThemeCategory = 'custom'; // 'default' o 'custom'
@@ -10,12 +11,50 @@ let currentThemeCategory = 'custom'; // 'default' o 'custom'
 /**
  * Orquestador del módulo de temas.
  */
-export function initThemeModule() {
+export async function initThemeModule() {
     initThemeNavigation_();
     initThemeSearch_();
     initThemeActions_();
     initThemeModal_();
+
+    // Carga inicial: podemos obtener el tema activo para loguear o verificar
+    const activeTheme = await getActiveThemeData_();
+    console.log("Current active theme configuration:", activeTheme);
+
     renderThemes_();
+}
+
+/**
+ * Recupera la configuración completa del tema seleccionado actualmente.
+ * @returns {Promise<Object|null>} Definición del tema lista para el editor.
+ */
+export async function getActiveThemeData_() {
+    try {
+        // 1. Obtener el ID activo del storage
+        const result = await new Promise(res => chrome.storage.sync.get([G_PROPERTY_NAME], res));
+        const activeThemeId = result[G_PROPERTY_NAME]?.themes?.active || 'vs-dark';
+
+        // 2. Buscar en temas por defecto (THEME_LIST)
+        let themeEntry = THEME_LIST.find(t => t.value === activeThemeId);
+
+        // 3. Si no está ahí, buscar en temas personalizados (IndexedDB)
+        if (!themeEntry) {
+            const customThemes = await DB.getAll('themes');
+            themeEntry = customThemes.find(t => t.value === activeThemeId);
+        }
+
+        if (!themeEntry) return null;
+
+        // 4. Si es un tema de sistema (protegido) y no tiene el JSON cargado, lo buscamos
+        if (themeEntry.protected && !themeEntry.data) {
+            themeEntry.data = await fetchThemeDefinition_(themeEntry.text);
+        }
+
+        return themeEntry;
+    } catch (error) {
+        console.error("Error al cargar el tema activo:", error);
+        return null;
+    }
 }
 
 /**
@@ -36,9 +75,11 @@ function initThemeModal_() {
             // Para IndexedDB, necesitamos un ID consistente. 
             // Tu modal ya genera uno en getFormData_: this._editingId || `theme-${Date.now()}`
             // Pero IndexedDB suele requerir que el campo 'id' esté en la raíz del objeto.
-            themeData.id = themeData.value; 
+            // themeData.id = themeData.value; 
 
+            // Guardamos en IndexedDB usando el método set, que hará upsert (insertar o actualizar según exista o no el ID)
             await DB.set('themes', themeData);
+            notifyEditors('themes');
             Toast.show("Theme saved successfully", "success");
             
             // Forzar vista a 'custom' para ver el resultado
@@ -118,6 +159,57 @@ function initThemeActions_() {
     container.addEventListener('edit-theme', (e) => handleEditTheme_(e.detail.value));
     container.addEventListener('duplicate-theme', (e) => handleDuplicateTheme_(e.detail.value));
     container.addEventListener('delete-theme', (e) => handleDeleteTheme_(e.detail.value));
+
+    // Listener de selección simplificado
+    document.addEventListener('select-theme', (e) => {
+        const { value, name } = e.detail;
+        handleSelectTheme_(value, name);
+    });
+}
+
+
+/**
+ * Maneja la selección de un tema, persiste la elección y actualiza la UI.
+ * @param {string} selectedValue - El ID/Value del tema.
+ * @param {string} themeName - El nombre legible del tema para el feedback.
+ * @private
+ */
+async function handleSelectTheme_(selectedValue, themeName) {
+    try {
+        // 1. Persistencia: Actualizamos el storage de Chrome
+        const result = await new Promise(res => chrome.storage.sync.get([G_PROPERTY_NAME], res));
+        const currentSettings = result[G_PROPERTY_NAME] || {};
+        
+        const updatedSettings = {
+            ...currentSettings,
+            themes: {
+                ...currentSettings.themes,
+                active: selectedValue
+            }
+        };
+
+        await chrome.storage.sync.set({ [G_PROPERTY_NAME]: updatedSettings });
+
+        // 2. UI: Actualización visual de las tarjetas en el grid
+        const allCards = document.querySelectorAll('theme-card');
+        allCards.forEach(card => {
+            if (card.getAttribute('value') === selectedValue) {
+                card.setAttribute('selected', '');
+            } else {
+                card.removeAttribute('selected');
+            }
+        });
+
+        // 3. Notificación: Avisamos a los content scripts/editores
+        notifyEditors('themes');
+
+        // 4. Feedback: Toast informativo
+        Toast.show(`Theme "${themeName}" selected and will be applied.`, "success");
+
+    } catch (error) {
+        console.error("Error al seleccionar el tema:", error);
+        Toast.show("Could not save theme selection", "error");
+    }
 }
 
 /**
@@ -172,15 +264,19 @@ async function handleDuplicateTheme_(sourceValue) {
 
     // 4. Guardar y actualizar UI
     try {
+        
+        // Guardamos en IndexedDB usando el método set, que hará upsert (insertar o actualizar según exista o no el ID)
         await DB.set('themes', newTheme);
+        notifyEditors('themes');
         Toast.show("Theme duplicated", "success");
+
+        // Renderizamos la vista de temas personalizados para mostrar el nuevo tema
+        renderThemes_();
         
         // Redirigir a pestaña de personalizados
         const customTab = document.querySelector('#themes .qc__sub-tab[data-filter="custom"]');
         if (customTab) {
             customTab.click();
-        } else {
-            renderThemes_();
         }
     } catch (err) {
         console.error("Error duplicating theme:", err);
@@ -201,7 +297,10 @@ async function handleDeleteTheme_(themeValue) {
         const target = allCustom.find(t => t.value === themeValue);
         
         if (target) {
+
+            // Eliminamos el tema de IndexedDB
             await DB.delete('themes', target.id);
+            notifyEditors('themes');
             Toast.show("Theme deleted", "success");
             renderThemes_();
         }

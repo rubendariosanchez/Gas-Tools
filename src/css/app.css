@@ -111,7 +111,7 @@ body {
 .qc__footer {
   padding: 12px 16px;
   background: var(--qc__bg-header);
-  display: flex;
+  display: none;
   gap: 10px;
   border-top: 1px solid var(--qc__border);
 }

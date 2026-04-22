@@ -10,7 +10,7 @@
     "128": "resources/icons/icon128.png"
   },
   "background": {
-    "service_worker": "js/background.js",
+    "service_worker": "extension/background.js",
     "type": "module"
   },
   "content_scripts": [{
@@ -18,22 +18,23 @@
       "https://script.google.com/home/projects/*/edit*"
     ],
     "js": [
-      "js/mainFunctions.js"
+      "extension/js/mainFunctions.js"
     ],
     "all_frames": false,
     "run_at": "document_end"
   }],
   "web_accessible_resources": [{
     "resources": [
+      "extension/*.*",
       "html/optionToogle.html",
       "html/optionWrapLine.html",
       "html/themeList.html",
       "css/gasToolsStyle.css",
       "html/modalSearch.html",
-      "js/gasTools.js",
       "js/library.js",
       "js/popover.js",
-      "themes/*.json"
+      "themes/*.json",
+      "src/vendor/codemirror/*"
     ],
     "matches": ["<all_urls>"]
   }],
@@ -43,7 +44,7 @@
     "default_icon": "resources/icons/icon128.png"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'",
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
     "sandbox": "sandbox allow-scripts; script-src 'self' 'https://apis.google.com/' 'https://www.gstatic.com/' 'https://*.firebaseio.com' 'https://www.googleapis.com' 'https://ajax.googleapis.com'; object-src 'self'"
   },
   "permissions": [
