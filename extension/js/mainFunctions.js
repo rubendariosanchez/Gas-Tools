@@ -34,7 +34,11 @@ async function loadResources() {
  */
 function injectScripts() {
   // Lista de scripts a inyectar (puede ser ampliada fácilmente)
-  const scriptPaths = ['extension/js/domUtils.js', 'extension/js/gasTools.js'];
+  const scriptPaths = [
+    'extension/js/domUtils.js',
+    'extension/js/gasTools.js',
+    'extension/js/components/gas-search-panel.js',
+  ];
 
   // Inyectar cada script y eliminarlo una vez cargado para mantener el DOM limpio
   scriptPaths.forEach(path => {

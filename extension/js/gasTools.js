@@ -43,7 +43,7 @@ document.addEventListener('GAS_TransferData', function(e) {
 
   // Si Monaco ya está listo, inicializamos de inmediato
   if (window.jsWireMonacoEditor) {
-    initializeEditor(responseJson_);
+    initializeEditor_(responseJson_);
   } else {
     console.log("[GASTools] Data received but Monaco not ready. Waiting...");
   }
@@ -224,20 +224,43 @@ class GasCustomEditor {
       this._searchPanel = document.querySelector('gas-search-panel');
     }
 
+    // Enlazamos la instancia del editor en el componente para permitir "goto line".
+    this._searchPanel.setEditor(this.editor);
+
     // 2. Escuchar el clic en el botón recién creado usando DomUtils
     this.DomUtils.delegate(this._toolsMenuElement, 'click', '#rsBtnSearchGas', (e) => {
       e.preventDefault();
       console.log("[GASTools] Advanced Search button clicked");
       console.log(this._searchPanel);
-      this._searchPanel.open();
+      this._searchPanel.toggle(e.target.closest('#rsBtnSearchGas'));
     });
 
-    // 3. Escuchar el evento de búsqueda del componente
-    this._searchPanel.addEventListener('search-input', (e) => {
-      const term = e.detail.value;
-      console.log("[GASTools] Searching for:", term);
-      // Aquí puedes llamar a una lógica de búsqueda en Monaco o en los archivos
-    });
+    // Atajo global solicitado: Alt + Shift + F.
+    if (!this._searchShortcutBound) {
+      this._searchShortcutBound = true;
+      document.addEventListener('keydown', (evt) => {
+        const isF = (evt.key || '').toLowerCase() === 'f';
+        const requestedShortcut = isF && evt.altKey && evt.shiftKey;
+        if (!requestedShortcut) return;
+
+        evt.preventDefault();
+        evt.stopPropagation();
+        const anchorBtn = document.querySelector('#rsBtnSearchGas');
+        this._searchPanel?.toggle(anchorBtn);
+      }, true);
+    }
+
+    // Registramos el mismo atajo dentro de Monaco para que responda directo en el IDE.
+    if (!this._searchMonacoCommandBound && this.editor?.addCommand && window.monaco?.KeyMod && window.monaco?.KeyCode) {
+      this._searchMonacoCommandBound = true;
+      this.editor.addCommand(
+        window.monaco.KeyMod.Alt | window.monaco.KeyMod.Shift | window.monaco.KeyCode.KeyF,
+        () => {
+          const anchorBtn = document.querySelector('#rsBtnSearchGas');
+          this._searchPanel?.toggle(anchorBtn);
+        }
+      );
+    }
     
     console.log("[GASTools] Advanced search UI injected.");
   }

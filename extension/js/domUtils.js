@@ -5,6 +5,8 @@
  */
 
 class DomUtils {
+  static #policy = null;
+  static #policyInitialized = false;
   
   /**
    * Elimina un elemento del DOM de forma segura.
@@ -35,9 +37,27 @@ class DomUtils {
    * advertencias de seguridad en la extensión de Chrome.
    * @private
    */
-  static #policy = window.trustedTypes?.createPolicy("qc-security-policy", {
-    createHTML: (input) => input
-  });
+  static #getTrustedPolicy() {
+    if (this.#policyInitialized) return this.#policy;
+    this.#policyInitialized = true;
+
+    if (!window.trustedTypes?.createPolicy) {
+      this.#policy = null;
+      return this.#policy;
+    }
+
+    try {
+      this.#policy = window.trustedTypes.createPolicy("qc-security-policy", {
+        createHTML: (input) => input
+      });
+    } catch (err) {
+      // Si la página restringe el nombre de política, seguimos sin Trusted Types policy.
+      this.#policy = null;
+      console.warn('[DomUtils] Trusted Types policy blocked by host CSP:', err);
+    }
+
+    return this.#policy;
+  }
 
   /**
    * Inserta HTML de forma segura cumpliendo con las políticas de seguridad (CSP).
@@ -46,13 +66,23 @@ class DomUtils {
    */
   static setHTML(container, htmlContent) {
     if (!container) return;
+    const html = String(htmlContent ?? '');
+    const policy = this.#getTrustedPolicy();
 
-    if (this.#policy) {
-      container.innerHTML = this.#policy.createHTML(htmlContent);
-    } else {
-      // Fallback para navegadores/entornos sin Trusted Types
-      container.innerHTML = htmlContent;
+    if (policy) {
+      try {
+        container.innerHTML = policy.createHTML(html);
+        return;
+      } catch (err) {
+        console.warn('[DomUtils] TrustedHTML assignment failed, using fragment fallback:', err);
+      }
     }
+
+    // Fallback sin innerHTML para entornos con Trusted Types estricto.
+    const range = document.createRange();
+    range.selectNode(container);
+    const fragment = range.createContextualFragment(html);
+    container.replaceChildren(fragment);
   }
 
   /**
