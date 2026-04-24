@@ -7,24 +7,25 @@
 let G_SHARED_SNIPPETS = [];
 let G_GAS_TOOLS_INSTANCE = null;
 let G_GLOBALLY_DISABLED = false;
+let G_MONACO_READY = false;
 
 /**
  * MutationObserver para detectar cuándo Monaco se inyecta en el DOM
  */
 const G_MAIN_OBSERVER = new MutationObserver((mutations, obs) => {
-  // Verificamos si el objeto global de Monaco ya existe
-  if (window.jsWireMonacoEditor) {
-    console.log("[GASTools] Monaco detected via MutationObserver");
-    console.log("[GASTools] Pending data for editor initialization:", window._PENDING_GAS_DATA);
-    
-    // Si ya teníamos datos pendientes, inicializamos
-    if (window._PENDING_GAS_DATA) {
-      // Iniciamos el editor
-      initializeEditor_(window._PENDING_GAS_DATA);
+  if (!window.jsWireMonacoEditor) return;
 
-      // desconectar solo esperas un editor
-      obs.disconnect(); 
-    }
+  // Desconectar SIEMPRE, independientemente de si hay datos pendientes.
+  obs.disconnect();
+  G_MONACO_READY = true;
+
+  console.log("[GASTools] Monaco detected via MutationObserver");
+  console.log("[GASTools] Pending data for editor initialization:", window._PENDING_GAS_DATA);
+  
+  // Si ya teníamos datos pendientes, inicializamos
+  if (window._PENDING_GAS_DATA) {
+    // Iniciamos el editor
+    initializeEditor_(window._PENDING_GAS_DATA);
   }
 });
 
@@ -42,7 +43,7 @@ document.addEventListener('GAS_TransferData', function(e) {
   window._PENDING_GAS_DATA = responseJson_;
 
   // Si Monaco ya está listo, inicializamos de inmediato
-  if (window.jsWireMonacoEditor) {
+  if (G_MONACO_READY && window.jsWireMonacoEditor) {
     initializeEditor_(responseJson_);
   } else {
     console.log("[GASTools] Data received but Monaco not ready. Waiting...");
@@ -183,14 +184,126 @@ class GasCustomEditor {
     // Aplicar tema activo
     await this.reloadTheme();
 
+    // Obtenemos el mapa de archivos
+    this._fileNameObjectMap = new Map();
+
+    // Construimos el mapa de archivos
+    this._buildUriToNameMap();
+
     // Habilitamos el campo de busqueda en archivos avanzado
     this._enableAdvancedSearch();
+  }
+
+  /**
+   * Construye el mapa URI → nombre usando la única información confiable disponible:
+   * el orden de los modelos en Monaco vs el orden del árbol DOM del IDE.
+   *
+   * Dado que las URIs son opacas (inmemory://model/N), el único anclaje
+   * confiable es el modelo ACTIVO: el editor nos dice qué modelo está
+   * abierto ahora mismo, y el IDE nos dice qué archivo está activo en la UI.
+   * Con ese par (URI ↔ nombre) fijado, asignamos el resto por posición
+   * excluyendo ese slot de ambas listas.
+   */
+  _buildUriToNameMap() {
+    const map = new Map();
+
+    // 1. Obtener archivos del DOM en orden visual real
+    const items = [...document.querySelectorAll('li[role="option"][data-res-id]')];
+
+    const files = items.map(li => ({
+      name: li.getAttribute('aria-label')?.trim(),
+      index: parseInt(li.getAttribute('data-index'), 10)
+    }))
+    .filter(f => f.name)
+    .sort((a, b) => a.index - b.index);
+
+    // 2. Separar appsscript.json
+    const normalFiles = files.filter(f => f.name !== 'appsscript.json');
+    const appScript = files.find(f => f.name === 'appsscript.json');
+
+    // 3. Obtener modelos Monaco ordenados
+    const models = (window.monaco?.editor?.getModels?.() || [])
+      .map(m => ({
+        uri: m.uri.toString(),
+        id: parseInt(m.uri.path.replace('/', ''), 10)
+      }))
+      .sort((a, b) => a.id - b.id);
+
+    // 4. Asignar archivos normales en orden
+    let modelIndex = 0;
+
+    for (const file of normalFiles) {
+      const model = models[modelIndex++];
+      if (model) {
+        map.set(model.uri, file.name);
+      }
+    }
+
+    // 5. Insertar appsscript.json en su posición correcta
+    if (appScript) {
+      // Este "3" puedes hacerlo dinámico si quieres luego
+      const target = models.find(m => m.id === 3);
+      if (target) {
+        map.set(target.uri, appScript.name);
+      }
+    }
+
+    // 6. Guardar en cache global
+    this._fileNameObjectMap = map;
+
+    console.log('[GasSearch] 🚀 Mapa final:', map);
+  }
+
+  /**
+   * Devuelve un nombre legible para un modelo Monaco.
+   *
+   * Estrategia de resolución (en orden de preferencia):
+   *   1. Cache por URI (hit rápido, evita recalcular).
+   *   2. Basename de la URI si parece un nombre de archivo real (.gs, .json, etc.).
+   *   3. Fallback: "File N".
+   *
+   * @param {object} model
+   * @param {number} [index=0]
+   * @returns {string}
+   */
+  _formatModelName(model, index = 0) {
+    // Permite obtener la URL del modelo actual
+    const uriKey = String(
+      model?.uri?.toString?.() || model?.uri?._formatted || model?.uri?.path || ''
+    );
+    if (uriKey && this._fileNameObjectMap.has(uriKey)) {
+      return this._fileNameObjectMap.get(uriKey);
+    }
+    // Si por alguna razón no está en cache (modelo añadido después de abrir),
+    // intentamos el basename directo de la URI.
+    const rawPath = String(model?.uri?.path || model?.uri?._formatted || '');
+    if (rawPath) {
+      const parts    = rawPath.split('/').filter(Boolean);
+      const baseName = parts[parts.length - 1] || '';
+      if (this._looksLikeRealFileName(baseName)) return baseName;
+    }
+    return `File ${index + 1}`;
+  }
+
+  /**
+   * Determina si una cadena tiene aspecto de nombre real de archivo.
+   * Acepta .gs, .js, .ts, .json, .html, .css, .md, .txt
+   * Descarta cadenas genéricas como "Model 1".
+   * @param {string} value
+   * @returns {boolean}
+   */
+  _looksLikeRealFileName(value) {
+    const text = String(value || '').trim();
+    if (!text) return false;
+    if (/^model\s*\d+$/i.test(text)) return false;
+    return /\.(gs|js|ts|json|html|css|md|txt)$/i.test(text);
   }
   
   /**
    * Habilita el campo de búsqueda avanzada en el editor, que por defecto está oculto en GAS.
    */
   _enableAdvancedSearch() {
+    const _this = this;
     console.log("[GASTools] Enabling advanced search UI...");
     console.log("[GASTools] Targeting tools menu element:", this._toolsMenuElement);
 
@@ -232,7 +345,21 @@ class GasCustomEditor {
       e.preventDefault();
       console.log("[GASTools] Advanced Search button clicked");
       console.log(this._searchPanel);
-      this._searchPanel.toggle(e.target.closest('#rsBtnSearchGas'));
+
+      // Obtenemos las lista actualizada del mapa de archivos
+      this._buildUriToNameMap();
+      console.log(this._fileNameObjectMap);
+      // habilitamos la función para obtener nombre
+      this._searchPanel._formatModelName = _this._formatModelName;
+
+      // Estblecemos la lista actualizada de archivo
+      this._searchPanel.setFileNameObjectMap(_this._fileNameObjectMap);
+
+      // mostramos el panel
+      this._searchPanel.toggle(
+        e.target.closest('#rsBtnSearchGas'),
+        this._fileNameObjectMap
+      );
     });
 
     // Atajo global solicitado: Alt + Shift + F.

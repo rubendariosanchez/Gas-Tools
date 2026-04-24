@@ -2,16 +2,20 @@ class GasSearchPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+
     /** @type {object|null} Instancia activa del editor Monaco inyectada desde gasTools.js. */
     this._editor = null;
+
     /**
      * Lista plana de resultados del archivo actualmente seleccionado.
      * Se usa para navegar con ArrowUp / ArrowDown / Enter.
      * @type {Array<{fileName:string, text:string, range:object, model:object, element:HTMLElement}>}
      */
     this._flatResults = [];
+
     /** @type {number} Índice del resultado activo en _flatResults; -1 = ninguno. */
     this._activeIndex = -1;
+
     /**
      * Resultados agrupados por clave de archivo.
      * Estructura: { [fileKey: string]: Array<match> }
@@ -20,48 +24,63 @@ class GasSearchPanel extends HTMLElement {
      * @type {Object.<string, Array>}
      */
     this._groupedResults = {};
+
     /**
      * Clave del archivo actualmente seleccionado en el panel izquierdo.
      * Coincide con una clave de _groupedResults.
      * @type {string}
      */
     this._currentFileKey = '';
+
     /**
      * Elemento DOM que actúa como ancla para posicionar el panel.
      * Generalmente es el botón que lo abre.
      * @type {HTMLElement|null}
      */
     this._anchorEl = null;
+
     /**
      * Indica si el panel ya fue posicionado al menos una vez.
      * Evita sobrescribir una posición ajustada manualmente por el usuario.
      * @type {boolean}
      */
     this._positionInitialized = false;
+
     /**
      * Estado activo del drag manual del panel.
      * null = no hay drag en curso.
      * @type {{offsetX:number, offsetY:number}|null}
      */
     this._dragState = null;
+
     /**
      * Estado activo del resize manual del panel.
      * null = no hay resize en curso.
      * @type {{startX:number, startY:number, startW:number, startH:number}|null}
      */
     this._resizeState = null;
+
     /**
      * Cache de nombres de archivo indexado por la URI del modelo Monaco.
      * Evita recalcular el nombre en cada búsqueda.
      * @type {Map<string, string>}
      */
-    this._fileNameObjectMap = new Map();
+    this._fileNameCacheByModelUri = new Map();
+
+    /**
+     * Pool de nombres de archivo extraídos del árbol del DOM del IDE.
+     * Se usa como fallback cuando la URI del modelo no tiene un basename legible.
+     * @type {string[]}
+     */
+    this._fileNamePoolFromDom = [];
+
     /**
      * Timer de debounce para la búsqueda.
      * Se cancela en cada pulsación de tecla para evitar búsquedas excesivas.
      * @type {ReturnType<typeof setTimeout>|null}
      */
     this._debounceTimer = null;
+
     // Binds explícitos necesarios para poder remover los mismos listeners
     // que se registraron (addEventListener y removeEventListener deben
     // recibir la misma referencia de función).
@@ -76,6 +95,7 @@ class GasSearchPanel extends HTMLElement {
   connectedCallback() {
     this.render();
     this.setupListeners();
+    this._setupFileTreeObserver();
   }
 
   disconnectedCallback() {
@@ -116,8 +136,12 @@ class GasSearchPanel extends HTMLElement {
     this.style.display       = 'block';
     this.style.pointerEvents = 'auto';
     this._repositionPanel(true);
+    this._refreshFileNameCacheFromDom();
+    this._buildFullModelMapFromClicks();
     this._resetState();
+
     const input = this.shadowRoot.getElementById('gc__searchInput');
+
     // ── Texto seleccionado en el editor: úsalo como query inicial ──
     let initialQuery = '';
     if (this._editor) {
@@ -131,6 +155,7 @@ class GasSearchPanel extends HTMLElement {
         }
       } catch (_) { /* El editor puede no estar listo; ignoramos el error */ }
     }
+
     if (input) {
       setTimeout(() => {
         input.focus();
@@ -143,14 +168,6 @@ class GasSearchPanel extends HTMLElement {
         }
       }, 30);
     }
-  }
-  
-  /**
-   * Establece el mapa de archivos.
-   * @param {Map<string, string>} fileNameObjectMap
-   */
-  setFileNameObjectMap(fileNameObjectMap) {
-    this._fileNameObjectMap = fileNameObjectMap;
   }
 
   /**
@@ -172,6 +189,23 @@ class GasSearchPanel extends HTMLElement {
       return;
     }
     this.open(anchorEl);
+  }
+
+  debugUris() {
+    const models = window.monaco?.editor?.getModels?.() || [];
+    console.group('=== GasSearchPanel URI debug ===');
+    console.log('DOM names pool:', this._fileNamePoolFromDom);
+    console.log('URI → name cache:', Object.fromEntries(this._fileNameCacheByModelUri));
+    models.forEach((m, i) => {
+      console.log(`Model[${i}]`, {
+        uri_toString : m?.uri?.toString?.(),
+        uri_path     : m?.uri?.path,
+        uri_formatted: m?.uri?._formatted,
+        uri_full     : JSON.stringify(m?.uri),
+        first80chars : m?.getValue?.()?.slice(0, 80),
+      });
+    });
+    console.groupEnd();
   }
 
   /**
@@ -228,6 +262,7 @@ class GasSearchPanel extends HTMLElement {
           flex-direction: column;
           height: 100%;
         }
+
         /* ── Header ── */
         .gc__header {
           display: flex;
@@ -288,6 +323,7 @@ class GasSearchPanel extends HTMLElement {
         }
         .gc__close:hover { background: rgba(95,99,104,.14); }
         :host([theme="dark"]) .gc__close { color: #bdc1c6; }
+
         /* ── Barra de metadata (totales + hint de teclado) ── */
         .gc__meta {
           display: flex;
@@ -305,13 +341,17 @@ class GasSearchPanel extends HTMLElement {
           border-bottom-color: #3c4043;
           background: #202124;
         }
+
         /* ── Layout de dos columnas: archivos | resultados ── */
         .gc__content {
           display: grid;
+          /* Panel izquierdo más ancho para mostrar el contador + nombre sin truncar */
+          /*grid-template-columns: 220px 1fr;*/
           grid-template-columns: 180px 1fr;
           min-height: 0;
           height: 100%;
         }
+
         /* ── Panel izquierdo: lista de archivos con contador ── */
         .gc__models {
           border-right: 1px solid #eceff1;
@@ -351,6 +391,7 @@ class GasSearchPanel extends HTMLElement {
           border-color: #4b6286;
           color: #d2e3fc;
         }
+
         /* Contador de coincidencias que precede al nombre del archivo */
         .gc__modelCount {
           display: inline-flex;
@@ -381,6 +422,7 @@ class GasSearchPanel extends HTMLElement {
           background: rgba(210,227,252,.15);
           color: #d2e3fc;
         }
+
         /* ── Panel derecho: resultados del archivo seleccionado ── */
         .gc__results {
           overflow: auto;
@@ -453,6 +495,7 @@ class GasSearchPanel extends HTMLElement {
           font-family: "Roboto Mono", Consolas, monospace;
           font-size: 11px;
         }
+
         /* ── Handle de redimensionamiento en la esquina inferior derecha ── */
         .gc__resizeHandle {
           position: absolute;
@@ -659,11 +702,13 @@ class GasSearchPanel extends HTMLElement {
     const summary          = this.shadowRoot.getElementById('gc__summary');
     const modelsContainer  = this.shadowRoot.getElementById('gc__modelsContainer');
     const resultsContainer = this.shadowRoot.getElementById('gc__resultsContainer');
+
     if (input) input.value = '';
     this._flatResults    = [];
     this._activeIndex    = -1;
     this._groupedResults = {};
     this._currentFileKey = '';
+
     if (summary)          summary.textContent = 'Type to start searching';
     if (modelsContainer)  DomUtils.setHTML(modelsContainer,  `<div class="gc__empty">No files</div>`);
     if (resultsContainer) DomUtils.setHTML(resultsContainer, `<div class="gc__empty">No results yet.</div>`);
@@ -738,12 +783,15 @@ class GasSearchPanel extends HTMLElement {
   _findAllMatches(searchText) {
     const grouped = {};
     const models  = window.monaco?.editor?.getModels?.() || [];
+
     models.forEach((model, index) => {
       const matches = model.findMatches(searchText, false, false, false, null, true);
       if (!matches?.length) return;
+
       const displayName = this._formatModelName(model, index);
       // Sufijo numérico interno para evitar colisiones si dos archivos tienen el mismo nombre.
       const key = `${displayName}__gc__${index + 1}`;
+
       grouped[key] = matches.map((match) => ({
         fileName : displayName,
         text     : model.getLineContent(match.range.startLineNumber).trim(),
@@ -751,6 +799,7 @@ class GasSearchPanel extends HTMLElement {
         model,
       }));
     });
+
     return grouped;
   }
 
@@ -786,6 +835,7 @@ class GasSearchPanel extends HTMLElement {
         </button>
       `;
     }).join('');
+
     DomUtils.setHTML(modelsContainer, html);
 
     // Al hacer clic en un archivo, actualizamos la columna derecha con sus resultados.
@@ -923,10 +973,12 @@ class GasSearchPanel extends HTMLElement {
    */
   _goTo(result) {
     if (!this._editor || !result?.model || !result?.range) return;
+
     this._editor.setModel(result.model);
     this._editor.setSelection(result.range);
     this._editor.revealRangeInCenter(result.range);
     this._editor.focus();
+
     // Actualiza la etiqueta del archivo activo si el IDE la expone en el DOM.
     const fileLabel = document.querySelector('#ctnCurrentFileName');
     if (fileLabel) {
@@ -934,6 +986,289 @@ class GasSearchPanel extends HTMLElement {
     }
   }
 
+  /**
+   * Construye el mapa URI → nombre usando la única información confiable disponible:
+   * el orden de los modelos en Monaco vs el orden del árbol DOM del IDE.
+   *
+   * Dado que las URIs son opacas (inmemory://model/N), el único anclaje
+   * confiable es el modelo ACTIVO: el editor nos dice qué modelo está
+   * abierto ahora mismo, y el IDE nos dice qué archivo está activo en la UI.
+   * Con ese par (URI ↔ nombre) fijado, asignamos el resto por posición
+   * excluyendo ese slot de ambas listas.
+   */
+  _buildUriToNameMap() {
+    this._fileNameCacheByModelUri.clear();
+
+    const models   = window.monaco?.editor?.getModels?.() || [];
+    const domNames = [...this._fileNamePoolFromDom]; // copia para no mutar
+
+    if (!models.length || !domNames.length) return;
+
+    // ── Ancla: modelo activo en el editor ──
+    // Obtenemos la URI del modelo que está abierto en este momento.
+    // El IDE muestra su nombre en #ctnCurrentFileName o en el árbol activo.
+    let activeUri  = '';
+    let activeName = '';
+
+    try {
+      const activeModel = this._editor?.getModel?.();
+      if (activeModel) {
+        activeUri = String(activeModel.uri?.toString?.() || '');
+      }
+    } catch (_) {}
+
+    // Nombre del archivo activo: buscamos el elemento seleccionado en el árbol del IDE.
+    const activeNodeCandidates = [
+      // Ítem activo/seleccionado en el árbol de GAS
+      document.querySelector(
+        'ul.StrnGf-VfPpkd-rymPhb li.StrnGf-VfPpkd-rymPhb-ibnC6b-OWXEXe-XpnDCe,' +
+        'ul.StrnGf-VfPpkd-rymPhb li[aria-selected="true"],' +
+        '[role="treeitem"][aria-selected="true"],' +
+        '[role="treeitem"].selected'
+      ),
+      // Fallback: etiqueta de nombre de archivo visible en el header del editor
+      document.querySelector('#ctnCurrentFileName'),
+    ];
+
+    for (const node of activeNodeCandidates) {
+      if (!node) continue;
+      const raw = (node.textContent || node.getAttribute('aria-label') || '').trim();
+      const cleaned = this._normalizeFileLabel(raw);
+      if (this._looksLikeRealFileName(cleaned)) {
+        activeName = cleaned;
+        break;
+      }
+    }
+
+    // Si tenemos el par (URI activa ↔ nombre activo), lo fijamos en el cache.
+    if (activeUri && activeName) {
+      this._fileNameCacheByModelUri.set(activeUri, activeName);
+    }
+
+    // ── Asignación posicional para el resto ──
+    // Construimos listas paralelas excluyendo los slots ya resueltos.
+    const remainingModels = models.filter(m => {
+      const u = String(m?.uri?.toString?.() || '');
+      return !this._fileNameCacheByModelUri.has(u);
+    });
+
+    const remainingNames = domNames.filter(n => n !== activeName);
+
+    // Solo asignamos posicionalmente si los conteos coinciden exactamente.
+    // Si no coinciden, preferimos "File N" antes que un nombre equivocado.
+    if (remainingModels.length === remainingNames.length) {
+      remainingModels.forEach((model, i) => {
+        const u = String(model?.uri?.toString?.() || '');
+        this._fileNameCacheByModelUri.set(u, remainingNames[i]);
+      });
+    } else {
+      remainingModels.forEach((model, i) => {
+        const u = String(model?.uri?.toString?.() || '');
+        this._fileNameCacheByModelUri.set(u, `File ${i + 1}`);
+      });
+    }
+  }
+
+  /**
+   * Devuelve un nombre legible para un modelo Monaco.
+   *
+   * Estrategia de resolución (en orden de preferencia):
+   *   1. Cache por URI (hit rápido, evita recalcular).
+   *   2. Basename de la URI si parece un nombre de archivo real (.gs, .json, etc.).
+   *   3. Mapa DOM: busca en _fileNameMapFromDom el nombre que coincida con algún
+   *      fragmento de la URI (p.ej. "appsscript" en la URI → "appsscript.json").
+   *   4. Cualquier nombre del DOM aún no asignado a otro modelo (fallback ordenado).
+   *   5. Último recurso: "Model".
+   *
+   * @param {object} model
+   * @param {number} [index=0]
+   * @returns {string}
+   */
+  _formatModelName(model, index = 0) {
+    const uriKey = String(
+      model?.uri?.toString?.() || model?.uri?._formatted || model?.uri?.path || ''
+    );
+    if (uriKey && this._fileNameCacheByModelUri.has(uriKey)) {
+      return this._fileNameCacheByModelUri.get(uriKey);
+    }
+    // Si por alguna razón no está en cache (modelo añadido después de abrir),
+    // intentamos el basename directo de la URI.
+    const rawPath = String(model?.uri?.path || model?.uri?._formatted || '');
+    if (rawPath) {
+      const parts    = rawPath.split('/').filter(Boolean);
+      const baseName = parts[parts.length - 1] || '';
+      if (this._looksLikeRealFileName(baseName)) return baseName;
+    }
+    return `File ${index + 1}`;
+  }
+
+  /**
+   * Construye el mapa URI → nombre haciendo click UNA SOLA VEZ por sesión.
+   * El resultado se persiste en sessionStorage para que reabrir el panel
+   * no vuelva a simular clicks.
+   */
+  async _buildFullModelMapFromClicks() {
+    const models = window.monaco?.editor?.getModels?.() || [];
+    const items  = Array.from(document.querySelectorAll('li[role="option"][data-res-id]'));
+    console.log(items);
+    console.log(models);
+    const fileNames = items
+      .map(li => (li.getAttribute('aria-label') || '').trim())
+      .filter(name => this._looksLikeRealFileName(name));
+    console.log(fileNames);
+    const map = new Map();
+  
+    for (const model of models) {
+      const uri = model.uri.toString();
+      const content = model.getValue();
+      console.log(uri);
+      console.log(content);
+  
+      // Heurística básica para detectar nombre
+      const match = fileNames.find(name => {
+        if (name.endsWith('.gs')) {
+          // Buscar funciones típicas
+          return content.includes('function') || content.includes('const');
+        }
+        if (name.endsWith('.html')) {
+          return content.includes('<html') || content.includes('<div');
+        }
+        if (name === 'appsscript.json') {
+          return content.includes('"timeZone"') || content.includes('"dependencies"');
+        }
+        return false;
+      });
+  
+      if (match && ![...map.values()].includes(match)) {
+        map.set(uri, match);
+      }
+    }
+  
+    this._fileNameCacheByModelUri = map;
+    console.log("RUBENCHO");
+    console.log(map);
+  }
+
+  /**
+   * Observa cambios en el árbol de archivos del IDE (agregar, eliminar, renombrar).
+   * Cuando detecta cambios, reconstruye el cache de nombres.
+   */
+  _setupFileTreeObserver() {
+    // Contenedor del árbol de archivos
+    const tree = document.querySelector('ul.StrnGf-VfPpkd-rymPhb');
+    if (!tree) return; // Si no existe, no hacemos nada
+
+    // Creamos un observer para detectar cambios en el DOM
+    const observer = new MutationObserver(() => {
+      console.log('🔄 Cambios en archivos detectados');
+
+      // Evita ejecutar múltiples veces seguidas (debounce)
+      clearTimeout(this._treeDebounce);
+      this._treeDebounce = setTimeout(() => {
+
+        // Invalida el cache para forzar reconstrucción en la próxima apertura
+        try { sessionStorage.removeItem('gas_search_uri_map'); } catch (_) {}
+
+        // Refresca lista de nombres desde el DOM
+        this._refreshFileNameCacheFromDom();
+
+        // Reconstruye el mapa completo URI → nombre
+        this._buildFullModelMapFromClicks();
+
+      }, 500); // espera 500ms después del último cambio
+    });
+
+    // Observa cambios en hijos y subárbol completo
+    observer.observe(tree, {
+      childList: true,
+      subtree: true
+    });
+
+    // Guardamos referencia para poder desconectarlo después
+    this._treeObserver = observer;
+  }
+
+  /**
+   * Lee el árbol del DOM, llena _fileNamePoolFromDom y dispara _buildUriToNameMap.
+   */
+  _refreshFileNameCacheFromDom() {
+    const selectors = [
+      'ul.StrnGf-VfPpkd-rymPhb.StrnGf-VfPpkd-rymPhb-OWXEXe-EzIYc.Fcw6db.GFlqGb li',
+      '[role="tree"] [role="treeitem"]',
+      '[role="treeitem"]',
+      '[aria-label*=".gs"], [aria-label*=".js"], [aria-label*=".json"], [aria-label*=".html"]',
+    ];
+
+    const names = [];
+    selectors.forEach((sel) => {
+      document.querySelectorAll(sel).forEach((node) => {
+        const rawText = (node.textContent || node.getAttribute('aria-label') || '').trim();
+        if (!rawText) return;
+        const cleanName = this._normalizeFileLabel(rawText);
+        if (!this._looksLikeRealFileName(cleanName)) return;
+        names.push(cleanName);
+      });
+    });
+
+    this._fileNamePoolFromDom = Array.from(new Set(names));
+    this._buildUriToNameMap();
+  }
+
+  /**
+   * Determina si una cadena tiene aspecto de nombre real de archivo.
+   * Acepta .gs, .js, .ts, .json, .html, .css, .md, .txt
+   * Incluye explícitamente "appsscript.json" como nombre válido.
+   */
+  _looksLikeRealFileName(value) {
+    const text = String(value || '').trim();
+    if (!text) return false;
+    if (/^model\s*\d+$/i.test(text)) return false;
+    // Acepta cualquier nombre con extensión reconocida, incluido appsscript.json.
+    return /\.(gs|js|ts|json|html|css|md|txt)$/i.test(text);
+  }
+
+  /**
+   * Limpia un texto tomado del árbol del DOM para obtener solo el nombre de archivo.
+   *
+   * - Elimina espacios múltiples.
+   * - Elimina textos de estado como "cargando…" o "loading…".
+   * - Extrae el primer token con extensión válida si lo hay.
+   * - Elimina caracteres no alfanuméricos del resultado final.
+   *
+   * @param {string} label - Texto crudo del nodo del árbol.
+   * @returns {string} Nombre limpio.
+   */
+  _normalizeFileLabel(label) {
+    const normalized = String(label || '')
+      .replace(/\s+/g, ' ')
+      .replace(/cargando…?/gi, '')
+      .replace(/loading…?/gi, '')
+      .trim();
+
+    // Preferimos el primer token que tenga extensión de archivo reconocida.
+    const match = normalized.match(/([A-Za-z0-9 _.-]+\.(gs|js|ts|json|html|css|md|txt))/i);
+    if (match?.[1]) return match[1].trim();
+
+    return normalized.replace(/[^\w.\- ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * Determina si una cadena tiene aspecto de nombre real de archivo.
+   *
+   * Descarta:
+   * - Cadenas vacías.
+   * - Texto genérico como "Model 1", "Model 2".
+   * Acepta cualquier nombre con extensión de Apps Script o web.
+   *
+   * @param {string} value
+   * @returns {boolean}
+   */
+  _looksLikeRealFileNameOLD(value) {
+    const text = String(value || '').trim();
+    if (!text) return false;
+    if (/^model\s*\d+$/i.test(text)) return false;
+    return /\.(gs|js|ts|json|html|css|md|txt)$/i.test(text);
+  }
 
   /**
    * Escapa caracteres especiales HTML para inserción segura en innerHTML.
