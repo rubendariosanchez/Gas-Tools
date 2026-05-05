@@ -1,10 +1,13 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="UTF-8">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0" />
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0" />
   <link rel="stylesheet" href="../css/app.css">
 </head>
+
 <body>
   <header class="qc__header">
     <img src="../../resources/icons/icon48.png" width="28" alt="Logo">
@@ -27,6 +30,10 @@
       <span class="material-symbols-outlined">palette</span>
       Themes
     </div>
+    <div class="qc__tab" data-target="ai-context">
+      <span class="material-symbols-outlined">psychology</span>
+      AI Context
+    </div>
     <div class="qc__tab" data-target="about">
       <span class="material-symbols-outlined">info</span>
       About
@@ -36,20 +43,67 @@
   <main class="qc__content-area">
     <div class="qc__page qc__active" id="options">
       <div class="qc__section-title">Extension</div>
-      <option-toggle id="global-enable" title="Enable extension" description="Activate or deactivate features globally" checked></option-toggle>
-      <option-toggle id="load-snippets" title="Load default snippets" description="Load custom snippets at startup" checked></option-toggle>
+      <option-toggle id="global-enable" title="Enable extension" description="Activate or deactivate features globally"
+        checked></option-toggle>
+      <option-toggle id="load-snippets" title="Load default snippets" description="Load custom snippets at startup"
+        checked></option-toggle>
+
+      <div class="qc__section-title">Font</div>
+      <option-select id="fontFamily" title="Font family" description="Editor font family"
+        options="Consolas:Consolas,Monaco:Monaco,Source Code Pro:Source Code Pro,Fira Code:Fira Code,Menlo:Menlo"
+        value="Consolas"></option-select>
+      <option-select id="fontSize" title="Font size" description="Editor font size"
+        options="10:10,12:12,14:14,16:16,18:18,20:20,22:22,24:24"
+        value="14"></option-select>
+      <option-select id="lineHeight" title="Line height" description="Line spacing"
+        options="14:14,16:16,18:18,20:20,22:22,24:24,26:26,28:28,30:30,32:32,34:34,36:36"
+        value="20"></option-select>
 
       <div class="qc__section-title">Visuals & Layout</div>
-      <option-toggle id="showMinimap" title="Show minimap" description="Display a high-level overview of your code on the side" checked></option-toggle>
-      <option-toggle id="wordWrap" title="Word wrap" description="Wrap long lines to fit within the editor width"></option-toggle>
-      <option-toggle id="bracketPairs" title="Bracket pair colorization" description="Highlight matching brackets with unique colors" checked></option-toggle>
-      <option-toggle id="smoothScrolling" title="Smooth scrolling" description="Animate scrolling for a more fluid experience"></option-toggle>
+      <option-toggle id="showMinimap" title="Show minimap"
+        description="Display a high-level overview of your code on the side" checked></option-toggle>
+      <option-toggle id="lineNumbers" title="Line numbers" description="Show line numbers on the left margin"
+        checked></option-toggle>
+      <option-toggle id="wordWrap" title="Word wrap"
+        description="Wrap long lines to fit within the editor width"></option-toggle>
+      <option-toggle id="renderLineHighlight" title="Line highlight" description="Highlight the current line"
+        checked></option-toggle>
+      <option-toggle id="rulers" title="Rulers" description="Show vertical rulers"></option-toggle>
+      <option-toggle id="occurrencesHighlight" title="Occurrences highlight" description="Highlight variable occurrences"
+        checked></option-toggle>
+      <option-toggle id="renderWhitespace" title="Show whitespace"
+        description="Show whitespace characters"></option-toggle>
 
-      <div class="qc__section-title">Behavior & Features</div>
-      <option-toggle id="tabCompletion" title="Tab completion" description="Enable tab key to complete code suggestions" checked></option-toggle>
-      <option-toggle id="scrollBeyondLastLine" title="Scroll beyond last line" description="Allows scrolling further than the final line of code" checked></option-toggle>
-      <option-toggle id="peekWidget" title="Peek widget" description="Enable inline preview for definitions and references" checked></option-toggle>
-      <option-toggle id="formatOnSave" title="Format on save" description="Automatically format code structure when saving" checked></option-toggle>
+      <div class="qc__section-title">Code Assistance</div>
+      <option-toggle id="bracketPairs" title="Bracket pair colorization"
+        description="Highlight matching brackets with unique colors" checked></option-toggle>
+      <option-toggle id="quickSuggestions" title="Quick suggestions" description="Show suggestions while typing"
+        checked></option-toggle>
+      <option-toggle id="autoClosingBrackets" title="Auto closing brackets"
+        description="Automatically close brackets" checked></option-toggle>
+      <option-toggle id="guides-indentation" title="Indentation guides"
+        description="Show indentation guide lines" checked></option-toggle>
+
+      <div class="qc__section-title">Navigation</div>
+      <option-toggle id="folding" title="Code folding" description="Allow collapsing code blocks"
+        checked></option-toggle>
+
+      <div class="qc__section-title">Scrolling</div>
+      <option-toggle id="smoothScrolling" title="Smooth scrolling"
+        description="Animate scrolling for a more fluid experience" checked></option-toggle>
+      <option-toggle id="scrollBeyondLastLine" title="Scroll beyond last line"
+        description="Allows scrolling further than the final line of code"></option-toggle>
+
+      <div class="qc__section-title">Editor Behavior</div>
+      <option-select id="tabSize" title="Tab size" description="Indentation size"
+        options="2:2,4:4,6:6,8:8"
+        value="2"></option-select>
+      <option-select id="cursorStyle" title="Cursor style" description="Cursor appearance"
+        options="line:Line,block:Block"
+        value="line"></option-select>
+      <option-select id="cursorBlinking" title="Cursor blinking" description="Cursor blink animation"
+        options="blink:Blink,smooth:Smooth,phase:Phase,hidden:Hidden"
+        value="blink"></option-select>
 
     </div>
 
@@ -66,35 +120,69 @@
       <div class="qc__sub-tabs">
         <div class="qc__sub-tab" data-filter="default">Default</div>
         <div class="qc__sub-tab qc__active" data-filter="custom">Custom</div>
-        
+
         <button id="addSnippetBtn" class="qc__add-inline-btn qc__btn-add-item" title="Add Snippet">
           <span class="material-symbols-outlined">add</span>
         </button>
       </div>
 
-      <div id="snippets-list"></div> 
+      <div id="snippets-list"></div>
     </div>
-    
+
     <!-- Pestaña de temas -->
     <div class="qc__page" id="themes">
       <div class="qc__themes-header">
-        <div class="qc__section-title">Themes</div>
-        <div class="qc__search-container">
-          <span class="material-symbols-outlined qc__search-icon">search</span>
-          <input type="text" id="themeSearch" class="qc__search-input" placeholder="Search...">
+        <div class="qc__header-top">
+          <div class="qc__section-title">Themes</div>
+          <div class="qc__search-container">
+            <span class="material-symbols-outlined qc__search-icon">search</span>
+            <input type="text" id="themeSearch" class="qc__search-input" placeholder="Search...">
+          </div>
+        </div>
+        <div id="activeThemeBadge" class="qc__active-theme-badge">Current theme: --</div>
+        <div class="qc__sub-tabs">
+          <div class="qc__sub-tab" data-filter="default">Default</div>
+          <div class="qc__sub-tab qc__active" data-filter="custom">Custom</div>
+
+          <button id="addThemeBtn" class="qc__add-inline-btn qc__btn-add-item" title="Add Snippet">
+            <span class="material-symbols-outlined">add</span>
+          </button>
         </div>
       </div>
 
-      <div class="qc__sub-tabs">
-        <div class="qc__sub-tab" data-filter="default">Default</div>
-        <div class="qc__sub-tab qc__active" data-filter="custom">Custom</div>
-        
-        <button id="addThemeBtn" class="qc__add-inline-btn qc__btn-add-item" title="Add Snippet">
-          <span class="material-symbols-outlined">add</span>
-        </button>
-      </div>
-      
       <div id="themes-grid" class="qc__themes-grid"></div>
+    </div>
+
+    <!-- AI Context -->
+    <div class="qc__page" id="ai-context">
+      <div class="qc__section-title">AI Context</div>
+      <p class="qc__field-description">
+        Define context, architecture, and coding guidelines for the AI assistant.
+        Applied to all projects. Use it for general coding standards and best practices.
+      </p>
+
+      <div class="qc__field">
+        <textarea id="aiContextInput" class="qc__textarea-large" rows="11" placeholder="# Project Context
+## Architecture
+- Describe your project structure
+- Main files and their purpose
+## Coding Style
+- Language for comments: Spanish
+- Language for comments: Spanish/English
+- Use arrow functions
+- Prefer const over let
+## Best Practices
+- Add JSDoc comments for functions
+- Use meaningful variable names
+- Handle errors with try-catch
+## Response Format
+- Explain in Spanish
+- Include code examples"></textarea>
+      </div>
+
+      <div class="qc__ai-context-actions">
+        <button id="saveAiContextBtn" class="qc__btn qc__btn--primary" style="width: 100%;">Save</button>
+      </div>
     </div>
 
     <!-- Créditos -->
@@ -104,16 +192,33 @@
         <div class="qc__about-title">Google Apps Script Tools</div>
         <div class="qc__about-version">Rubén Sánchez</div>
         <div class="qc__about-version">Version 0.0.5</div>
-        
+
         <div class="qc__social-row">
-          <a href="https://github.com/rubenchodev" class="qc__social-btn" title="GitHub Perfil" target="_blank" rel="noopener">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path><path d="M9 18c-4.51 2-5-2-7-2"></path></svg>
+          <a href="https://github.com/rubenchodev" class="qc__social-btn" title="GitHub Perfil" target="_blank"
+            rel="noopener">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path
+                d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4">
+              </path>
+              <path d="M9 18c-4.51 2-5-2-7-2"></path>
+            </svg>
           </a>
-          <a href="https://www.linkedin.com/in/rub%C3%A9n-dar%C3%ADo-s%C3%A1nchez-ram%C3%ADrez-6a3a606b/" class="qc__social-btn" title="LinkedIn" target="_blank" rel="noopener">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect width="4" height="12" x="2" y="9"></rect><circle cx="4" cy="4" r="2"></circle></svg>
+          <a href="https://www.linkedin.com/in/rub%C3%A9n-dar%C3%ADo-s%C3%A1nchez-ram%C3%ADrez-6a3a606b/"
+            class="qc__social-btn" title="LinkedIn" target="_blank" rel="noopener">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path>
+              <rect width="4" height="12" x="2" y="9"></rect>
+              <circle cx="4" cy="4" r="2"></circle>
+            </svg>
           </a>
           <a href="mailto:rubencho.dev@gmail.com" class="qc__social-btn" title="Email" target="_blank" rel="noopener">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect width="20" height="16" x="2" y="4" rx="2"></rect>
+              <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+            </svg>
           </a>
         </div>
       </div>
@@ -138,8 +243,7 @@
   </main>
 
   <footer class="qc__footer" style="display: flex;">
-    <button class="qc__btn qc__btn--secondary" id="resetBtn">Reset</button>
-    <button class="qc__btn qc__btn--primary" id="saveBtn">Save Changes</button>
+    <button class="qc__btn qc__btn--secondary" id="resetBtn">RESET</button>
   </footer>
 
   <!-- Modal de edición de snippets -->
@@ -164,4 +268,5 @@
 
   <script type="module" src="../js/app.js"></script>
 </body>
+
 </html>

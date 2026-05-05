@@ -96,7 +96,7 @@ function initThemeModal_() {
  * Carga el JSON de definición desde la carpeta /themes.
  */
 async function fetchThemeDefinition_(themeText) {
-    const fileName = themeText.replace(/\s+/g, '');
+    const fileName = themeText;
     console.log(`${fileName}.json`);
     const url = chrome.runtime.getURL(`themes/${fileName}.json`);
     console.log("Fetching theme from:", url);
@@ -116,6 +116,7 @@ async function fetchThemeDefinition_(themeText) {
  */
 export async function renderThemes_(filter = '', category = currentThemeCategory) {
     const grid = document.getElementById('themes-grid');
+    const activeThemeBadge = document.getElementById('activeThemeBadge');
     if (!grid) return;
 
     try {
@@ -143,6 +144,21 @@ export async function renderThemes_(filter = '', category = currentThemeCategory
             if (theme.value === activeTheme) card.setAttribute('selected', '');
             grid.appendChild(card);
         });
+
+        if (activeThemeBadge) {
+            const activeThemeEntry = allThemes.find(theme => theme.value === activeTheme);
+            const colors = activeThemeEntry?.colors ? activeThemeEntry.colors.split(',') : ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b'];
+            activeThemeBadge.innerHTML = `
+                <div class="qc__badge-colors">
+                    ${colors.slice(0, 4).map(c => `<div class="qc__badge-color" style="background:${c}"></div>`).join('')}
+                </div>
+                <span class="material-symbols-outlined qc__badge-icon">palette</span>
+                <div class="qc__badge-info">
+                    <span class="qc__badge-label">Active Theme</span>
+                    <span class="qc__badge-name">${activeThemeEntry?.text || activeTheme}</span>
+                </div>
+            `;
+        }
     } catch (error) {
         console.error("Error al renderizar temas:", error);
     }
@@ -179,7 +195,7 @@ async function handleSelectTheme_(selectedValue, themeName) {
         // 1. Persistencia: Actualizamos el storage de Chrome
         const result = await new Promise(res => chrome.storage.sync.get([G_PROPERTY_NAME], res));
         const currentSettings = result[G_PROPERTY_NAME] || {};
-        
+
         const updatedSettings = {
             ...currentSettings,
             themes: {
@@ -200,10 +216,32 @@ async function handleSelectTheme_(selectedValue, themeName) {
             }
         });
 
-        // 3. Notificación: Avisamos a los content scripts/editores
+        // 3. Actualizar badge del tema activo inmediatamente
+        const activeThemeBadge = document.getElementById('activeThemeBadge');
+        if (activeThemeBadge) {
+            // Obtener los colores del tema seleccionado
+            let themeEntry = THEME_LIST.find(t => t.value === selectedValue);
+            if (!themeEntry) {
+                const customThemes = await DB.getAll('themes');
+                themeEntry = customThemes.find(t => t.value === selectedValue);
+            }
+            const colors = themeEntry?.colors ? themeEntry.colors.split(',') : ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b'];
+            activeThemeBadge.innerHTML = `
+                <div class="qc__badge-colors">
+                    ${colors.slice(0, 4).map(c => `<div class="qc__badge-color" style="background:${c}"></div>`).join('')}
+                </div>
+                <span class="material-symbols-outlined qc__badge-icon">palette</span>
+                <div class="qc__badge-info">
+                    <span class="qc__badge-label">Active Theme</span>
+                    <span class="qc__badge-name">${themeName}</span>
+                </div>
+            `;
+        }
+
+        // 4. Notificación: Avisamos a los content scripts/editores
         notifyEditors('themes');
 
-        // 4. Feedback: Toast informativo
+        // 5. Feedback: Toast informativo
         Toast.show(`Theme "${themeName}" selected and will be applied.`, "success");
 
     } catch (error) {

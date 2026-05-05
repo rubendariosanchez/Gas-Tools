@@ -123,7 +123,9 @@ async function saveSnippet_(newSnip, modalInstance) {
 
         // Almacenamos los datos en IndexedDB para optimizar rendimiento y evitar bloqueos
         await DB.set('snippets', newSnip); // Guarda o actualiza directamente
+        console.log('[Snippets] Saved, notifying editors...');
         notifyEditors('snippets');
+        console.log('[Snippets] Notification sent');
 
         // Después de guardar, cerramos el modal y recargamos la lista para reflejar cambios
         modalInstance.close_();

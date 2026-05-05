@@ -13,35 +13,41 @@
     "service_worker": "extension/background.js",
     "type": "module"
   },
-  "content_scripts": [{
-    "matches": [
-      "https://script.google.com/home/projects/*/edit*"
-    ],
-    "js": [
-      "extension/js/mainFunctions.js"
-    ],
-    "all_frames": false,
-    "run_at": "document_end"
-  }],
-  "web_accessible_resources": [{
-    "resources": [
-      "extension/*.*",
-      "html/optionToogle.html",
-      "html/optionWrapLine.html",
-      "html/themeList.html",
-      "css/gasToolsStyle.css",
-      "html/modalSearch.html",
-      "js/library.js",
-      "js/popover.js",
-      "themes/*.json",
-      "src/vendor/codemirror/*"
-    ],
-    "matches": ["<all_urls>"]
-  }],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://script.google.com/home/projects/*/edit*"
+      ],
+      "js": [
+        "extension/js/mainFunctions.js"
+      ],
+      "all_frames": false,
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "extension/*.*",
+        "themes/*.json",
+        "src/vendor/codemirror/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
   "action": {
     "default_title": "Google Apps Script Tools",
     "default_popup": "src/html/index.html",
-    "default_icon": "resources/icons/icon128.png"
+    "default_icon": {
+      "16": "resources/icons/icon16.png",
+      "48": "resources/icons/icon48.png",
+      "128": "resources/icons/icon128.png"
+    },
+    "show_matches": [
+      "https://script.google.com/home/projects/*/edit*"
+    ]
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
@@ -52,6 +58,11 @@
     "storage"
   ],
   "host_permissions": [
-    "https://script.google.com/home/projects/*/edit*"
+    "https://script.google.com/home/projects/*/edit*",
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.deepseek.com/*",
+    "https://apps.abacus.ai/*"
   ]
 }

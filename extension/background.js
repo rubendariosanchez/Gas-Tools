@@ -1,157 +1,203 @@
 "use strict";
+
+// Importa el helper de IndexedDB para leer ajustes y snippets del usuario
 import { DB } from '../src/js/utils/Storage.js';
+// Importa la clave global de storage y los snippets predeterminados de la extensión
 import { G_PROPERTY_NAME, DEFAULT_SNIPPETS } from '../src/js/utils/Variables.js';
-import { THEME_LIST } from '../src/js/utils/Themes.js';
+// Importa las funciones de tema activo y despacho LLM desde el módulo de proveedores
+import { getActiveTheme, callLlmProvider } from './js/llmProviders.js';
 
 // ─────────────────────────────────────────────
-// MESSAGE HANDLERS
+// MANEJADORES DE MENSAJES
 // ─────────────────────────────────────────────
 
+/**
+ * Escucha y despacha los mensajes entrantes desde el popup y los content scripts.
+ * Cada bloque maneja un tipo de mensaje distinto y responde de forma asíncrona.
+ *
+ * @listens chrome.runtime.onMessage
+ * @param {Object}   msg          - Mensaje recibido con al menos la propiedad `type`.
+ * @param {Object}   sender       - Información del remitente (tab, frame, extensión).
+ * @param {Function} sendResponse - Callback para enviar la respuesta al remitente.
+ * @returns {true} Retorna `true` en todos los casos para mantener el canal abierto de forma asíncrona.
+ */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
-  // El content script solicita la configuración actual (toggles del popup).
+  // ── GET_SETTINGS ──────────────────────────────────────────────────
   if (msg.type === 'GET_SETTINGS') {
+    // Lee los ajustes del usuario desde IndexedDB y los devuelve al solicitante
     DB.get('settings', G_PROPERTY_NAME)
       .then(data => sendResponse(data?.options ?? {}))
+      // Si falla la lectura, responde con un objeto vacío para no romper el receptor
       .catch(() => sendResponse({}));
     return true;
   }
 
-  // El script inyectado solicita todos los snippets personalizados del usuario.
+  // ── GET_SNIPPETS ──────────────────────────────────────────────────
   if (msg.type === 'GET_SNIPPETS') {
     (async () => {
       try {
-        // 1. Obtenemos los snippets del usuario de la DB
+        // Obtiene todos los snippets guardados por el usuario en IndexedDB
         const userSnippets = await DB.getAll('snippets') || [];
-        
-        // 2. Obtenemos la configuración para ver si "load-snippets" está activo
+        // Lee la configuración para saber si los snippets por defecto están habilitados
         const settingsData = await DB.get('settings', G_PROPERTY_NAME);
         const isDefaultEnabled = settingsData?.options?.['load-snippets'] === true;
-
-        // 3. Combinamos si es necesario
-        let finalSnippets = [...userSnippets];
-        
-        if (isDefaultEnabled) {
-          // DEFAULT_SNIPPETS debe ser un array definido en tus constantes
-          // Usamos un Map o Filter para evitar duplicados por prefijo si lo deseas
-          finalSnippets = [...DEFAULT_SNIPPETS, ...userSnippets];
-        }
-
+        // Prepende los snippets predeterminados solo si el toggle está activado
+        const finalSnippets = isDefaultEnabled
+          ? [...DEFAULT_SNIPPETS, ...userSnippets]
+          : [...userSnippets];
         sendResponse(finalSnippets);
-      } catch (error) {
-        console.error("[BG] Error fetching snippets:", error);
+      } catch (err) {
+        console.error('[BG] Error al obtener snippets:', err);
+        // Responde con arreglo vacío para que el receptor no quede sin datos
         sendResponse([]);
       }
     })();
     return true;
   }
 
-  // El script inyectado solicita el tema activo completo (incluyendo colores y reglas).
+  // ── GET_ACTIVE_THEME ──────────────────────────────────────────────
   if (msg.type === 'GET_ACTIVE_THEME') {
-    _resolveActiveTheme()
+    // Resuelve el tema activo (lista protegida o IndexedDB) y lo devuelve completo
+    getActiveTheme()
       .then(themeData => sendResponse(themeData))
+      // Si no se puede resolver el tema, responde con null de forma segura
       .catch(() => sendResponse(null));
     return true;
   }
 
-  // El popup avisa que hubo un cambio — reenviamos al tab activo.
+  // ── NOTIFY_UPDATE ─────────────────────────────────────────────────
   if (msg.type === 'NOTIFY_UPDATE') {
-    DB.get('settings', G_PROPERTY_NAME).then(settingsData => {
-      const options = settingsData?.options ?? {};
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (!tabs[0]?.id) return;
-        chrome.tabs.sendMessage(tabs[0].id, {
-          type: 'SETTINGS_UPDATED',
-          payload: { options, updateType: msg.updateType }
+    // Identifica qué recurso cambió: 'settings', 'snippets' o 'themes'
+    const updateType = msg.updateType;
+    console.log('[Background] NOTIFY_UPDATE recibido, tipo:', updateType);
+
+    /**
+     * Envía un payload a todos los tabs del editor de Google Apps Script abiertos.
+     *
+     * @param {Object} payload - Datos actualizados a reenviar a los content scripts.
+     */
+    const sendToTabs = (payload) => {
+      // Filtra solo las pestañas que coinciden con la URL del editor de GAS
+      chrome.tabs.query({ url: 'https://script.google.com/home/projects/*/edit*' }, (tabs) => {
+        console.log('[Background] Tabs encontrados:', tabs.length);
+        tabs.forEach(tab => {
+          // Envía el mensaje a cada tab; ignora errores si el content script no está listo
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'SETTINGS_UPDATED',
+            payload: { ...payload, updateType },
+          }).catch(err => {
+            console.log('[Background] No se pudo enviar al tab:', tab.id, err.message);
+          });
         });
       });
-    });
+    };
+
+    if (updateType === 'settings') {
+      // Lee los ajustes actualizados y los reenvía a los tabs del editor
+      DB.get('settings', G_PROPERTY_NAME).then(settingsData => {
+        console.log('[Background] Enviando settings');
+        sendToTabs({ options: settingsData?.options ?? {} });
+      });
+
+    } else if (updateType === 'snippets') {
+      (async () => {
+        try {
+          // Reconstruye la lista final de snippets con la misma lógica que GET_SNIPPETS
+          const userSnippets = await DB.getAll('snippets') || [];
+          const settingsData = await DB.get('settings', G_PROPERTY_NAME);
+          const isDefaultEnabled = settingsData?.options?.['load-snippets'] === true;
+          const finalSnippets = isDefaultEnabled
+            ? [...DEFAULT_SNIPPETS, ...userSnippets]
+            : [...userSnippets];
+          console.log('[Background] Enviando snippets, cantidad:', finalSnippets.length);
+          sendToTabs({ data: finalSnippets });
+        } catch (err) {
+          console.error('[Background] Error al obtener snippets:', err);
+          // En caso de error, reenvía un arreglo vacío para limpiar el estado en los tabs
+          sendToTabs({ data: [] });
+        }
+      })();
+
+    } else if (updateType === 'themes') {
+      // Resuelve el tema activo y lo propaga a todos los tabs del editor
+      getActiveTheme().then(themeData => {
+        console.log('[Background] Enviando tema:', themeData?.text);
+        sendToTabs({ data: themeData });
+      });
+    }
+
+    // Confirma al popup que el mensaje fue recibido y procesado
     sendResponse({ ok: true });
     return true;
   }
+
+  // ── LLM_GET_CONFIG ────────────────────────────────────────────────
+  if (msg.type === 'LLM_GET_CONFIG') {
+    // Lee la configuración LLM (proveedor, modelo, API key, system prompt) desde chrome.storage.sync
+    chrome.storage.sync.get(['gasToolsLlmConfig'], (result) => {
+      // Devuelve null si aún no hay configuración guardada
+      sendResponse(result?.gasToolsLlmConfig || null);
+    });
+    return true;
+  }
+
+  // ── LLM_SAVE_CONFIG ───────────────────────────────────────────────
+  if (msg.type === 'LLM_SAVE_CONFIG') {
+    // Persiste el payload de configuración LLM en chrome.storage.sync
+    chrome.storage.sync.set({ gasToolsLlmConfig: msg.payload || {} }, () => {
+      // Informa si el guardado fue exitoso comprobando lastError
+      sendResponse({ ok: !chrome.runtime.lastError });
+    });
+    return true;
+  }
+
+  // ── GET_GLOBAL_AI_CONTEXT ─────────────────────────────────────────
+  if (msg.type === 'GET_GLOBAL_AI_CONTEXT') {
+    // Recupera el contexto global de IA (instrucciones compartidas entre chats)
+    chrome.storage.sync.get(['gasToolsAiContext'], (result) => {
+      // Devuelve null si todavía no se ha definido ningún contexto
+      sendResponse(result['gasToolsAiContext'] || null);
+    });
+    return true;
+  }
+
+  // ── LLM_CHAT_REQUEST ──────────────────────────────────────────────
+  if (msg.type === 'LLM_CHAT_REQUEST') {
+    // El background ejecuta el fetch al proveedor LLM para evitar restricciones CORS
+    // y para que las API keys nunca queden expuestas en el contexto MAIN de la página
+    callLlmProvider(msg.payload || {})
+      .then((content) => sendResponse({ ok: true, content }))
+      // Serializa el error a string para que sea transferible como mensaje
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+
 });
 
 // ─────────────────────────────────────────────
-// HELPERS
+// REGLA DE PAGE ACTION
 // ─────────────────────────────────────────────
 
 /**
- * Resuelve el tema activo completo:
- *  1. Lee el ID del tema activo desde chrome.storage.sync
- *  2. Busca primero en THEME_LIST (protegidos)
- *  3. Si no, busca en IndexedDB (personalizados)
- *  4. Si es protegido y no tiene JSON, lo carga desde /themes/*.json
+ * Registra la regla declarativa que activa el ícono de la extensión
+ * solo cuando el tab activo es el editor de Google Apps Script.
+ * Se ejecuta una sola vez al instalar o actualizar la extensión.
  *
- * @returns {Promise<Object|null>}
- */
-async function _resolveActiveTheme() {
-  try {
-    // 1. Obtener el ID activo
-    const result = await new Promise(res =>
-      chrome.storage.sync.get([G_PROPERTY_NAME], res)
-    );
-    const activeId = result[G_PROPERTY_NAME]?.themes?.active || 'vs-dark';
-
-    // 2. Buscar en temas del sistema
-    let themeEntry = THEME_LIST.find(t => t.value === activeId);
-
-    // 3. Si no está, buscar en IndexedDB
-    if (!themeEntry) {
-      const customThemes = await DB.getAll('themes');
-      themeEntry = customThemes.find(t => t.value === activeId);
-    }
-
-    if (!themeEntry) return null;
-
-    // 4. Si es protegido y no tiene JSON incrustado, cargarlo desde el archivo
-    if (themeEntry.protected && !themeEntry.data) {
-      themeEntry = {
-        ...themeEntry,
-        data: await _fetchThemeJson(themeEntry.text)
-      };
-    }
-
-    return themeEntry;
-  } catch (err) {
-    console.error('[Background] Error resolving active theme:', err);
-    return null;
-  }
-}
-
-/**
- * Carga el JSON de definición de un tema desde la carpeta /themes.
- * @param {string} themeText - Nombre legible del tema (ej: "Monokai")
- * @returns {Promise<Object|null>}
- */
-async function _fetchThemeJson(themeText) {
-  const fileName = themeText.replace(/\s+/g, '');
-  const url = chrome.runtime.getURL(`themes/${fileName}.json`);
-  try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
-  } catch (err) {
-    console.error(`[Background] Could not load theme JSON for "${themeText}":`, err);
-    return null;
-  }
-}
-
-// ─────────────────────────────────────────────
-// PAGE ACTION RULE
-// ─────────────────────────────────────────────
-
-/**
- * Muestra el icono de la extensión solo en el editor de Google Apps Script.
+ * @listens chrome.runtime.onInstalled
  */
 chrome.runtime.onInstalled.addListener(() => {
+  // Elimina cualquier regla anterior para evitar duplicados tras una actualización
   chrome.declarativeContent.onPageChanged.removeRules(undefined, () => {
     chrome.declarativeContent.onPageChanged.addRules([{
       conditions: [
+        // Activa el page action solo en URLs que coincidan con el editor de GAS
         new chrome.declarativeContent.PageStateMatcher({
-          pageUrl: { urlContains: 'https://script.google.com/home/projects/*/edit*' }
-        })
+          pageUrl: { urlContains: 'https://script.google.com/home/projects/*/edit*' },
+        }),
       ],
-      actions: [new chrome.declarativeContent.ShowPageAction()]
+      // Muestra el ícono de la extensión en la barra del navegador al cumplirse la condición
+      actions: [new chrome.declarativeContent.ShowPageAction()],
     }]);
   });
 });

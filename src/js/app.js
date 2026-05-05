@@ -4,13 +4,14 @@
  */
 // Importación de componentes Web y constantes globales
 import { OptionToggle } from '../components/OptionToggle.js';
+import { OptionSelect } from '../components/OptionSelect.js';
 import { SnippetCard } from '../components/SnippetCard.js';
 import { ThemeCard } from '../components/ThemeCard.js';
 import { SnippetModal } from '../components/SnippetModal.js';
 import { ThemeModal } from '../components/ThemeModal.js';
 
 import { initTabs_, updateAboutStats_ } from './modules/ui.js';
-import { initSettingsModule } from './modules/settings.js';
+import { initSettingsModule, initAiContextModule } from './modules/settings.js';
 import { initThemeModule } from './modules/themes.js';
 import { initSnippetModule } from './modules/snippets.js';
 
@@ -53,6 +54,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Inicializar módulos funcionales
     initSettingsModule();
+    initAiContextModule();
     initThemeModule();
     
     // Si tienes snippets listos:

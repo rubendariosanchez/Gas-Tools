@@ -1,40 +1,49 @@
 # Google Apps Script Tools
-[![Chrome Web Store](https://img.shields.io/badge/Google%20Apps%20Script-Tools-blue)](https://github.com/rubendariosanchez/Gas-Tools)
 
-Se trata de un proyecto que he iniciado con el objetivo de ir agregando funcionalidades al nuevo entorno de desarrollo (IDE) de Google Apps Script. En su primera versión se crea como extensión para Google Chrome y se comparte el código en búsqueda de recibir realimentación de otros desarrolladores y así mismo ir adicionando nuevas carácteristicas.
+Extensión Chrome (Manifest V3) que mejora el editor de Google Apps Script con configuración avanzada de Monaco, snippets y temas.
 
-
-[![Google Apps Script Tools](https://innovationtechweb.com/resources/chrome-extensions/GasTools%20-%20Captura%20de%20pantalla.png)](https://github.com/rubendariosanchez/Gas-Tools)
-
-
-Las características que posee actualmente la extensión son las siguientes:
+## Características
 
 | # | Característica | Descripción |
 | - | - | - |
-| 1 | Temas | Lista de aproximadamente 49 temas para aplicar en el nuevo editor de Google Apps Script. |
-| 2 | Mostrar/Ocultar archivos | Se agrega la funcionalidad de ocultar o mostrar el panel para aprovechar al máximo el espacio de su pantalla. |
-| 3 | Wrap Line | Permite activar o desactivar el ajuste de línea en el editor. |
-| 4 | Búsqueda avanzada | Permite realizar la búsqueda de palabras en múltiples archivos para agilizar este proceso. **NOTA:** *En esta primera versión  no se muestra el nombre de los archivos, se espera tener esta funcionalidad en una siguiente versión* |
+| 1 | **Temas** | ~50 temas para el editor Monaco |
+| 2 | **Snippets** | 23 snippets predefinidos (JS + HTML/GAS) |
+| 3 | **Opciones de editor** | Minimap, word wrap, bracket pairs, smooth scrolling, tab completion, format on save, y más |
+| 4 | **Mostrar/Ocultar archivos** | Panel lateral colapsable |
 
-### Instalación
+## Instalación
 
+Desde [Chrome Web Store](https://chrome.google.com/webstore/detail/google-apps-script-tools/iigobcdpmngdgiacebgenbccmdacnjhp) o cargar manualmente la extensión desde `manifest.json`.
 
-Desde el navegador de Google Chrome acceder al [Chrome Web Store](https://chrome.google.com/webstore/detail/google-apps-script-tools/iigobcdpmngdgiacebgenbccmdacnjhp) y realizar la instalación de la extensión. Este complemento puede ser usado con otro complemento muy bueno llamado [AppsScript Color](https://chrome.google.com/webstore/detail/appsscript-color/ciggahcpieccaejjdpkllokejakhkome), los cuales se complementan muy bien para sacar el mayor provecho del nuevo IDE de Google Apps Script.
+## Snippets disponibles
 
+**JavaScript:**
+- `clog` - console.log
+- `log` - Logger.log (GAS)
+- `gss` - Get Active Spreadsheet
+- `getval` - Get Range Values
+- `alert` - Browser Alert
+- `for`, `forof`, `fe` - Bucles
+- `ife` - If-Else
+- `try` - Try-Catch
+- `map`, `filter` - Arrays
+- `doc` - JSDoc comment
+- `todo` - To-Do comment
 
-### Agradecimientos
+**HTML/GAS:**
+- `htmlgas` - Base template HTML
+- `field`, `btn`, `select` - Form elements
+- `divc`, `table` - Containers
+- `incjs`, `incss` - GAS includes
+- `loader` - Loading spinner
 
+## Tech Stack
 
-- Los temas agregados al nuevo editor fueron tomados de la página [github-brijeshb42](https://github.com/brijeshb42/monaco-themes/), donde agradezco a sus creadores.
+- Chrome Extension (Manifest V3)
+- ES Modules (sin build step)
+- Web Components
+- IndexedDB + chrome.storage.sync
 
+## Licencia
 
-Licencia
-----
-
-
-[MIT](https://opensource.org/licenses/MIT)
-
-
-
-
-**El código es libre y puede ser usado en nuevas iniciativas o como apoyo a este proyecto.**
+MIT
