@@ -334,11 +334,11 @@ body {
   background: var(--qc__bg-surface);
   border: 1px solid var(--qc__border);
   border-radius: 8px;
-  cursor: default;
   transition: all 0.2s ease;
 }
 
 .qc__active-theme-badge:hover {
+  cursor: pointer;
   border-color: var(--qc__primary);
   box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
 }
@@ -712,6 +712,8 @@ body {
   min-width: 24px;
   text-align: right;
 }
+
+.qc__textarea-large {
   box-sizing: border-box;
   outline: none;
   transition: border-color 0.2s;
@@ -729,4 +731,14 @@ body {
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+
+@keyframes highlight-pulse {
+  0%   { box-shadow: 0 0 0 0px var(--qc__primary); }
+  50%  { box-shadow: 0 0 0 6px var(--qc__primary); }
+  100% { box-shadow: 0 0 0 0px var(--qc__primary); }
+}
+
+.qc__highlight-pulse {
+  animation: highlight-pulse 0.6s ease-out;
 }

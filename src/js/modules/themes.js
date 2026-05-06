@@ -16,12 +16,68 @@ export async function initThemeModule() {
     initThemeSearch_();
     initThemeActions_();
     initThemeModal_();
+    initActiveThemeBadge_();
 
     // Carga inicial: podemos obtener el tema activo para loguear o verificar
     const activeTheme = await getActiveThemeData_();
     console.log("Current active theme configuration:", activeTheme);
 
-    renderThemes_();
+    // Renderiza los temas
+    renderThemes_(true);
+}
+
+/**
+ * Inicializa el badge del tema activo con navegación al hacer clic.
+ *
+ * Al hacer clic en el badge, la función:
+ *  1. Obtiene el tema activo actual desde storage/IndexedDB.
+ *  2. Detecta en qué categoría vive ('default' si es protegido, 'custom' si no).
+ *  3. Cambia al tab correspondiente si el usuario está en la categoría incorrecta.
+ *  4. Hace scroll hasta la card del tema activo y aplica un pulso visual para indicar su posición.
+ *
+ * Se apoya en {@link getActiveThemeData_} para resolver el tema activo sin duplicar lógica,
+ * y en {@link scrollWhenVisible} para manejar el caso donde el panel aún no es visible.
+ *
+ * @remarks
+ * El `setTimeout(50ms)` tras el `tab.click()` le da tiempo al DOM para que
+ * `renderThemes_` (llamada desde el listener del tab) termine de pintar las cards
+ * antes de intentar hacer scroll. Si en el futuro `renderThemes_` expone su Promise,
+ * este defer puede reemplazarse por un await directo.
+ *
+ * @returns {void} No retorna nada; opera únicamente sobre el DOM.
+ */
+function initActiveThemeBadge_() {
+    const badge = document.getElementById('activeThemeBadge');
+    if (!badge) return;
+
+    badge.addEventListener('click', async () => {
+        // 1. Reutilizamos getActiveThemeData_ que ya maneja THEME_LIST + IndexedDB
+        const activeEntry = await getActiveThemeData_();
+        if (!activeEntry) return;
+
+        // 2. Determinar categoría según si el tema es protegido o no
+        const targetCategory = activeEntry.protected ? 'default' : 'custom';
+
+        // 3. Cambiar tab si es necesario
+        if (currentThemeCategory !== targetCategory) {
+            const targetTab = document.querySelector(
+                `#themes .qc__sub-tab[data-filter="${targetCategory}"]`
+            );
+            targetTab?.click();
+            // Esperar a que renderThemes_ termine de pintar las cards tras el click
+            await new Promise(r => setTimeout(r, 50));
+        }
+
+        // 4. Scroll + pulso visual para indicar la posición del tema activo
+        const activeCard = document.querySelector(`theme-card[value="${activeEntry.value}"]`);
+        if (activeCard) {
+            scrollWhenVisible(activeCard);
+            activeCard.classList.add('qc__highlight-pulse');
+            activeCard.addEventListener('animationend', () => {
+                activeCard.classList.remove('qc__highlight-pulse');
+            }, { once: true });
+        }
+    });
 }
 
 /**
@@ -84,7 +140,7 @@ function initThemeModal_() {
             
             // Forzar vista a 'custom' para ver el resultado
             currentThemeCategory = 'custom';
-            renderThemes_();
+            renderThemes_(true);
         } catch (err) {
             console.error(err);
             Toast.show("Error saving theme", "error");
@@ -113,55 +169,168 @@ async function fetchThemeDefinition_(themeText) {
 
 /**
  * Renderiza el grid de temas filtrado.
+ *
+ * @param {boolean} startModule_  - Indica si es la primera carga (inicialización del módulo).
+ * @param {string}  filter        - Texto para filtrar temas por nombre.
+ * @param {string}  category      - Categoría activa: 'default' | 'custom'.
  */
-export async function renderThemes_(filter = '', category = currentThemeCategory) {
+export async function renderThemes_(startModule_, filter = '', category = currentThemeCategory) {
     const grid = document.getElementById('themes-grid');
     const activeThemeBadge = document.getElementById('activeThemeBadge');
+
+    // Salida temprana: si no existe el contenedor no hay nada que renderizar
     if (!grid) return;
 
     try {
-        // 1. Obtener temas personalizados de IndexedDB y configuración de Sync
-        const [customThemes, result] = await Promise.all([
+        // 1. Obtener en paralelo los temas personalizados (IndexedDB) y el tema activo (chrome.storage.sync)
+        const [customThemes, syncResult] = await Promise.all([
             DB.getAll('themes'),
-            new Promise(res => chrome.storage.sync.get([G_PROPERTY_NAME], res))
+            chrome.storage.sync.get([G_PROPERTY_NAME])
         ]);
 
-        const activeTheme = result[G_PROPERTY_NAME]?.themes?.active || 'vs-dark';
+        // Tema activo guardado en sync storage (null si no existe)
+        const activeTheme = syncResult[G_PROPERTY_NAME]?.themes?.active ?? null;
 
-        // 2. Unificar y Filtrar
+        // 2. Lógica de inicialización: determinar qué tab/categoría mostrar al arrancar
+        if (startModule_) {
+            // Categoría por defecto según si hay temas personalizados
+            currentThemeCategory = customThemes?.length > 0 ? 'custom' : 'default';
+
+            // Si hay un tema activo, la tab activa debe ser la que lo contiene
+            if (activeTheme) {
+                const estaEnCustom   = customThemes.some(t => t.value === activeTheme);
+                const estaEnDefault  = THEME_LIST.some(t => t.value === activeTheme);
+                // OPTIMIZACIÓN: usamos .some() en lugar de .find() porque solo
+                // necesitamos saber si existe, no obtener el objeto.
+
+                if (estaEnCustom)        currentThemeCategory = 'custom';
+                else if (estaEnDefault)  currentThemeCategory = 'default';
+            }
+
+            category = currentThemeCategory;
+
+            // Actualizar clases CSS de los sub-tabs
+            document.querySelectorAll('#themes .qc__sub-tab').forEach(tab => {
+                tab.classList.toggle('qc__active', tab.dataset.filter === currentThemeCategory);
+            });
+        }
+
+        // 3. Unificar lista de temas y aplicar filtros
         const allThemes = [...THEME_LIST, ...customThemes];
-        const targetThemes = allThemes.filter(t => (category === 'default' ? t.protected : !t.protected));
-        const filtered = targetThemes.filter(t => t.text.toLowerCase().includes(filter.toLowerCase()));
 
-        // 3. Renderizar
-        grid.innerHTML = '';
-        filtered.forEach(theme => {
-            const card = document.createElement('theme-card');
-            card.setAttribute('name', theme.text);
-            card.setAttribute('value', theme.value);
-            card.setAttribute('colors', theme.colors);
-            if (theme.protected) card.setAttribute('protected', '');
-            if (theme.value === activeTheme) card.setAttribute('selected', '');
-            grid.appendChild(card);
+        // Filtra por categoría (protected = default) y luego por texto de búsqueda
+        const filterLower = filter.toLowerCase(); // OPTIMIZACIÓN: calcular una sola vez
+        const filtered = allThemes.filter(t => {
+            const matchCategory = category === 'default' ? t.protected : !t.protected;
+            const matchText     = t.text.toLowerCase().includes(filterLower);
+            return matchCategory && matchText;
         });
 
+        // 4. Renderizar cards en el grid
+        // OPTIMIZACIÓN: usar DocumentFragment evita reflows intermedios al agregar múltiples nodos
+        const fragment = document.createDocumentFragment();
+        filtered.forEach(theme => {
+            const card = document.createElement('theme-card');
+            card.setAttribute('name',   theme.text);
+            card.setAttribute('value',  theme.value);
+            card.setAttribute('colors', theme.colors);
+            if (theme.protected)           card.setAttribute('protected', '');
+            if (theme.value === activeTheme) card.setAttribute('selected', '');
+            fragment.appendChild(card);
+        });
+
+        grid.innerHTML = ''; // Limpiar antes de insertar el fragment
+        grid.appendChild(fragment);
+
+        // 5. Scroll hacia la card activa
+        if (activeTheme) {
+            const activeCard = grid.querySelector(`theme-card[value="${activeTheme}"]`);
+            if (activeCard) {
+                scrollWhenVisible(activeCard);
+            }
+        }
+
+        // 6. Actualizar el badge del tema activo
         if (activeThemeBadge) {
-            const activeThemeEntry = allThemes.find(theme => theme.value === activeTheme);
-            const colors = activeThemeEntry?.colors ? activeThemeEntry.colors.split(',') : ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b'];
+            const activeEntry  = allThemes.find(t => t.value === activeTheme);
+            const colors = activeEntry?.colors
+                ? activeEntry.colors.split(',').slice(0, 4)
+                : ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b'];
+
+            // OPTIMIZACIÓN: construir el HTML de colores con join en lugar de map+join separados
             activeThemeBadge.innerHTML = `
                 <div class="qc__badge-colors">
-                    ${colors.slice(0, 4).map(c => `<div class="qc__badge-color" style="background:${c}"></div>`).join('')}
+                    ${colors.map(c => `<div class="qc__badge-color" style="background:${c}"></div>`).join('')}
                 </div>
                 <span class="material-symbols-outlined qc__badge-icon">palette</span>
                 <div class="qc__badge-info">
                     <span class="qc__badge-label">Active Theme</span>
-                    <span class="qc__badge-name">${activeThemeEntry?.text || activeTheme}</span>
+                    <span class="qc__badge-name">${activeEntry?.text ?? activeTheme ?? ''}</span>
                 </div>
             `;
         }
+
     } catch (error) {
-        console.error("Error al renderizar temas:", error);
+        console.error('renderThemes_: error al renderizar temas:', error);
     }
+}
+
+/**
+ * Hace scroll hacia `element` solo cuando este sea visible en el layout.
+ *
+ * Maneja tres escenarios:
+ *  1. El elemento ya es visible → espera el próximo frame de pintura y scrollea.
+ *  2. El elemento está oculto pero su panel contenedor se vuelve visible →
+ *     usa un MutationObserver sobre el panel para detectar el cambio de
+ *     display/visibility y entonces scrollea. Esto resuelve el caso de carga
+ *     inicial donde el panel está con display:none.
+ *  3. Fallback: si no se encuentra un panel contenedor, usa IntersectionObserver
+ *     como antes.
+ *
+ * @param {Element} element - El elemento al que hacer scroll.
+ */
+function scrollWhenVisible(element) {
+    // Caso 1: ya visible, esperamos el próximo frame
+    if (element.offsetParent !== null) {
+        requestAnimationFrame(() => {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        return;
+    }
+
+    // Caso 2: panel oculto — buscamos el contenedor que tiene display:none
+    // y observamos cuando cambie (cuando el usuario abra el panel)
+    const hiddenPanel = element.closest('[style*="display: none"], [style*="display:none"], [hidden]')
+        ?? document.getElementById('themes'); // fallback al panel de temas
+
+    if (hiddenPanel) {
+        const mutationObserver = new MutationObserver((_, obs) => {
+            // Verificar que el elemento ya tiene layout visible
+            if (element.offsetParent !== null) {
+                obs.disconnect();
+                requestAnimationFrame(() => {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                });
+            }
+        });
+
+        mutationObserver.observe(hiddenPanel, {
+            attributes: true,                // detecta cambios en style, hidden, class
+            attributeFilter: ['style', 'hidden', 'class'],
+            subtree: false
+        });
+        return;
+    }
+
+    // Caso 3: fallback con IntersectionObserver
+    const intersectionObserver = new IntersectionObserver((entries, obs) => {
+        if (entries[0].isIntersecting) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            obs.disconnect();
+        }
+    }, { threshold: 0.1 });
+
+    intersectionObserver.observe(element);
 }
 
 /**
@@ -309,7 +478,7 @@ async function handleDuplicateTheme_(sourceValue) {
         Toast.show("Theme duplicated", "success");
 
         // Renderizamos la vista de temas personalizados para mostrar el nuevo tema
-        renderThemes_();
+        renderThemes_(true);
         
         // Redirigir a pestaña de personalizados
         const customTab = document.querySelector('#themes .qc__sub-tab[data-filter="custom"]');
@@ -340,7 +509,7 @@ async function handleDeleteTheme_(themeValue) {
             await DB.delete('themes', target.id);
             notifyEditors('themes');
             Toast.show("Theme deleted", "success");
-            renderThemes_();
+            renderThemes_(true);
         }
     } catch (err) {
         console.error("Error deleting theme:", err);
@@ -360,7 +529,7 @@ function initThemeNavigation_() {
             subTabs.forEach(t => t.classList.remove('qc__active'));
             tab.classList.add('qc__active');
             currentThemeCategory = tab.dataset.filter;
-            renderThemes_(document.getElementById('themeSearch').value|| '');
+            renderThemes_(false, document.getElementById('themeSearch').value|| '');
         });
     });
 }
@@ -370,5 +539,5 @@ function initThemeNavigation_() {
  */
 function initThemeSearch_() {
     // Listener para el buscador de temas
-    document.getElementById('themeSearch')?.addEventListener('input', (e) => renderThemes_(e.target.value));
+    document.getElementById('themeSearch')?.addEventListener('input', (e) => renderThemes_(false, e.target.value));
 }
