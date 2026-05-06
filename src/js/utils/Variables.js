@@ -7,17 +7,17 @@ export const DEFAULT_SETTINGS_OPTIONS = {
     'global-enable': true,
     'load-snippets': true,
     // Visuals & Layout
-    'showMinimap': true,
+    'showMinimap': false,
     'lineNumbers': 'on',
-    'wordWrap': false,
+    'wordWrap': true,
     'renderLineHighlight': 'line',
     'rulers': '',
     'occurrencesHighlight': 'singleFile',
     'renderWhitespace': 'none',
     // Font
-    'fontFamily': 'Consolas',
-    'fontSize': 14,
-    'lineHeight': 20,
+    'fontFamily': 'Roboto Mono',
+    'fontSize': 13,
+    'lineHeight': 19,
     // Code Assistance
     'bracketPairs': true,
     'quickSuggestions': true,

@@ -12,7 +12,7 @@ let currentSnippetFilter = 'custom'; // 'default' o 'custom'
  * Inicializa el módulo de Snippets: navegación, modal y carga inicial.
  */
 export function initSnippetModule() {
-    loadSnippets_();            // Renderizado inicial
+    loadSnippets_(true);            // Renderizado inicial
     initSnippetNavigation_();   // Tabs de Default/Custom y búsqueda
     initSnippetModal_();        // Eventos del modal de creación/edición
 }
@@ -26,7 +26,7 @@ function initSnippetNavigation_() {
 
     // Listener para el buscador de texto
     searchInput?.addEventListener('input', (e) => {
-        loadSnippets_(e.target.value, currentSnippetFilter);
+        loadSnippets_(false, e.target.value, currentSnippetFilter);
     });
 
     // Listener para cambio entre snippets de sistema y de usuario
@@ -36,7 +36,7 @@ function initSnippetNavigation_() {
             tab.classList.add('qc__active');
             
             currentSnippetFilter = tab.dataset.filter;
-            loadSnippets_(searchInput.value, currentSnippetFilter);
+            loadSnippets_(false, searchInput.value, currentSnippetFilter);
         });
     });
 }
@@ -44,11 +44,30 @@ function initSnippetNavigation_() {
 /**
  * Carga y renderiza la lista de snippets según el filtro y la categoría.
  */
-export async function loadSnippets_(query = '', category = currentSnippetFilter) {
+export async function loadSnippets_(startModule_, query = '', category = currentSnippetFilter) {
 
     // En lugar de chrome.storage, usamos nuestra API
     const userSnippets = await DB.getAll('snippets');
     const container = document.getElementById('snippets-list');
+
+    // Determinar pestaña por defecto según existan snippets personalizados
+    if(startModule_){
+        console.log('userSnippets', userSnippets.length);
+        const hasCustomSnippets = userSnippets && userSnippets.length > 0;
+        const defaultCategory = hasCustomSnippets ? 'custom' : 'default';
+        
+        // Aplicar clase active al tab correcto
+        const subTabs = document.querySelectorAll('#snippets .qc__sub-tab');
+        subTabs.forEach(tab => {
+            if (tab.dataset.filter === defaultCategory) {
+                tab.classList.add('qc__active');
+                currentSnippetFilter = defaultCategory;
+                category = defaultCategory;
+            } else {
+                tab.classList.remove('qc__active');
+            }
+        });
+    }
 
     if (!container) return;
     container.innerHTML = '';
@@ -131,7 +150,7 @@ async function saveSnippet_(newSnip, modalInstance) {
         modalInstance.close_();
 
         // Cargar nuevamente los snippets para actualizar la vista (podemos optimizar esto más adelante para solo actualizar el snippet modificado)
-        loadSnippets_();
+        loadSnippets_(true);
     } catch (err) {
         Toast.show("Error saving data", "error");
     }
@@ -146,7 +165,7 @@ async function deleteSnippet_(id) {
         await DB.delete('snippets', id);
 
         // Refrescar la interfaz
-        loadSnippets_();
+        loadSnippets_(true);
         notifyEditors('snippets');
         
         // Feedback al usuario

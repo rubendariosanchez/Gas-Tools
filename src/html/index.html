@@ -43,67 +43,40 @@
   <main class="qc__content-area">
     <div class="qc__page qc__active" id="options">
       <div class="qc__section-title">Extension</div>
-      <option-toggle id="global-enable" title="Enable extension" description="Activate or deactivate features globally"
-        checked></option-toggle>
-      <option-toggle id="load-snippets" title="Load default snippets" description="Load custom snippets at startup"
-        checked></option-toggle>
+      <option-toggle id="global-enable" title="Enable extension" description="Activate or deactivate features globally" checked></option-toggle>
+      <option-toggle id="load-snippets" title="Load default snippets" description="Load custom snippets at startup" checked></option-toggle>
 
       <div class="qc__section-title">Font</div>
-      <option-select id="fontFamily" title="Font family" description="Editor font family"
-        options="Consolas:Consolas,Monaco:Monaco,Source Code Pro:Source Code Pro,Fira Code:Fira Code,Menlo:Menlo"
-        value="Consolas"></option-select>
-      <option-select id="fontSize" title="Font size" description="Editor font size"
-        options="10:10,12:12,14:14,16:16,18:18,20:20,22:22,24:24"
-        value="14"></option-select>
-      <option-select id="lineHeight" title="Line height" description="Line spacing"
-        options="14:14,16:16,18:18,20:20,22:22,24:24,26:26,28:28,30:30,32:32,34:34,36:36"
-        value="20"></option-select>
+      <option-select id="fontFamily" title="Font family" description="Editor font family" options="JetBrains Mono:JetBrains Mono,Fira Code:Fira Code,Source Code Pro:Source Code Pro,Roboto Mono:Roboto Mono,Geist Mono:Geist Mono,IBM Plex Mono:IBM Plex Mono,Space Mono:Space Mono,DM Mono:DM Mono,Azeret Mono:Azeret Mono,Inconsolata:Inconsolata,Anonymous Pro:Anonymous Pro,Cousine:Cousine,PT Mono:PT Mono,Noto Sans Mono:Noto Sans Mono,Share Tech Mono:Share Tech Mono,Martian Mono:Martian Mono,Nova Mono:Nova Mono,VT323:VT323,Consolas:Consolas,Monaco:Monaco,Menlo:Menlo" value="Roboto Mono"></option-select>
+      <option-select id="fontSize" title="Font size" description="Editor font size" options="10:10,11:11,12:12,13:13,14:14,15:15,16:16,17:17,18:18,19:19,20:20,21:21,22:22,23:23,24:24,25:25,26:26,28:28,30:30,32:32,34:34,36:36,40:40,48:48" value="13"></option-select>
+      <option-select id="lineHeight" title="Line height" description="Line spacing" options="12:12,13:13,14:14,15:15,16:16,17:17,18:18,19:19,20:20,21:21,22:22,23:23,24:24,25:25,26:26,27:27,28:28,29:29,30:30,32:32,34:34,36:36,40:40,48:48" value="19"></option-select>
 
       <div class="qc__section-title">Visuals & Layout</div>
-      <option-toggle id="showMinimap" title="Show minimap"
-        description="Display a high-level overview of your code on the side" checked></option-toggle>
-      <option-toggle id="lineNumbers" title="Line numbers" description="Show line numbers on the left margin"
-        checked></option-toggle>
-      <option-toggle id="wordWrap" title="Word wrap"
-        description="Wrap long lines to fit within the editor width"></option-toggle>
-      <option-toggle id="renderLineHighlight" title="Line highlight" description="Highlight the current line"
-        checked></option-toggle>
+      <option-toggle id="showMinimap" title="Show minimap" description="Display a high-level overview of your code on the side" checked></option-toggle>
+      <option-toggle id="lineNumbers" title="Line numbers" description="Show line numbers on the left margin" checked></option-toggle>
+      <option-toggle id="wordWrap" title="Word wrap" description="Wrap long lines to fit within the editor width"></option-toggle>
+      <option-toggle id="renderLineHighlight" title="Line highlight" description="Highlight the current line" checked></option-toggle>
       <option-toggle id="rulers" title="Rulers" description="Show vertical rulers"></option-toggle>
-      <option-toggle id="occurrencesHighlight" title="Occurrences highlight" description="Highlight variable occurrences"
-        checked></option-toggle>
-      <option-toggle id="renderWhitespace" title="Show whitespace"
-        description="Show whitespace characters"></option-toggle>
+      <option-toggle id="occurrencesHighlight" title="Occurrences highlight" description="Highlight variable occurrences" checked></option-toggle>
+      <option-toggle id="renderWhitespace" title="Show whitespace" description="Show whitespace characters"></option-toggle>
 
       <div class="qc__section-title">Code Assistance</div>
-      <option-toggle id="bracketPairs" title="Bracket pair colorization"
-        description="Highlight matching brackets with unique colors" checked></option-toggle>
-      <option-toggle id="quickSuggestions" title="Quick suggestions" description="Show suggestions while typing"
-        checked></option-toggle>
-      <option-toggle id="autoClosingBrackets" title="Auto closing brackets"
-        description="Automatically close brackets" checked></option-toggle>
-      <option-toggle id="guides-indentation" title="Indentation guides"
-        description="Show indentation guide lines" checked></option-toggle>
+      <option-toggle id="bracketPairs" title="Bracket pair colorization" description="Highlight matching brackets with unique colors" checked></option-toggle>
+      <option-toggle id="quickSuggestions" title="Quick suggestions" description="Show suggestions while typing" checked></option-toggle>
+      <option-toggle id="autoClosingBrackets" title="Auto closing brackets" description="Automatically close brackets" checked></option-toggle>
+      <option-toggle id="guides-indentation" title="Indentation guides" description="Show indentation guide lines" checked></option-toggle>
 
       <div class="qc__section-title">Navigation</div>
-      <option-toggle id="folding" title="Code folding" description="Allow collapsing code blocks"
-        checked></option-toggle>
+      <option-toggle id="folding" title="Code folding" description="Allow collapsing code blocks" checked></option-toggle>
 
       <div class="qc__section-title">Scrolling</div>
-      <option-toggle id="smoothScrolling" title="Smooth scrolling"
-        description="Animate scrolling for a more fluid experience" checked></option-toggle>
-      <option-toggle id="scrollBeyondLastLine" title="Scroll beyond last line"
-        description="Allows scrolling further than the final line of code"></option-toggle>
+      <option-toggle id="smoothScrolling" title="Smooth scrolling" description="Animate scrolling for a more fluid experience" checked></option-toggle>
+      <option-toggle id="scrollBeyondLastLine" title="Scroll beyond last line" description="Allows scrolling further than the final line of code"></option-toggle>
 
       <div class="qc__section-title">Editor Behavior</div>
-      <option-select id="tabSize" title="Tab size" description="Indentation size"
-        options="2:2,4:4,6:6,8:8"
-        value="2"></option-select>
-      <option-select id="cursorStyle" title="Cursor style" description="Cursor appearance"
-        options="line:Line,block:Block"
-        value="line"></option-select>
-      <option-select id="cursorBlinking" title="Cursor blinking" description="Cursor blink animation"
-        options="blink:Blink,smooth:Smooth,phase:Phase,hidden:Hidden"
-        value="blink"></option-select>
+      <option-select id="tabSize" title="Tab size" description="Indentation size" options="2:2,4:4,6:6,8:8" value="2"></option-select>
+      <option-select id="cursorStyle" title="Cursor style" description="Cursor appearance" options="line:Line,block:Block,underline:Underline,line-thin:Line thin,block-outline:Block outline,underline-thin:Underline thin" value="line"></option-select>
+      <option-select id="cursorBlinking" title="Cursor blinking" description="Cursor blink animation" options="blink:Blink,smooth:Smooth,phase:Phase,hidden:Hidden" value="blink"></option-select>
 
     </div>
 
@@ -119,7 +92,7 @@
 
       <div class="qc__sub-tabs">
         <div class="qc__sub-tab" data-filter="default">Default</div>
-        <div class="qc__sub-tab qc__active" data-filter="custom">Custom</div>
+        <div class="qc__sub-tab" data-filter="custom">Custom</div>
 
         <button id="addSnippetBtn" class="qc__add-inline-btn qc__btn-add-item" title="Add Snippet">
           <span class="material-symbols-outlined">add</span>
@@ -142,7 +115,7 @@
         <div id="activeThemeBadge" class="qc__active-theme-badge">Current theme: --</div>
         <div class="qc__sub-tabs">
           <div class="qc__sub-tab" data-filter="default">Default</div>
-          <div class="qc__sub-tab qc__active" data-filter="custom">Custom</div>
+          <div class="qc__sub-tab" data-filter="custom">Custom</div>
 
           <button id="addThemeBtn" class="qc__add-inline-btn qc__btn-add-item" title="Add Snippet">
             <span class="material-symbols-outlined">add</span>

@@ -229,6 +229,9 @@ class GasCustomEditor {
 
     // Opciones de solo lectura (HTML de botones, URL de temas, referencia del editor)
     this.options = options;
+    // ───────────────── Font ─────────────────────────────
+    // Contador para generar IDs únicos en las peticiones a Google Fonts
+    this._fontRequestId = 0;
 
     // ── Monaco ───────────────────────────────────────────────────
     this.editor = null;
@@ -768,7 +771,7 @@ class GasCustomEditor {
       console.warn("[GASTools] Editor Monaco no disponible aún");
       return;
     }
-
+    console.log("[GASTools] Applying settings:", settings);
     // Tabla de handlers: cada clave mapea a la llamada updateOptions correspondiente
     const SETTINGS_MAP = {
       // Visuales & Layout
@@ -780,7 +783,25 @@ class GasCustomEditor {
       'occurrencesHighlight': (val) => this.editor.updateOptions({ occurrencesHighlight: val ? 'singleFile' : 'off' }),
       'renderWhitespace': (val) => this.editor.updateOptions({ renderWhitespace: val ? 'selection' : 'none' }),
       // Font
-      'fontFamily': (val) => this.editor.updateOptions({ fontFamily: val }),
+      // 'fontFamily': (val) => this.editor.updateOptions({ fontFamily: val }),
+      'fontFamily': (val) => {
+
+        // Incrementamos el ID de request para invalidar cualquier promesa anterior en vuelo
+        const requestId = ++this._fontRequestId;
+
+        // Aplicar inmediatamente para fuentes de sistema (sin latencia)
+        this.editor.updateOptions({ fontFamily: val });
+
+        this._loadGoogleFont_(val).then(() => {
+          // Si llegó una selección más nueva mientras cargábamos, descartamos esta
+          if (requestId !== this._fontRequestId) {
+            console.log(`[GASTools] Fuente "${val}" descartada — hay una selección más reciente`);
+            return;
+          }
+          console.log(`[GASTools] Applying font family: ${val}`);
+          this.editor.updateOptions({ fontFamily: val });
+        });
+      },
       'fontSize': (val) => this.editor.updateOptions({ fontSize: parseInt(val, 10) }),
       'lineHeight': (val) => this.editor.updateOptions({ lineHeight: parseInt(val, 10) }),
       // Code Assistance
@@ -794,7 +815,13 @@ class GasCustomEditor {
       'smoothScrolling': (val) => this.editor.updateOptions({ smoothScrolling: val }),
       'scrollBeyondLastLine': (val) => this.editor.updateOptions({ scrollBeyondLastLine: val }),
       // Editor Behavior
-      'tabSize': (val) => this.editor.updateOptions({ tabSize: parseInt(val, 10) }),
+      'tabSize': (val) => {
+        const size = parseInt(val, 10) || 2;
+        const model_ = this.editor.getModel();
+        if (model_) {
+          model_.updateOptions({ tabSize: size, indentSize: size, insertSpaces: true });
+        }
+      },
       'cursorStyle': (val) => this.editor.updateOptions({ cursorStyle: val === 'block' ? 2 : 1 }),
       'cursorBlinking': (val) => this.editor.updateOptions({ cursorBlinking: val }),
     };
@@ -811,6 +838,54 @@ class GasCustomEditor {
           console.warn(`[GASTools] No se pudo aplicar "${key}":`, err);
         }
       }
+    });
+  }
+
+  /**
+   * Carga una fuente desde Google Fonts solo si el browser no la tiene ya disponible.
+   * Verifica con document.fonts.check() antes de inyectar el <link> para evitar
+   * requests redundantes (fuentes de sistema o ya cargadas previamente).
+   *
+   * @param {string} fontName - Nombre exacto de la fuente (ej: "JetBrains Mono").
+   * @returns {Promise<void>}
+   * @private
+   */
+  async _loadGoogleFont_(fontName) {
+    // Fuentes del sistema que el browser ya tiene sin necesitar Google Fonts
+    const SYSTEM_FONTS = ['Consolas', 'Monaco', 'Menlo', 'Courier New', 'Courier', 'monospace'];
+    if (SYSTEM_FONTS.includes(fontName)) return;
+
+    // ID de la fuente cargada
+    const fontId = `qc-font-${fontName.replace(/\s+/g, '-').toLowerCase()}`;
+
+    // Evitar inyectar el mismo <link> dos veces aunque la fuente aún no haya cargado
+    if (document.getElementById(fontId)) {
+      // El link ya existe pero la fuente puede estar en flight: esperamos a que esté lista
+      await document.fonts.ready;
+      return;
+    }
+
+    // URL de la fuente en Google Fonts
+    const href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontName)}:ital,wght@0,400;0,500;0,700;1,400&display=swap`;
+
+    // Inyectar <link>
+    return new Promise((resolve) => {
+      const link = document.createElement('link');
+      link.id = fontId;
+      link.rel = 'stylesheet';
+      link.href = href;
+      link.onload = async () => {
+        // Esperamos a que el FontFaceSet confirme que la fuente está activa
+        await document.fonts.ready;
+        const loaded = document.fonts.check(`12px "${fontName}"`);
+        console.log(`[GASTools] Fuente "${fontName}" ${loaded ? 'cargada ✓' : 'no disponible (fallback)'}`);
+        resolve();
+      };
+      link.onerror = () => {
+        console.warn(`[GASTools] Error cargando fuente desde Google Fonts: ${fontName}`);
+        resolve(); // Monaco usará el fallback, pero no bloqueamos
+      };
+      document.head.appendChild(link);
     });
   }
 
