@@ -136,6 +136,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'LLM_GET_CONFIG') {
     // Lee la configuración LLM (proveedor, modelo, API key, system prompt) desde chrome.storage.sync
     chrome.storage.sync.get(['gasToolsLlmConfig'], (result) => {
+      console.log('[BG] LLM_GET_CONFIG received, result:', result ? JSON.stringify(result) : 'undefined');
       // Devuelve null si aún no hay configuración guardada
       sendResponse(result?.gasToolsLlmConfig || null);
     });
@@ -144,6 +145,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // ── LLM_SAVE_CONFIG ───────────────────────────────────────────────
   if (msg.type === 'LLM_SAVE_CONFIG') {
+    console.log('[BG] LLM_SAVE_CONFIG received, payload:', msg.payload ? JSON.stringify(msg.payload).slice(0, 200) : 'undefined');
     // Persiste el payload de configuración LLM en chrome.storage.sync
     chrome.storage.sync.set({ gasToolsLlmConfig: msg.payload || {} }, () => {
       // Informa si el guardado fue exitoso comprobando lastError
@@ -199,5 +201,9 @@ chrome.runtime.onInstalled.addListener(() => {
       // Muestra el ícono de la extensión en la barra del navegador al cumplirse la condición
       actions: [new chrome.declarativeContent.ShowPageAction()],
     }]);
+  });
+
+  chrome.sidePanel.setPanelBehavior({
+    openPanelOnActionClick: true
   });
 });

@@ -298,6 +298,9 @@ async function _callChatLLM(apiKey, model, messages, temperature) {
  * @throws {Error} Si la respuesta no contiene contenido o el request falla.
  */
 async function _callNvidia(apiKey, model, messages, temperature) {
+  console.log("apiKey", apiKey)
+  console.log("model", model)
+  console.log("messages", messages)
   // Tabla de alias cortos hacia los IDs completos que espera la API de NVIDIA
   const MODEL_MAP = {
     'deepseek-v4-pro': 'deepseek-ai/deepseek-v4-pro',
@@ -322,9 +325,10 @@ async function _callNvidia(apiKey, model, messages, temperature) {
       stream: false,
     }),
   });
-
+  console.log("resp", resp)
   // Intenta parsear el JSON aunque la respuesta sea un error HTTP
   const data = await resp.json().catch(() => null);
+  console.log("data", data)
 
   if (!resp.ok) {
     // Prioriza el mensaje de error del body sobre el status genérico

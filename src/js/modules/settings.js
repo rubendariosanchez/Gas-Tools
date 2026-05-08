@@ -4,6 +4,7 @@ import { ConfirmDialog } from '../utils/ConfirmDialog.js';
 import { updateAboutStats_ } from './ui.js';
 import { DB } from '../utils/Storage.js';
 import { notifyEditors } from '../utils/Notify.js';
+import { syncLastUpdated } from '../utils/Functions.js';
 
 /**
  * Inicializa el módulo de configuración: carga datos, bindea botones y auto-guardado.
@@ -55,23 +56,6 @@ function initAutoSave_() {
             Toast.show('Error saving setting', 'error');
         }
     });
-
-    // Listener para option-range
-    optionsContainer.addEventListener('range', async (e) => {
-        const rangeEl = e.target;
-        const optionId = rangeEl.id;
-        const value = e.detail.value;
-
-        console.log(`[Settings] Auto-saving range: ${optionId} = ${value}`);
-
-        try {
-            await saveSingleOption_(optionId, value);
-            Toast.show('Setting saved', 'success', 800);
-        } catch (error) {
-            console.error('[Settings] Auto-save error:', error);
-            Toast.show('Error saving setting', 'error');
-        }
-    });
 }
 
 /**
@@ -82,11 +66,13 @@ async function saveSingleOption_(optionId, value) {
     const currentData = await DB.get('settings', G_PROPERTY_NAME) || {};
     const currentOptions = currentData?.options || {};
 
+    // Se actualiza la opción seleccionada
     const updatedOptions = {
         ...currentOptions,
         [optionId]: value
     };
 
+    // Se construye el payload
     const payload = {
         id: G_PROPERTY_NAME,
         ...currentData,
@@ -94,8 +80,12 @@ async function saveSingleOption_(optionId, value) {
         lastUpdated: new Date().toISOString()
     };
 
+    // Guardamos en IndexedDB
     await DB.set('settings', payload);
     notifyEditors('settings');
+
+    // Actualizamos la fecha de última actualización
+    await syncLastUpdated();
 }
 
 /**
@@ -117,8 +107,8 @@ async function loadQualityCodeSettings_() {
 
         const settings = settingsData?.options || {};
 
-        const optionIds = [
-            'global-enable', 'load-snippets',
+const optionIds = [
+            'global-enable', 'load-snippets', 'ai-autocomplete',
             // Visuals & Layout
             'showMinimap', 'lineNumbers', 'wordWrap', 'renderLineHighlight',
             'rulers', 'occurrencesHighlight', 'renderWhitespace',
@@ -166,63 +156,6 @@ function initActionButtons_() {
 }
 
 /**
- * Permite guardar las opciones actuales en IndexedDB.
- */
-async function saveSettings_() {
-    const saveBtn = document.getElementById('saveBtn');
-    const optionElements = document.querySelectorAll('option-toggle');
-    const optionsData = {};
-
-    // Recopilar estado de cada opción
-    optionElements.forEach(el => {
-        const isChecked = el.shadowRoot.querySelector('input').checked;
-        optionsData[el.id] = isChecked;
-    });
-
-    try {
-        // Obtenemos datos actuales para no sobrescribir otras propiedades
-        const currentData = await DB.get('settings', G_PROPERTY_NAME) || {};
-
-        // Construimos el payload incluyendo el id (clave primaria)
-        const payload = {
-            id: G_PROPERTY_NAME,
-            ...currentData,
-            options: optionsData,
-            lastUpdated: new Date().toISOString()
-        };
-
-        console.log("Saving settings:", payload);
-
-        // Guardamos en IndexedDB
-        await DB.set('settings', payload);
-
-        // El AI Context ahora se guarda con el botón dedicado en la pestaña AI Context
-
-        // Notificar a los editores sobre el cambio de configuración
-        notifyEditors('settings');
-
-        // Actualizar estadísticas en la pestaña "About" si está abierta
-        updateAboutStats_();
-
-        // Feedback visual
-        const originalText = saveBtn.innerText;
-        saveBtn.innerText = '✓ Saved';
-        saveBtn.classList.add('qc__btn--success');
-
-        setTimeout(() => {
-            saveBtn.innerText = originalText;
-            saveBtn.classList.remove('qc__btn--success');
-        }, 1500);
-
-        Toast.show('Settings saved', 'success');
-
-    } catch (error) {
-        console.error('Error saving settings:', error);
-        Toast.show('Error saving settings', 'error');
-    }
-}
-
-/**
  * Permite restaurar las opciones a valores por defecto.
  */
 async function resetSettings_() {
@@ -241,6 +174,9 @@ async function resetSettings_() {
 
             // Guardamos en IndexedDB
             await DB.set('settings', payload);
+
+            // Actualizamos la fecha de última actualización
+            await syncLastUpdated();
 
             // Notificar a los editores sobre el cambio de configuración para que puedan reaccionar
             notifyEditors('settings');

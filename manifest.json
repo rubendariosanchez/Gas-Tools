@@ -55,7 +55,8 @@
   },
   "permissions": [
     "declarativeContent",
-    "storage"
+    "storage",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://script.google.com/home/projects/*/edit*",
@@ -63,6 +64,7 @@
     "https://api.anthropic.com/*",
     "https://generativelanguage.googleapis.com/*",
     "https://api.deepseek.com/*",
-    "https://apps.abacus.ai/*"
+    "https://apps.abacus.ai/*",
+    "https://integrate.api.nvidia.com/*"
   ]
 }

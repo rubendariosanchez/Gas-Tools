@@ -62,7 +62,6 @@ class GasSearchPanel extends HTMLElement {
      * @type {ReturnType<typeof setTimeout>|null}
      */
     this._debounceTimer = null;
-    this._splitterState = null;
     // Binds explícitos necesarios para poder remover los mismos listeners
     // que se registraron (addEventListener y removeEventListener deben
     // recibir la misma referencia de función).
@@ -72,8 +71,6 @@ class GasSearchPanel extends HTMLElement {
     this._onDragEnd           = this._onDragEnd.bind(this);
     this._onResizeMove        = this._onResizeMove.bind(this);
     this._onResizeEnd         = this._onResizeEnd.bind(this);
-    this._onSplitterMove      = this._onSplitterMove.bind(this);
-    this._onSplitterEnd       = this._onSplitterEnd.bind(this);
   }
   connectedCallback() {
     this.render();
@@ -87,8 +84,6 @@ class GasSearchPanel extends HTMLElement {
     window.removeEventListener('mouseup', this._onDragEnd);
     window.removeEventListener('mousemove', this._onResizeMove);
     window.removeEventListener('mouseup', this._onResizeEnd);
-    window.removeEventListener('mousemove', this._onSplitterMove);
-    window.removeEventListener('mouseup', this._onSplitterEnd);
     clearTimeout(this._debounceTimer);
   }
   /**
@@ -196,11 +191,12 @@ class GasSearchPanel extends HTMLElement {
           left: auto;
           transform: none;
           z-index: 2147483640;
-          width: min(400px, calc(100vw - 28px));
-          height: min(440px, calc(100vh - 120px));
+          /* ── Ancho reducido: de 780px → 480px, mínimo de 360px ── */
+          width: min(480px, calc(100vw - 28px));
+          height: min(580px, calc(100vh - 120px));
           min-width: 360px;
           min-height: 280px;
-          max-width: 700px;
+          max-width: calc(100vw - 18px);
           max-height: calc(100vh - 84px);
           background: #ffffff;
           color: #202124;
@@ -318,29 +314,15 @@ class GasSearchPanel extends HTMLElement {
         }
         /* ── Layout de dos columnas: archivos | resultados ── */
         .gc__content {
-          display: flex;
+          display: grid;
+          /* Columna izquierda más estrecha para ganar espacio en resultados */
+          grid-template-columns: 140px 1fr;
           min-height: 0;
           height: 100%;
         }
-        /* ── Divisor arrastrable entre los dos paneles ── */
-        .gc__splitter {
-          width: 4px;
-          flex: 0 0 4px;
-          background: #eceff1;
-          cursor: col-resize;
-          transition: background .15s;
-        }
-        .gc__splitter:hover,
-        .gc__splitter.gc__splitterActive { background: #a8c7fa; }
-        :host([theme="dark"]) .gc__splitter { background: #3c4043; }
-        :host([theme="dark"]) .gc__splitter:hover,
-        :host([theme="dark"]) .gc__splitter.gc__splitterActive { background: #4b6286; }
         /* ── Panel izquierdo: lista de archivos con contador ── */
         .gc__models {
-          flex: 0 0 140px;
-          min-width: 80px;
-          max-width: 60%;
-          border-right: none; /* el splitter hace de separador */
+          border-right: 1px solid #eceff1;
           overflow: auto;
           background: #fff;
           padding: 5px;
@@ -417,8 +399,6 @@ class GasSearchPanel extends HTMLElement {
         }
         /* ── Panel derecho: resultados del archivo seleccionado ── */
         .gc__results {
-          flex: 1;
-          min-width: 0;
           overflow: auto;
           background: #f8f9fa;
           padding: 6px;
@@ -489,23 +469,23 @@ class GasSearchPanel extends HTMLElement {
           font-family: "Roboto Mono", Consolas, monospace;
           font-size: 10.5px;
         }
-        /* ── Handle de redimensionamiento en la esquina inferior izquierda ── */
+        /* ── Handle de redimensionamiento en la esquina inferior derecha ── */
         .gc__resizeHandle {
           position: absolute;
-          left: 0;
+          right: 0;
           bottom: 0;
           width: 16px;
           height: 16px;
-          cursor: nesw-resize;
+          cursor: nwse-resize;
           background:
-            linear-gradient(225deg, transparent 0 45%, rgba(95,99,104,.45) 45% 55%, transparent 55% 100%);
+            linear-gradient(135deg, transparent 0 45%, rgba(95,99,104,.45) 45% 55%, transparent 55% 100%);
         }
       </style>
       <div class="gc__shell">
         <div class="gc__header">
           <div class="gc__icon">🔎</div>
           <input id="gc__searchInput" class="gc__input" type="text" autocomplete="off"
-                 placeholder="Search all files (min 1 chars)">
+                 placeholder="Search all files (min 3 chars)">
           <button id="gc__closeBtn" class="gc__close" title="Close (Esc)">×</button>
         </div>
         <div class="gc__meta">
@@ -516,7 +496,6 @@ class GasSearchPanel extends HTMLElement {
           <div id="gc__modelsContainer" class="gc__models">
             <div class="gc__empty">No files</div>
           </div>
-          <div id="gc__splitter" class="gc__splitter"></div>
           <div id="gc__resultsContainer" class="gc__results">
             <div class="gc__empty">No results yet.</div>
           </div>
@@ -533,7 +512,6 @@ class GasSearchPanel extends HTMLElement {
     const closeBtn     = this.shadowRoot.getElementById('gc__closeBtn');
     const header       = this.shadowRoot.querySelector('.gc__header');
     const resizeHandle = this.shadowRoot.getElementById('gc__resizeHandle');
-    const splitter     = this.shadowRoot.getElementById('gc__splitter');
     closeBtn?.addEventListener('click', () => this.close());
     input?.addEventListener('input', (e) => {
       const value = e.target.value || '';
@@ -555,12 +533,6 @@ class GasSearchPanel extends HTMLElement {
       evt.preventDefault();
       evt.stopPropagation();
       this._startResize(evt);
-    });
-    // ── Splitter interno: ajusta el ancho relativo de las dos columnas ──
-    splitter?.addEventListener('mousedown', (evt) => {
-      evt.preventDefault();
-      evt.stopPropagation();
-      this._startSplitterDrag(evt);
     });
     window.addEventListener('keydown', this._onWindowKeyDown);
     document.addEventListener('mousedown', this._onDocumentMouseDown, true);
@@ -586,19 +558,12 @@ class GasSearchPanel extends HTMLElement {
    */
   _repositionPanel(forceCenter = false) {
     if (this._positionInitialized && !forceCenter) return;
-    // Posición
     this.style.right     = '14px';
     this.style.left      = 'auto';
     this.style.top       = '102px';
     this.style.transform = 'none';
-    // Tamaño: volvemos siempre al default al abrir
-    this.style.width     = '';
-    this.style.height    = '';
-    this.style.maxWidth  = '';
     this._positionInitialized = true;
-    // Resetear también el ancho de la columna izquierda al default
-    const models = this.shadowRoot?.querySelector('.gc__models');
-    if (models) models.style.flex = '0 0 140px';
+    this.style.maxWidth      = '480px';
   }
   /**
    * Inicia el drag manual.
@@ -641,11 +606,6 @@ class GasSearchPanel extends HTMLElement {
    * @param {MouseEvent} evt
    */
   _startResize(evt) {
-    const rect = this.getBoundingClientRect();
-    // Fijamos right en píxeles para que el lado derecho quede anclado mientras
-    // el usuario arrastra desde la esquina inferior izquierda.
-    this.style.right = `${window.innerWidth - rect.right}px`;
-    this.style.left  = 'auto';
     this._resizeState = {
       startX: evt.clientX,
       startY: evt.clientY,
@@ -657,8 +617,6 @@ class GasSearchPanel extends HTMLElement {
   }
   /**
    * Actualiza el tamaño durante el resize.
-   * Como el handle está abajo-izquierda, el ancho crece hacia la izquierda
-   * (deltaX negativo = panel más ancho) y la altura crece hacia abajo.
    * @param {MouseEvent} evt
    */
   _onResizeMove(evt) {
@@ -666,8 +624,7 @@ class GasSearchPanel extends HTMLElement {
     const minW = 360, minH = 280;
     const maxW = window.innerWidth  - 18;
     const maxH = window.innerHeight - 84;
-    // Ancho: arrastrar a la izquierda (deltaX < 0) lo agranda
-    const nextW = this._resizeState.startW - (evt.clientX - this._resizeState.startX);
+    const nextW = this._resizeState.startW + (evt.clientX - this._resizeState.startX);
     const nextH = this._resizeState.startH + (evt.clientY - this._resizeState.startY);
     this.style.width  = `${Math.max(minW, Math.min(nextW, maxW))}px`;
     this.style.height = `${Math.max(minH, Math.min(nextH, maxH))}px`;
@@ -714,14 +671,14 @@ class GasSearchPanel extends HTMLElement {
       DomUtils.setHTML(resultsContainer, `<div class="gc__empty">No results yet.</div>`);
       return;
     }
-    if (query.length < 1) {
+    if (query.length < 3) {
       this._flatResults    = [];
       this._activeIndex    = -1;
       this._groupedResults = {};
       this._currentFileKey = '';
       summary.textContent = 'Query too short';
       DomUtils.setHTML(modelsContainer,  `<div class="gc__empty">No files</div>`);
-      DomUtils.setHTML(resultsContainer, `<div class="gc__empty">Enter at least 1 characters.</div>`);
+      DomUtils.setHTML(resultsContainer, `<div class="gc__empty">Enter at least 3 characters.</div>`);
       return;
     }
     const grouped  = this._findAllMatches(query);
@@ -925,46 +882,6 @@ class GasSearchPanel extends HTMLElement {
    */
   _escapeAttr(value) {
     return this._escapeHtml(value).replace(/"/g, '&quot;');
-  }
-  /**
-   * Inicia el drag del splitter interno entre las dos columnas.
-   * Captura el ancho actual del panel de modelos como punto de partida.
-   * @param {MouseEvent} evt
-   */
-  _startSplitterDrag(evt) {
-    const models = this.shadowRoot.querySelector('.gc__models');
-    const splitter = this.shadowRoot.getElementById('gc__splitter');
-    if (!models) return;
-    this._splitterState = {
-      startX   : evt.clientX,
-      startW   : models.offsetWidth,
-      totalW   : this.offsetWidth,
-    };
-    splitter?.classList.add('gc__splitterActive');
-    window.addEventListener('mousemove', this._onSplitterMove);
-    window.addEventListener('mouseup', this._onSplitterEnd);
-  }
-  /**
-   * Ajusta el ancho de la columna izquierda durante el drag del splitter.
-   * @param {MouseEvent} evt
-   */
-  _onSplitterMove(evt) {
-    if (!this._splitterState) return;
-    const models  = this.shadowRoot.querySelector('.gc__models');
-    if (!models) return;
-    const delta   = evt.clientX - this._splitterState.startX;
-    const nextW   = this._splitterState.startW + delta;
-    const minLeft = 80;
-    const maxLeft = this._splitterState.totalW * 0.6;
-    models.style.flex = `0 0 ${Math.max(minLeft, Math.min(nextW, maxLeft))}px`;
-  }
-  /** Finaliza el drag del splitter. */
-  _onSplitterEnd() {
-    this._splitterState = null;
-    const splitter = this.shadowRoot.getElementById('gc__splitter');
-    splitter?.classList.remove('gc__splitterActive');
-    window.removeEventListener('mousemove', this._onSplitterMove);
-    window.removeEventListener('mouseup', this._onSplitterEnd);
   }
 }
 if (!customElements.get('gas-search-panel')) {

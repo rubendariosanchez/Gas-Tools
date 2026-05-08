@@ -6,6 +6,7 @@ export const DEFAULT_SETTINGS_OPTIONS = {
     // Extension
     'global-enable': true,
     'load-snippets': true,
+    'ai-autocomplete': true,
     // Visuals & Layout
     'showMinimap': false,
     'lineNumbers': 'on',

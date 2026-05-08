@@ -47,9 +47,11 @@ function injectScripts() {
   // Orden crítico: domUtils debe estar disponible antes que los demás módulos
   const scriptPaths = [
     'extension/js/domUtils.js',
+    'extension/js/gas-ai-autocomplete.js',
     'extension/js/gasTools.js',
     'extension/js/components/gas-search-panel.js',
     'extension/js/components/gas-chat-panel.js',
+    'extension/js/components/gas-file-tree-panel.js',
   ];
 
   const loadPromises = scriptPaths.map(path => new Promise((resolve, reject) => {
@@ -350,7 +352,7 @@ document.addEventListener('GAS_LLM_REQUEST', (e) => {
 
   // Separa el requestId del resto del payload para poder correlacionar la respuesta
   const { requestId, ...rest } = payload || {};
-
+  console.log('[MainFunctions] GAS_LLM_REQUEST recibido:', payload);
   _safeSendMessage({ type: 'LLM_CHAT_REQUEST', payload: rest }, (response) => {
     const ok = response?.ok;
     document.dispatchEvent(new CustomEvent('GAS_LLM_RESPONSE', {
@@ -393,6 +395,7 @@ document.addEventListener('GAS_LLM_SAVE_CONFIG', (e) => {
   let payload;
   // Descarta el evento si el detalle no es JSON válido
   try { payload = JSON.parse(e.detail); } catch (_) { return; }
+  console.log('[MainFunctions] GAS_LLM_SAVE_CONFIG recibido:', payload);
   _safeSendMessage({ type: 'LLM_SAVE_CONFIG', payload });
 });
 

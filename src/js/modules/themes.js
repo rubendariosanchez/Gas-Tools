@@ -4,6 +4,7 @@ import { Toast } from '../utils/Toast.js';
 import { ConfirmDialog } from '../utils/ConfirmDialog.js';
 import { DB } from '../utils/Storage.js';
 import { notifyEditors } from '../utils/Notify.js';
+import { syncLastUpdated } from '../utils/Functions.js';
 
 // Estado local del módulo para filtros
 let currentThemeCategory = 'custom'; // 'default' o 'custom'
@@ -135,12 +136,16 @@ function initThemeModal_() {
 
             // Guardamos en IndexedDB usando el método set, que hará upsert (insertar o actualizar según exista o no el ID)
             await DB.set('themes', themeData);
+            await syncLastUpdated();
             notifyEditors('themes');
             Toast.show("Theme saved successfully", "success");
             
-            // Forzar vista a 'custom' para ver el resultado
-            currentThemeCategory = 'custom';
-            renderThemes_(true);
+            // Cambiar tab visual a 'custom' antes de renderizar
+            const customTab = document.querySelector('#themes .qc__sub-tab[data-filter="custom"]');
+            if (customTab) {
+                customTab.click();
+            }
+            renderThemes_(false);
         } catch (err) {
             console.error(err);
             Toast.show("Error saving theme", "error");
@@ -474,17 +479,18 @@ async function handleDuplicateTheme_(sourceValue) {
         
         // Guardamos en IndexedDB usando el método set, que hará upsert (insertar o actualizar según exista o no el ID)
         await DB.set('themes', newTheme);
+        await syncLastUpdated();
         notifyEditors('themes');
         Toast.show("Theme duplicated", "success");
 
-        // Renderizamos la vista de temas personalizados para mostrar el nuevo tema
-        renderThemes_(true);
-        
-        // Redirigir a pestaña de personalizados
+        // Redirigir a pestaña de personalizados ANTES de renderizar
         const customTab = document.querySelector('#themes .qc__sub-tab[data-filter="custom"]');
         if (customTab) {
             customTab.click();
         }
+        
+        // Renderizamos la vista de temas personalizados para mostrar el nuevo tema
+        renderThemes_(false);
     } catch (err) {
         console.error("Error duplicating theme:", err);
         Toast.show("Failed to duplicate", "error");
@@ -504,11 +510,30 @@ async function handleDeleteTheme_(themeValue) {
         const target = allCustom.find(t => t.value === themeValue);
         
         if (target) {
+            // Verificar si es el tema activo para restaurar vs-dark
+            const syncResult = await chrome.storage.sync.get([G_PROPERTY_NAME]);
+            const currentActive = syncResult[G_PROPERTY_NAME]?.themes?.active;
+            let wasActive = false;
+            
+            // Se valida si el tema eliminado es el activo actualmente
+            if (currentActive === themeValue) {
+                wasActive = true;
+                // Restaurar tema por defecto vs-dark
+                const updatedSettings = {
+                    ...syncResult[G_PROPERTY_NAME],
+                    themes: {
+                        ...syncResult[G_PROPERTY_NAME]?.themes,
+                        active: 'vs-dark'
+                    }
+                };
+                await chrome.storage.sync.set({ [G_PROPERTY_NAME]: updatedSettings });
+            }
 
             // Eliminamos el tema de IndexedDB
             await DB.delete('themes', target.id);
+            await syncLastUpdated();
             notifyEditors('themes');
-            Toast.show("Theme deleted", "success");
+            Toast.show(wasActive ? "Theme deleted. Default theme restored." : "Theme deleted", "success");
             renderThemes_(true);
         }
     } catch (err) {

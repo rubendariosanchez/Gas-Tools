@@ -274,6 +274,7 @@ class GasCustomEditor {
 
     // ── Mapa URI → nombre legible de archivo ─────────────────────
     this._fileNameObjectMap = new Map();
+    this._aiAutocomplete = null;
   }
 
   // ──────────────────────────────────────────
@@ -363,9 +364,20 @@ class GasCustomEditor {
     this.editor = window.jsWireMonacoEditor;
     if (!this.editor) return;
 
-    this.editor.onDidPaste(() => {
-      console.info('[GASTools] Paste detectado por Monaco');
-    });
+    // 2. Crear y montar el panel
+    const treePanel = document.createElement('gas-file-tree-panel');
+    document.body.appendChild(treePanel);
+
+    // 3. Conectarlo al editor Monaco cuando esté listo
+    treePanel.setEditor(this.editor);
+
+    // 4. Notificar cambios de modelo activo (cuando el usuario abre un archivo)
+    // this.editor .onDidChangeActiveEditor(() => {
+    //   treePanel.setActiveModel(this.editor .getActiveCodeEditor()?.getModel());
+    // });
+
+    // 5. Botón que lo abre/cierra
+    // miBotonExplorador.addEventListener('click', () => treePanel.toggle());
 
     // Capturamos el tema por defecto de GAS para poder restaurarlo en disable()
     this._defaultThemeName = this.editor._themeService._theme.themeName;
@@ -403,6 +415,14 @@ class GasCustomEditor {
 
     // Escuchar cambios de modelo para mantener snippets y tema activos al cambiar de archivo
     this._setupModelListeners_();
+
+    // Si es la primera vez que se activa, inicializamos el AI Autocomplete
+    this.initAiAutocomplete_();
+
+    // Habilitamos el AI Autocomplete si está en los settings
+    if (this._settings['ai-autocomplete']) {
+      this._aiAutocomplete.enable();
+    }
   }
 
   // ──────────────────────────────────────────
@@ -824,6 +844,13 @@ class GasCustomEditor {
       },
       'cursorStyle': (val) => this.editor.updateOptions({ cursorStyle: val === 'block' ? 2 : 1 }),
       'cursorBlinking': (val) => this.editor.updateOptions({ cursorBlinking: val }),
+      'ai-autocomplete': (val) => {
+        // Si es la primera vez que se activa, inicializamos el AI Autocomplete
+        this.initAiAutocomplete_();
+
+        // Habilitamos o deshabilitamos el AI Autocomplete
+        val ? this._aiAutocomplete.enable() : this._aiAutocomplete.disable();
+      },
     };
 
     Object.entries(settings).forEach(([key, value]) => {
@@ -839,6 +866,17 @@ class GasCustomEditor {
         }
       }
     });
+  }
+
+  /**
+   * Permite instanciar el AI Autocomplete por separado, para poder usarlo en otros Web Components
+   */
+  initAiAutocomplete_() {
+    console.log("[GASTools] Creating AI Autocomplete instance");
+    if (!this._aiAutocomplete) {
+      console.log("[GASTools] Creating AI Autocomplete instance");
+      this._aiAutocomplete = new GasAiAutocomplete(this.editor);
+    }
   }
 
   /**
@@ -1129,6 +1167,11 @@ class GasCustomEditor {
     this._resetEditorDefaults();
     // 4. Eliminar la UI inyectada y los listeners
     this._teardownInjectedUi_();
+
+    // 5. Deshabilitar autocompletado AI si existe
+    if (this._aiAutocomplete) {
+      this._aiAutocomplete.disable();
+    }
     console.log("[GASTools] Extensión deshabilitada y UI limpiada.");
   }
 

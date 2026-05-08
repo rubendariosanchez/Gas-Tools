@@ -4,6 +4,7 @@ import { DB } from '../utils/Storage.js';
 import { Toast } from '../utils/Toast.js';
 import { ConfirmDialog } from '../utils/ConfirmDialog.js';
 import { notifyEditors } from '../utils/Notify.js';
+import { syncLastUpdated } from '../utils/Functions.js';
 
 // Estado local del módulo para filtros
 let currentSnippetFilter = 'custom'; // 'default' o 'custom'
@@ -142,6 +143,7 @@ async function saveSnippet_(newSnip, modalInstance) {
 
         // Almacenamos los datos en IndexedDB para optimizar rendimiento y evitar bloqueos
         await DB.set('snippets', newSnip); // Guarda o actualiza directamente
+        await syncLastUpdated();
         console.log('[Snippets] Saved, notifying editors...');
         notifyEditors('snippets');
         console.log('[Snippets] Notification sent');
@@ -163,6 +165,7 @@ async function deleteSnippet_(id) {
     try {
         // Llamada directa a nuestra API de IndexedDB
         await DB.delete('snippets', id);
+        await syncLastUpdated();
 
         // Refrescar la interfaz
         loadSnippets_(true);
