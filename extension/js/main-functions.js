@@ -44,14 +44,14 @@ async function loadResources() {
  * @returns {Promise<void>} Se resuelve cuando todos los scripts han cargado.
  */
 function injectScripts() {
-  // Orden crítico: domUtils debe estar disponible antes que los demás módulos
+  // Indizamos ordenadamente los archivos de los módulos
   const scriptPaths = [
-    'extension/js/domUtils.js',
-    'extension/js/gas-ai-autocomplete.js',
-    'extension/js/gasTools.js',
+    'extension/js/services/dom-utils.js',
+    'extension/js/services/gas-ai-autocomplete.js',
+    'extension/js/services/gas-folders.js',
     'extension/js/components/gas-search-panel.js',
     'extension/js/components/gas-chat-panel.js',
-    'extension/js/components/gas-file-tree-panel.js',
+    'extension/js/gas-tools.js',
   ];
 
   const loadPromises = scriptPaths.map(path => new Promise((resolve, reject) => {

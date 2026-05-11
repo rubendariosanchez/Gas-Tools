@@ -128,11 +128,6 @@ function initThemeModal_() {
     modal?.addEventListener('save-theme', async (e) => {
         try {
             const themeData = e.detail;
-            
-            // Para IndexedDB, necesitamos un ID consistente. 
-            // Tu modal ya genera uno en getFormData_: this._editingId || `theme-${Date.now()}`
-            // Pero IndexedDB suele requerir que el campo 'id' esté en la raíz del objeto.
-            // themeData.id = themeData.value; 
 
             // Guardamos en IndexedDB usando el método set, que hará upsert (insertar o actualizar según exista o no el ID)
             await DB.set('themes', themeData);

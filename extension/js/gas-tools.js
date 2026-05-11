@@ -275,6 +275,7 @@ class GasCustomEditor {
     // ── Mapa URI → nombre legible de archivo ─────────────────────
     this._fileNameObjectMap = new Map();
     this._aiAutocomplete = null;
+    this._gasFolders = new GasFolders();
   }
 
   // ──────────────────────────────────────────
@@ -364,21 +365,6 @@ class GasCustomEditor {
     this.editor = window.jsWireMonacoEditor;
     if (!this.editor) return;
 
-    // 2. Crear y montar el panel
-    const treePanel = document.createElement('gas-file-tree-panel');
-    document.body.appendChild(treePanel);
-
-    // 3. Conectarlo al editor Monaco cuando esté listo
-    treePanel.setEditor(this.editor);
-
-    // 4. Notificar cambios de modelo activo (cuando el usuario abre un archivo)
-    // this.editor .onDidChangeActiveEditor(() => {
-    //   treePanel.setActiveModel(this.editor .getActiveCodeEditor()?.getModel());
-    // });
-
-    // 5. Botón que lo abre/cierra
-    // miBotonExplorador.addEventListener('click', () => treePanel.toggle());
-
     // Capturamos el tema por defecto de GAS para poder restaurarlo en disable()
     this._defaultThemeName = this.editor._themeService._theme.themeName;
     console.log("[GASTools] Tema por defecto de GAS capturado:", this._defaultThemeName);
@@ -417,11 +403,14 @@ class GasCustomEditor {
     this._setupModelListeners_();
 
     // Si es la primera vez que se activa, inicializamos el AI Autocomplete
-    this.initAiAutocomplete_();
-
-    // Habilitamos el AI Autocomplete si está en los settings
-    if (this._settings['ai-autocomplete']) {
-      this._aiAutocomplete.enable();
+    // this.initAiAutocomplete_();
+    
+    // Inicializar carpetas si están habilitadas
+    if (this._settings['gas-folders']) {
+      if (this._settings['gas-folders-color']) {
+        this._gasFolders.setColor(this._settings['gas-folders-color']);
+      }
+      this._gasFolders.enable();
     }
   }
 
@@ -466,8 +455,7 @@ class GasCustomEditor {
   }
 
   /**
-   * Acciones comunes a ejecutar cada vez que el usuario cambia de archivo.
-   * Centraliza la lógica que antes estaba duplicada en varios listeners.
+   * Acciones a ejecutar cuando se detecta un cambio de archivo (modelo).
    * @private
    */
   _onFileChange_() {
@@ -575,11 +563,8 @@ class GasCustomEditor {
   }
 
   /**
-   * Comprueba si una cadena parece un nombre real de archivo de GAS.
-   * Acepta extensiones .gs, .js, .ts, .json, .html, .css, .md, .txt.
-   * Descarta cadenas genéricas como "model 1".
-   *
-   * @param {string} value - Cadena a comprobar.
+   * Comprueba si una cadena parece un nombre de archivo real (gs, html, etc.).
+   * @param {string} value - Nombre a validar.
    * @returns {boolean}
    */
   _looksLikeRealFileName(value) {
@@ -844,13 +829,25 @@ class GasCustomEditor {
       },
       'cursorStyle': (val) => this.editor.updateOptions({ cursorStyle: val === 'block' ? 2 : 1 }),
       'cursorBlinking': (val) => this.editor.updateOptions({ cursorBlinking: val }),
+
+      /**
+       * Habilita o deshabilita el autocompletado AI basado en el toggle del popup.
+       * @param {boolean} val - Estado de habilitación.
+       */
       'ai-autocomplete': (val) => {
-        // Si es la primera vez que se activa, inicializamos el AI Autocomplete
         this.initAiAutocomplete_();
 
         // Habilitamos o deshabilitamos el AI Autocomplete
-        val ? this._aiAutocomplete.enable() : this._aiAutocomplete.disable();
+        if (this._aiAutocomplete) {
+          val ? this._aiAutocomplete.enable() : this._aiAutocomplete.disable();
+        }
       },
+      'gas-folders': (val) => {
+        val ? this._gasFolders.enable() : this._gasFolders.disable();
+      },
+      'gas-folders-color': (val) => {
+        this._gasFolders.setColor(val);
+      }
     };
 
     Object.entries(settings).forEach(([key, value]) => {
@@ -869,12 +866,15 @@ class GasCustomEditor {
   }
 
   /**
-   * Permite instanciar el AI Autocomplete por separado, para poder usarlo en otros Web Components
+   * Inicializa la instancia del autocompletado AI si no existe.
+   * Verifica que la clase GasAiAutocomplete esté cargada en el contexto global
+   * antes de intentar instanciarla para evitar ReferenceErrors.
+   * @private
    */
   initAiAutocomplete_() {
-    console.log("[GASTools] Creating AI Autocomplete instance");
+    // Si no existe la instancia de AI Autocomplete, la creamos
     if (!this._aiAutocomplete) {
-      console.log("[GASTools] Creating AI Autocomplete instance");
+      console.log("[GASTools] Creando instancia de AI Autocomplete");
       this._aiAutocomplete = new GasAiAutocomplete(this.editor);
     }
   }
@@ -1151,9 +1151,7 @@ class GasCustomEditor {
   // ──────────────────────────────────────────
 
   /**
-   * Desactiva todas las mejoras de la extensión:
-   * restaura el tema original de GAS, elimina el patch de setTheme,
-   * revierte las opciones del editor y elimina la UI inyectada.
+   * Desactiva la extensión y limpia todos los cambios inyectados.
    */
   disable() {
     console.log("[GASTools] Deshabilitando extensión...");
@@ -1172,13 +1170,15 @@ class GasCustomEditor {
     if (this._aiAutocomplete) {
       this._aiAutocomplete.disable();
     }
-    console.log("[GASTools] Extensión deshabilitada y UI limpiada.");
+
+    if (this._gasFolders) {
+      this._gasFolders.disable();
+    }
+    console.log("[GASTools] Extensión deshabilitada.");
   }
 
   /**
-   * Reactiva todas las mejoras con el estado en memoria.
-   * Re-inyecta la UI y reaplica settings, snippets y tema
-   * sin llamar a `init()` para evitar duplicar comandos de Monaco.
+   * Reactiva la extensión con el estado guardado en memoria.
    */
   enable() {
     console.log("[GASTools] Re-habilitando extensión...");

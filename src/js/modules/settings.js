@@ -34,6 +34,11 @@ function initAutoSave_() {
         try {
             await saveSingleOption_(optionId, isChecked);
             Toast.show('Setting saved', 'success', 800);
+            
+            // Si el toggle es gas-folders, actualizamos la visibilidad del color picker
+            if (optionId === 'gas-folders') {
+                updateFolderColorVisibility_(isChecked);
+            }
         } catch (error) {
             console.error('[Settings] Auto-save error:', error);
             Toast.show('Error saving setting', 'error');
@@ -56,6 +61,33 @@ function initAutoSave_() {
             Toast.show('Error saving setting', 'error');
         }
     });
+
+    // Listener para el nuevo componente option-color
+    optionsContainer.addEventListener('color-change', async (e) => {
+        const optionId = e.target.id;
+        const value = e.detail.value;
+
+        console.log(`[Settings] Auto-saving color component: ${optionId} = ${value}`);
+
+        try {
+            await saveSingleOption_(optionId, value);
+            Toast.show('Color saved', 'success', 800);
+        } catch (error) {
+            console.error('[Settings] Auto-save error:', error);
+            Toast.show('Error saving color', 'error');
+        }
+    });
+}
+
+/**
+ * Oculta o muestra el selector de color de carpetas.
+ * @private
+ */
+function updateFolderColorVisibility_(enabled) {
+    const colorEl = document.getElementById('gas-folders-color');
+    if (colorEl) {
+        colorEl.style.display = enabled ? 'block' : 'none';
+    }
 }
 
 /**
@@ -107,8 +139,8 @@ async function loadQualityCodeSettings_() {
 
         const settings = settingsData?.options || {};
 
-const optionIds = [
-            'global-enable', 'load-snippets', 'ai-autocomplete',
+        const optionIds = [
+            'global-enable', 'ai-autocomplete', 'gas-folders',
             // Visuals & Layout
             'showMinimap', 'lineNumbers', 'wordWrap', 'renderLineHighlight',
             'rulers', 'occurrencesHighlight', 'renderWhitespace',
@@ -138,6 +170,15 @@ const optionIds = [
                 el.setAttribute('value', settings[id]);
             }
         });
+
+        // Procesar color inputs
+        const colorInput = document.getElementById('gas-folders-color');
+        if (colorInput && settings['gas-folders-color']) {
+            colorInput.setAttribute('value', settings['gas-folders-color']);
+        }
+        
+        // Inicializar visibilidad del color picker
+        updateFolderColorVisibility_(settings['gas-folders'] !== false);
 
     } catch (error) {
         console.error('Error loading settings:', error);

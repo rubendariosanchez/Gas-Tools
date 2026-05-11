@@ -19,7 +19,7 @@
         "https://script.google.com/home/projects/*/edit*"
       ],
       "js": [
-        "extension/js/mainFunctions.js"
+        "extension/js/main-functions.js"
       ],
       "all_frames": false,
       "run_at": "document_end"
@@ -29,6 +29,7 @@
     {
       "resources": [
         "extension/*.*",
+        "extension/js/*.*",
         "themes/*.json",
         "src/vendor/codemirror/*"
       ],

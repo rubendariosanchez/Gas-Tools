@@ -5,7 +5,7 @@ import { DB } from '../src/js/utils/Storage.js';
 // Importa la clave global de storage y los snippets predeterminados de la extensión
 import { G_PROPERTY_NAME, DEFAULT_SNIPPETS } from '../src/js/utils/Variables.js';
 // Importa las funciones de tema activo y despacho LLM desde el módulo de proveedores
-import { getActiveTheme, callLlmProvider } from './js/llmProviders.js';
+import { getActiveTheme, callLlmProvider } from './js/llm-providers.js';
 
 // ─────────────────────────────────────────────
 // MANEJADORES DE MENSAJES
@@ -39,13 +39,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         // Obtiene todos los snippets guardados por el usuario en IndexedDB
         const userSnippets = await DB.getAll('snippets') || [];
-        // Lee la configuración para saber si los snippets por defecto están habilitados
-        const settingsData = await DB.get('settings', G_PROPERTY_NAME);
-        const isDefaultEnabled = settingsData?.options?.['load-snippets'] === true;
-        // Prepende los snippets predeterminados solo si el toggle está activado
-        const finalSnippets = isDefaultEnabled
-          ? [...DEFAULT_SNIPPETS, ...userSnippets]
-          : [...userSnippets];
+        // Agregamos los snippets predeterminados al inicio de la lista
+        const finalSnippets = [...DEFAULT_SNIPPETS, ...userSnippets];
         sendResponse(finalSnippets);
       } catch (err) {
         console.error('[BG] Error al obtener snippets:', err);
@@ -105,11 +100,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         try {
           // Reconstruye la lista final de snippets con la misma lógica que GET_SNIPPETS
           const userSnippets = await DB.getAll('snippets') || [];
-          const settingsData = await DB.get('settings', G_PROPERTY_NAME);
-          const isDefaultEnabled = settingsData?.options?.['load-snippets'] === true;
-          const finalSnippets = isDefaultEnabled
-            ? [...DEFAULT_SNIPPETS, ...userSnippets]
-            : [...userSnippets];
+          const finalSnippets = [...DEFAULT_SNIPPETS, ...userSnippets];
           console.log('[Background] Enviando snippets, cantidad:', finalSnippets.length);
           sendToTabs({ data: finalSnippets });
         } catch (err) {

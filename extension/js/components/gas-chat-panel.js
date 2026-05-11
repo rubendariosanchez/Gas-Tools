@@ -22,6 +22,13 @@
 // CATÁLOGO DE PROVEEDORES
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS_LLM_PROVIDERS = {
+  gemini: {
+    label: 'Gemini',
+    icon: '✦',
+    color: '#4285f4',
+    models: ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro', 'gemini-3.1-pro', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview'],
+    keyHint: 'AIza...',
+  },
   openai: {
     label: 'OpenAI',
     icon: '◆',
@@ -35,13 +42,6 @@ const GAS_LLM_PROVIDERS = {
     color: '#d97757',
     models: ['claude-haiku-4-5', 'claude-sonnet-4', 'claude-opus-4-1', 'claude-sonnet-4-5', 'claude-sonnet-4-6', 'claude-opus-4-7'],
     keyHint: 'sk-ant-...',
-  },
-  gemini: {
-    label: 'Gemini',
-    icon: '✦',
-    color: '#4285f4',
-    models: ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro', 'gemini-3.1-pro', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview'],
-    keyHint: 'AIza...',
   },
   deepseek: {
     label: 'DeepSeek',
@@ -88,6 +88,36 @@ const GAS_LLM_PROVIDERS = {
       'openai/gpt-oss-120b',
     ],
     keyHint: 'nvapi-...',
+  },
+  openrouter: {
+    label: 'OpenRouter',
+    icon: '○',
+    color: '#656ee8',
+    models: [
+      // =========================
+      // GRATIS (Coding)
+      // =========================
+      'inclusionai/ring-2.6-1t:free',
+      'openai/gpt-oss-120b:free',
+      'openrouter/free',
+      'minimax/minimax-m2.5:free',
+      'poolside/laguna-xs.2:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'google/gemma-4-31b-it:free',
+      'qwen/qwen3-coder:free',
+      'meta-llama/llama-3.3-70b-instruct:free',
+
+      // =========================
+      // PAGO (Top Coding)
+      // =========================
+      'moonshotai/kimi-k2.6',
+      'anthropic/claude-sonnet-4.6',
+      'anthropic/claude-opus-4.7',
+      'deepseek/deepseek-v4-flash',
+      'google/gemini-3-flash-preview',
+      'x-ai/grok-4.1-fast',
+    ],
+    keyHint: 'sk-or-v1-...',
   },
 };
 

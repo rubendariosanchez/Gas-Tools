@@ -6,7 +6,9 @@ export const DEFAULT_SETTINGS_OPTIONS = {
     // Extension
     'global-enable': true,
     'load-snippets': true,
-    'ai-autocomplete': true,
+    'ai-autocomplete': false,
+    'gas-folders': true,
+    'gas-folders-color': '#5f6368',
     // Visuals & Layout
     'showMinimap': false,
     'lineNumbers': 'on',

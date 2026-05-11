@@ -9,6 +9,7 @@ import { SnippetCard } from '../components/SnippetCard.js';
 import { ThemeCard } from '../components/ThemeCard.js';
 import { SnippetModal } from '../components/SnippetModal.js';
 import { ThemeModal } from '../components/ThemeModal.js';
+import { OptionColor } from '../components/OptionColor.js';
 
 import { initTabs_, updateAboutStats_ } from './modules/ui.js';
 import { initSettingsModule, initAiContextModule } from './modules/settings.js';

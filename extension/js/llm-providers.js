@@ -97,6 +97,7 @@ export async function callLlmProvider(cfg) {
     deepseek: () => _callDeepSeek(apiKey, model, messages, temperature),
     chatllm: () => _callChatLLM(apiKey, model, messages, temperature),
     nvidia: () => _callNvidia(apiKey, model, messages, temperature),
+    openrouter: () => _callOpenRouter(apiKey, model, messages, temperature),
   };
 
   // Busca el handler del proveedor solicitado
@@ -343,4 +344,30 @@ async function _callNvidia(apiKey, model, messages, temperature) {
   // NVIDIA a veces responde 200 OK pero sin contenido; se trata como error
   if (!content) throw new Error('NVIDIA Build respondió sin contenido.');
   return content;
+}
+
+/**
+ * Realiza una solicitud a la API de OpenRouter, compatible con el formato de OpenAI.
+ *
+ * @async
+ * @param {string} apiKey      - Clave de API de OpenRouter.
+ * @param {string} model       - Identificador del modelo (ej: 'anthropic/claude-3-opus').
+ * @param {Array}  messages    - Historial de mensajes.
+ * @param {number} temperature - Temperatura de muestreo.
+ * @returns {Promise<string>} Texto de la respuesta del modelo.
+ */
+async function _callOpenRouter(apiKey, model, messages, temperature) {
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      // Requerido por OpenRouter para identificación opcional
+      'HTTP-Referer': 'https://github.com/rubendariosanchez/Gas-Tools',
+      'X-Title': 'Gas-Tools Extension',
+    },
+    body: JSON.stringify({ model, messages, temperature }),
+  });
+  if (!res.ok) throw await _readErr(res);
+  return (await res.json())?.choices?.[0]?.message?.content ?? '';
 }
