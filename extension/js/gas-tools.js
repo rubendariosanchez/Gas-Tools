@@ -3,17 +3,48 @@
 console.log("[GASTools] Script cargado y ejecutándose");
 
 // ─────────────────────────────────────────────
+// SINGLETON GUARD: si el script se re-evalúa (SPA), salir inmediatamente
+// Envuelto en IIFE porque return no es válido en top-level de un script.
+// ─────────────────────────────────────────────
+;(() => {
+if (window.__gasToolsInit) return;
+window.__gasToolsInit = true;
+
+// ─────────────────────────────────────────────
+// CONSTANTES DE EVENTOS (deben coincidir con main-functions.js)
+// ─────────────────────────────────────────────
+const GAS_EVENTS = {
+  TRANSFER_DATA:    'GAS_TransferData',
+  SETTINGS_UPDATED: 'GAS_SettingsUpdated',
+  DATA_UPDATED:     'GAS_DataUpdated',
+  GLOBAL_DISABLE:   'GAS_GlobalDisable',
+  GLOBAL_ENABLE:    'GAS_GlobalEnable',
+};
+
+/**
+ * Despacha un CustomEvent con serialización JSON centralizada.
+ * @param {string} eventName
+ * @param {Object} detail
+ * @param {boolean} [useWindow=false]
+ */
+function dispatchGAS(eventName, detail, useWindow = false) {
+  (useWindow ? window : document).dispatchEvent(new CustomEvent(eventName, {
+    detail: JSON.stringify(detail),
+  }));
+}
+
+// ─────────────────────────────────────────────
 // ESTADO GLOBAL MÍNIMO
-// Solo lo que debe existir ANTES de que la clase se instancie.
-// Todo lo demás vive dentro de GasCustomEditor.
 // ─────────────────────────────────────────────
 
-// Flag que indica si la extensión fue deshabilitada antes de que Monaco cargara
+
 let G_GLOBALLY_DISABLED = false;
-// Flag que indica si Monaco ya está disponible en window
 let G_MONACO_READY = false;
-// Referencia única a la instancia activa del editor personalizado
 let G_GAS_TOOLS_INSTANCE = null;
+
+// Cola de payloads pendientes (action queue) para no perder datos
+// si GAS_TransferData llega mientras se está inicializando.
+const G_PENDING_QUEUE = [];
 
 // ─────────────────────────────────────────────
 // DETECCIÓN DE MONACO
@@ -26,11 +57,16 @@ let G_GAS_TOOLS_INSTANCE = null;
  *   2. Desde el MutationObserver, cuando Monaco aparece tras una mutación del DOM.
  */
 function markMonacoReady_() {
-  // Evitar ejecución doble si ya fue marcado
-  if (G_MONACO_READY) return;
+  if (G_MONACO_READY) {
+    // Ya listo pero puede haber datos pendientes (SPA navigation)
+    if (window._PENDING_GAS_DATA && window.jsWireMonacoEditor) {
+      console.log("[GASTools] Procesando datos pendientes tras navegación");
+      initializeEditor_(window._PENDING_GAS_DATA);
+    }
+    return;
+  }
   G_MONACO_READY = true;
   console.log("[GASTools] Monaco detectado y listo");
-  // Si ya habían llegado datos antes de que Monaco cargara, inicializamos ahora
   if (window._PENDING_GAS_DATA) {
     initializeEditor_(window._PENDING_GAS_DATA);
   }
@@ -38,12 +74,10 @@ function markMonacoReady_() {
 
 /**
  * Observa el DOM para detectar cuándo Monaco se inyecta en la página.
- * Solo activo cuando el script cargó ANTES de que Monaco existiera.
+ * Permanece activo toda la vida de la página para soportar navegación SPA.
  */
 const G_MAIN_OBSERVER = new MutationObserver((mutations, obs) => {
   if (!window.jsWireMonacoEditor) return;
-  // Desconectamos tan pronto detectamos Monaco para no seguir observando
-  obs.disconnect();
   markMonacoReady_();
 });
 
@@ -61,31 +95,72 @@ if (window.jsWireMonacoEditor) {
 // ─────────────────────────────────────────────
 
 /**
- * Resetea el flag de disabled para que gasTools.js acepte la inicialización
-*/
-document.addEventListener('GAS_GlobalEnable', () => {
+ * Almacenamos las referencias a las funciones listener para poder
+ * eliminarlas correctamente con removeEventListener si fuera necesario.
+ * Cada evento usa su propia función con nombre (no arrow inline).
+ */
+const _listeners = {};
+
+// ── GAS_GlobalEnable ──────────────────────────────────────
+_listeners.onGlobalEnable = () => {
   G_GLOBALLY_DISABLED = false;
   console.log('[GASTools] Flag de disabled reseteado');
-});
+};
+document.addEventListener(GAS_EVENTS.GLOBAL_ENABLE, _listeners.onGlobalEnable);
 
+// ── GAS_GlobalDisable ─────────────────────────────────────
+_listeners.onGlobalDisable = () => {
+  G_GLOBALLY_DISABLED = true;
+  console.log("[GASTools] Flag de deshabilitación global establecido en carga de página");
+};
+document.addEventListener(GAS_EVENTS.GLOBAL_DISABLE, _listeners.onGlobalDisable);
+
+// ── GAS_TransferData (con action queue) ───────────────────
 /**
- * Recibe el payload inicial desde el content script (mainFunctions.js).
- * Si Monaco ya está listo, inicializa de inmediato; si no, guarda los datos
- * para procesarlos cuando Monaco esté disponible.
- *
- * @listens document#GAS_TransferData
+ * Procesa un payload de GAS_TransferData.
+ * Si ya hay una inicialización en curso, lo encola para replay.
+ * @param {Object} data
  */
-document.addEventListener('GAS_TransferData', (e) => {
-  const data = JSON.parse(e.detail);
-  console.log("[GASTools] GAS_TransferData recibido:", data);
-  // Guardamos siempre como pendientes por si Monaco aún no cargó
+function processTransferData_(data) {
+  // Si hay instancia creándose, encolar para replay
+  if (window.__gasToolsBusy) {
+    G_PENDING_QUEUE.push(data);
+    console.log("[GASTools] Inicialización en curso, encolando payload.");
+    return;
+  }
+
   window._PENDING_GAS_DATA = data;
-  if (G_MONACO_READY && window.jsWireMonacoEditor) {
+  if (window.jsWireMonacoEditor) {
+    if (!G_MONACO_READY) markMonacoReady_();
     initializeEditor_(data);
   } else {
-    console.log("[GASTools] Datos recibidos pero Monaco no está listo. Esperando...");
+    console.log("[GASTools] Datos recibidos pero Monaco no está listo. Iniciando polling...");
+    if (!window._gasSpaPollInterval) {
+      window._gasSpaPollInterval = setInterval(() => {
+        if (window._PENDING_GAS_DATA && window.jsWireMonacoEditor) {
+          clearInterval(window._gasSpaPollInterval);
+          window._gasSpaPollInterval = null;
+          markMonacoReady_();
+        }
+      }, 300);
+      setTimeout(() => {
+        if (window._gasSpaPollInterval) {
+          clearInterval(window._gasSpaPollInterval);
+          window._gasSpaPollInterval = null;
+        }
+      }, 60000);
+    }
   }
-});
+}
+
+_listeners.onTransferData = (e) => {
+  try {
+    processTransferData_(JSON.parse(e.detail));
+  } catch (err) {
+    console.warn('[GASTools] Error parseando GAS_TransferData:', err);
+  }
+};
+document.addEventListener(GAS_EVENTS.TRANSFER_DATA, _listeners.onTransferData);
 
 /**
  * Crea o actualiza la instancia de GasCustomEditor con los datos recibidos.
@@ -95,107 +170,107 @@ document.addEventListener('GAS_TransferData', (e) => {
  * @param {Object} data - Payload inicial con settings, snippets, tema y HTML de botones.
  */
 function initializeEditor_(data) {
-  // Si el usuario desactivó la extensión, no inicializar
-  if (G_GLOBALLY_DISABLED) {
-    console.log("[GASTools] Deshabilitado globalmente, omitiendo inicialización.");
-    window._PENDING_GAS_DATA = null;
-    return;
-  }
+  // Marcar como ocupado para que payloads entrantes se encolen
+  window.__gasToolsBusy = true;
 
-  if (G_GAS_TOOLS_INSTANCE) {
-    // Ya existe una instancia: actualizamos sus opciones con el estado más reciente en memoria
-    // para no perder cambios hechos desde el popup mientras se cambiaba de archivo
-    console.log("[GASTools] Instancia existente detectada. Actualizando opciones y reiniciando.");
-    G_GAS_TOOLS_INSTANCE.mergeAndReinit(data);
-    window._PENDING_GAS_DATA = null;
-    return;
-  }
+  try {
+    if (G_GLOBALLY_DISABLED) {
+      console.log("[GASTools] Deshabilitado globalmente, omitiendo inicialización.");
+      window._PENDING_GAS_DATA = null;
+      return;
+    }
 
-  // Primera inicialización: creamos la instancia y la arrancamos
-  G_GAS_TOOLS_INSTANCE = new GasCustomEditor(data);
-  G_GAS_TOOLS_INSTANCE.init();
-  window._PENDING_GAS_DATA = null;
+    // Limpiar polling SPA si estaba activo
+    if (window._gasSpaPollInterval) {
+      clearInterval(window._gasSpaPollInterval);
+      window._gasSpaPollInterval = null;
+    }
+
+    if (G_GAS_TOOLS_INSTANCE) {
+      console.log("[GASTools] Instancia existente detectada. Actualizando opciones y reiniciando.");
+      G_GAS_TOOLS_INSTANCE.mergeAndReinit(data);
+      window._PENDING_GAS_DATA = null;
+      return;
+    }
+
+    // Primera inicialización: creamos la instancia y la arrancamos
+    G_GAS_TOOLS_INSTANCE = new GasCustomEditor(data);
+    G_GAS_TOOLS_INSTANCE.init();
+    window._PENDING_GAS_DATA = null;
+  } finally {
+    window.__gasToolsBusy = false;
+    // Replay: procesar payloads que llegaron mientras estábamos ocupados
+    if (G_PENDING_QUEUE.length) {
+      const next = G_PENDING_QUEUE.shift();
+      console.log("[GASTools] Replay de payload encolado");
+      processTransferData_(next);
+    }
+  }
 }
 
 // ─────────────────────────────────────────────
 // EVENTOS DESDE EL POPUP (vía mainFunctions.js)
 // ─────────────────────────────────────────────
 
-/**
- * Aplica cambios de configuración emitidos desde el popup.
- * Procesa `global-enable` primero; el resto se delega a la instancia activa.
- *
- * @listens document#GAS_SettingsUpdated
- */
-document.addEventListener('GAS_SettingsUpdated', (e) => {
-  const options = JSON.parse(e.detail);
+// ── GAS_SettingsUpdated ─────────────────────────────────
+_listeners.onSettingsUpdated = (e) => {
+  try {
+    const options = JSON.parse(e.detail);
 
-  // El toggle global debe ser procesado primero
-  if ('global-enable' in options) {
-    const isEnabled = options['global-enable'];
-    G_GLOBALLY_DISABLED = !isEnabled;
+    if ('global-enable' in options) {
+      const isEnabled = options['global-enable'];
+      G_GLOBALLY_DISABLED = !isEnabled;
 
-    if (!isEnabled) {
-      G_GAS_TOOLS_INSTANCE?.disable();
-      console.info('[GASTools] Extensión deshabilitada globalmente');
+      if (!isEnabled) {
+        G_GAS_TOOLS_INSTANCE?.disable();
+        console.info('[GASTools] Extensión deshabilitada globalmente');
+        return;
+      }
+
+      if (G_GAS_TOOLS_INSTANCE) {
+        G_GAS_TOOLS_INSTANCE.enable();
+      } else if (window._PENDING_GAS_DATA) {
+        initializeEditor_(window._PENDING_GAS_DATA);
+      }
+
+      console.info('[GASTools] Extensión habilitada globalmente');
+    }
+
+    if (!G_GAS_TOOLS_INSTANCE) {
+      console.warn('[GASTools] Sin instancia activa — actualización de settings omitida.');
       return;
     }
 
-    // Sin instancia previa: inicializar desde cero si hay datos pendientes
-    if (G_GAS_TOOLS_INSTANCE) {
-      G_GAS_TOOLS_INSTANCE.enable();
-    } else if (window._PENDING_GAS_DATA) {
-      initializeEditor_(window._PENDING_GAS_DATA);
+    G_GAS_TOOLS_INSTANCE.updateSettings(options);
+  } catch (err) {
+    console.warn('[GASTools] Error en GAS_SettingsUpdated:', err);
+  }
+};
+document.addEventListener(GAS_EVENTS.SETTINGS_UPDATED, _listeners.onSettingsUpdated);
+
+// ── GAS_DataUpdated ──────────────────────────────────────
+_listeners.onDataUpdated = (e) => {
+  try {
+    const { updateType, data } = JSON.parse(e.detail);
+    console.log("[GASTools] GAS_DataUpdated recibido:", updateType);
+
+    if (!G_GAS_TOOLS_INSTANCE) {
+      console.log("[GASTools] Sin instancia activa, ignorando actualización.");
+      return;
     }
 
-    console.info('[GASTools] Extensión habilitada globalmente');
+    if (updateType === 'snippets') {
+      G_GAS_TOOLS_INSTANCE.updateSnippets(data);
+    }
+
+    if (updateType === 'themes') {
+      G_GAS_TOOLS_INSTANCE.updateTheme(data);
+    }
+  } catch (err) {
+    console.warn('[GASTools] Error en GAS_DataUpdated:', err);
   }
-
-  // Sin instancia activa no hay donde aplicar los cambios
-  if (!G_GAS_TOOLS_INSTANCE) {
-    console.warn('[GASTools] Sin instancia activa — actualización de settings omitida.');
-    return;
-  }
-
-  // Aplicamos los cambios de settings en la instancia activa
-  G_GAS_TOOLS_INSTANCE.updateSettings(options);
-});
-
-/**
- * Recibe snippets o tema actualizados desde el popup.
- *
- * @listens document#GAS_DataUpdated
- */
-document.addEventListener('GAS_DataUpdated', (e) => {
-  const { updateType, data } = JSON.parse(e.detail);
-  console.log("[GASTools] GAS_DataUpdated recibido:", updateType);
-
-  if (!G_GAS_TOOLS_INSTANCE) {
-    console.log("[GASTools] Sin instancia activa, ignorando actualización.");
-    return;
-  }
-
-  if (updateType === 'snippets') {
-    // Delega en la instancia para que actualice su propio estado y recargue
-    G_GAS_TOOLS_INSTANCE.updateSnippets(data);
-  }
-
-  if (updateType === 'themes') {
-    // Delega en la instancia para que actualice su propio estado y recargue
-    G_GAS_TOOLS_INSTANCE.updateTheme(data);
-  }
-});
-
-/**
- * Recibe la señal de deshabilitación global emitida por mainFunctions.js
- * antes de que la instancia se cree (durante la carga inicial de la página).
- *
- * @listens document#GAS_GlobalDisable
- */
-document.addEventListener('GAS_GlobalDisable', () => {
-  G_GLOBALLY_DISABLED = true;
-  console.log("[GASTools] Flag de deshabilitación global establecido en carga de página");
-});
+};
+document.addEventListener(GAS_EVENTS.DATA_UPDATED, _listeners.onDataUpdated);
 
 // ─────────────────────────────────────────────
 // CLASE PRINCIPAL
@@ -275,7 +350,6 @@ class GasCustomEditor {
     // ── Mapa URI → nombre legible de archivo ─────────────────────
     this._fileNameObjectMap = new Map();
     this._aiAutocomplete = null;
-    this._gasFolders = new GasFolders();
   }
 
   // ──────────────────────────────────────────
@@ -405,13 +479,6 @@ class GasCustomEditor {
     // Si es la primera vez que se activa, inicializamos el AI Autocomplete
     // this.initAiAutocomplete_();
     
-    // Inicializar carpetas si están habilitadas
-    if (this._settings['gas-folders']) {
-      if (this._settings['gas-folders-color']) {
-        this._gasFolders.setColor(this._settings['gas-folders-color']);
-      }
-      this._gasFolders.enable();
-    }
   }
 
   // ──────────────────────────────────────────
@@ -425,6 +492,17 @@ class GasCustomEditor {
    */
   _setupModelListeners_() {
     if (!this.editor) return;
+
+    // Limpiar listeners e intervalos previos en caso de re-inicialización por SPA
+    if (this._modelChangeDisposable) {
+      this._modelChangeDisposable.dispose();
+      this._modelChangeDisposable = null;
+    }
+    if (this._modelCreateDisposable) {
+      this._modelCreateDisposable.dispose();
+      this._modelCreateDisposable = null;
+    }
+    this._stopFileCheckInterval_();
 
     // Evento nativo de Monaco: se dispara al cambiar el modelo activo en el editor
     this._modelChangeDisposable = this.editor.onDidChangeModel(() => {
@@ -842,12 +920,6 @@ class GasCustomEditor {
           val ? this._aiAutocomplete.enable() : this._aiAutocomplete.disable();
         }
       },
-      'gas-folders': (val) => {
-        val ? this._gasFolders.enable() : this._gasFolders.disable();
-      },
-      'gas-folders-color': (val) => {
-        this._gasFolders.setColor(val);
-      }
     };
 
     Object.entries(settings).forEach(([key, value]) => {
@@ -1171,9 +1243,6 @@ class GasCustomEditor {
       this._aiAutocomplete.disable();
     }
 
-    if (this._gasFolders) {
-      this._gasFolders.disable();
-    }
     console.log("[GASTools] Extensión deshabilitada.");
   }
 
@@ -1214,23 +1283,29 @@ class GasCustomEditor {
 
   /**
    * Re-inyecta los elementos de UI sin reinicializar todo desde cero.
-   * Espera la toolbar si aún no está disponible.
+   * Usa requestAnimationFrame para alinear las operaciones DOM con el
+   * ciclo de renderizado del navegador.
    * @private
    */
   _reinjectUI_() {
-    if (!this._toolsMenuElement) {
-      // La toolbar puede no existir si disable() se llamó muy temprano
-      this._waitForToolsMenu_().then((el) => {
-        this._toolsMenuElement = el;
-        if (el) {
-          this._injectAdvancedSearch_();
-          this._injectChatPanel_();
-        }
-      });
-      return;
-    }
-    this._injectAdvancedSearch_();
-    this._injectChatPanel_();
+    const doInject = () => {
+      if (this._toolsMenuElement) {
+        this._injectAdvancedSearch_();
+        this._injectChatPanel_();
+      } else {
+        // La toolbar puede no existir si disable() se llamó muy temprano
+        this._waitForToolsMenu_().then((el) => {
+          this._toolsMenuElement = el;
+          if (el) {
+            requestAnimationFrame(() => {
+              this._injectAdvancedSearch_();
+              this._injectChatPanel_();
+            });
+          }
+        });
+      }
+    };
+    requestAnimationFrame(doInject);
   }
 
   /**
@@ -1257,13 +1332,15 @@ class GasCustomEditor {
     if (this._onSearchShortcut) document.removeEventListener('keydown', this._onSearchShortcut, true);
     if (this._onChatShortcut) document.removeEventListener('keydown', this._onChatShortcut, true);
 
-    // Eliminar elementos del DOM
-    this.DomUtils.remove('buttonAdvancedSearch');
-    this.DomUtils.remove('buttonChatGas');
-    this.DomUtils.remove('ctnCurrentFileName');
-    this.DomUtils.remove('sltRubThemeList');
-    document.querySelector('gas-search-panel')?.remove();
-    document.querySelector('gas-chat-panel')?.remove();
+    // Eliminar elementos del DOM en el siguiente frame (requestAnimationFrame)
+    requestAnimationFrame(() => {
+      this.DomUtils.remove('buttonAdvancedSearch');
+      this.DomUtils.remove('buttonChatGas');
+      this.DomUtils.remove('ctnCurrentFileName');
+      this.DomUtils.remove('sltRubThemeList');
+      document.querySelector('gas-search-panel')?.remove();
+      document.querySelector('gas-chat-panel')?.remove();
+    });
 
     // Limpiar disposables de Monaco para evitar memory leaks
     this._modelChangeDisposable?.dispose();
@@ -1285,6 +1362,23 @@ class GasCustomEditor {
     this._chatShortcutBound = false;
     this._searchPanel = null;
     this._chatPanel = null;
+  }
+
+  /**
+   * Destructor del ciclo de vida: limpia todo el estado y el DOM.
+   * Complementa a disable() liberando recursos adicionales.
+   * @private
+   */
+  _destroy_() {
+    this.disable();
+    this.options = null;
+    this._settings = null;
+    this._snippets = null;
+    this._activeTheme = null;
+    this._aiAutocomplete = null;
+    this.editor = null;
+    this.element = null;
+    console.log("[GASTools] Instancia destruída");
   }
 
   /**
@@ -1336,3 +1430,5 @@ class GasCustomEditor {
     }
   }
 }
+
+})();

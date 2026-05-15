@@ -23,7 +23,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log("Current active tab:", tab);
 
     // Validamos la URL del editor de Google Apps Script
-    const isEditor_ = tab?.url?.includes('script.google.com/home/projects/') && tab?.url?.includes('/edit');
+    const isEditor_ = tab?.url?.includes('script.google.com/') && tab?.url?.includes('/edit');
     console.log("Is Google Apps Script Editor?", isEditor_);
 
     // Si no estamos en el editor, mostramos una pantalla de créditos o información básica

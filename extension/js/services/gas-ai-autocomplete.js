@@ -295,6 +295,7 @@ class GasAiAutocomplete {
           { role: 'user',   content: userPrompt          },
         ],
         temperature: config.temperature,
+        endpointUrl: config.endpointUrl,
         signal:      abortCtrl.signal,
         // Contexto adicional para el bridge
         languageId,
@@ -506,13 +507,14 @@ ${contextBefore}`
     const model    = cfg.model    || '';
     const apiKey   = cfg.apiKeys?.[provider] || '';
 
-    if (!apiKey) {
+    if (!apiKey && provider !== 'custom') {
       console.warn(`[AIAutocomplete] Sin API key para "${provider}".`);
       return null;
     }
 
     const provSettings = (cfg.providerSettings || {})[provider] || {};
     const temperature  = provSettings.temperature ?? 0.2;
+    const endpointUrl  = provSettings.endpointUrl || '';
     const baseSystem   = provSettings.systemPrompt
       || 'You are an expert Google Apps Script developer.';
 
@@ -525,7 +527,7 @@ You are completing code inline. Rules:
 - Respect the existing indentation exactly.
 - If nothing useful can be suggested, return an empty string.`;
 
-    return { provider, model, apiKey, systemPrompt, temperature };
+    return { provider, model, apiKey, systemPrompt, temperature, endpointUrl };
   }
 
   // ── Bridge con timeout ───────────────────────────────────────────────────

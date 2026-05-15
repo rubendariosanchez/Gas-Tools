@@ -119,6 +119,13 @@ const GAS_LLM_PROVIDERS = {
     ],
     keyHint: 'sk-or-v1-...',
   },
+  custom: {
+    label: 'Custom / Local',
+    icon: '⚙',
+    color: '#a0aec0',
+    models: [],
+    keyHint: 'API Key (Opcional)',
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -312,6 +319,7 @@ You respond in English and provide practical, production-ready code examples tha
       temperature: 0.3,
       systemPrompt: systemPrompt_,
       customModels: [],
+      endpointUrl: '',
     };    
 
     // Retornamos el merge de propiedades por defecto y las propiedades del proveedor seleccionado
@@ -382,7 +390,7 @@ You respond in English and provide practical, production-ready code examples tha
     this._config.model    = model;
 
     const apiKey = this._config.apiKeys?.[provider] || '';
-    if (!apiKey) {
+    if (!apiKey && provider !== 'custom') {
       this._appendSystemNotice_(
         `Missing API key for ${GAS_LLM_PROVIDERS[provider]?.label || provider}. Configure it in Settings.`
       );
@@ -426,6 +434,7 @@ You respond in English and provide practical, production-ready code examples tha
           apiKey,
           model,
           temperature: provSettings.temperature,
+          endpointUrl: provSettings.endpointUrl,
           messages: apiMessages,
         }),
       })
@@ -1788,6 +1797,19 @@ You respond in English and provide practical, production-ready code examples tha
               <select id="gc__settingsModelSelect" class="gc__select" aria-label="Select model"></select>
             </div>
 
+            <!-- Endpoint URL (Sólo visible para Custom) -->
+            <div class="gc__settingsField" id="gc__endpointField" style="display: none;">
+              <label class="gc__fieldLabel" for="gc__endpointUrl">Endpoint URL</label>
+              <input
+                id="gc__endpointUrl"
+                class="gc__textInput"
+                type="text"
+                autocomplete="off"
+                placeholder="http://localhost:11434/v1/chat/completions"
+              >
+              <p class="gc__fieldHint">URL completa del endpoint (ej. LM Studio, Ollama).</p>
+            </div>
+
             <!-- API Key -->
             <div class="gc__settingsField">
               <label class="gc__fieldLabel" id="gc__apiKeyLabel" for="gc__apiKeyInput">API Key</label>
@@ -1997,6 +2019,10 @@ You respond in English and provide practical, production-ready code examples tha
   }
 
   /** Maneja el cambio de proveedor en settings. */
+  /**
+   * Actualiza los campos del formulario de ajustes cuando cambia el proveedor.
+   * Muestra u oculta campos específicos como el Endpoint URL.
+   */
   _onSettingsProviderChange() {
     const settingsProvSel   = this.shadowRoot.getElementById('gc__settingsProviderSelect');
     const settingsModelSel  = this.shadowRoot.getElementById('gc__settingsModelSelect');
@@ -2005,6 +2031,8 @@ You respond in English and provide practical, production-ready code examples tha
     const tempVal           = this.shadowRoot.getElementById('gc__tempVal');
     const systemPrompt      = this.shadowRoot.getElementById('gc__systemPrompt');
     const customModelsInput = this.shadowRoot.getElementById('gc__customModels');
+    const endpointField     = this.shadowRoot.getElementById('gc__endpointField');
+    const endpointUrlInput  = this.shadowRoot.getElementById('gc__endpointUrl');
     if (!settingsProvSel) return;
 
     const id = settingsProvSel.value;
@@ -2030,6 +2058,13 @@ You respond in English and provide practical, production-ready code examples tha
     tempInput.setAttribute('aria-valuenow', tempInput.value);
     systemPrompt.value      = providerSettings.systemPrompt || '';
     customModelsInput.value = (providerSettings.customModels || []).join('\n');
+    
+    if (endpointUrlInput) {
+      endpointUrlInput.value = providerSettings.endpointUrl || '';
+    }
+    if (endpointField) {
+      endpointField.style.display = id === 'custom' ? 'block' : 'none';
+    }
   }
 
   /** Maneja el click en el resize handle. */
@@ -2047,6 +2082,7 @@ You respond in English and provide practical, production-ready code examples tha
     const tempInput         = this.shadowRoot.getElementById('gc__tempInput');
     const systemPrompt      = this.shadowRoot.getElementById('gc__systemPrompt');
     const customModelsInput = this.shadowRoot.getElementById('gc__customModels');
+    const endpointUrlInput  = this.shadowRoot.getElementById('gc__endpointUrl');
 
     try {
       const activeProvider = settingsProvSel?.value || this._config.provider || 'gemini';
@@ -2057,6 +2093,7 @@ You respond in English and provide practical, production-ready code examples tha
       const customModelsVal = customModelsInput?.value
         ? customModelsInput.value.split('\n').map(l => l.trim()).filter(Boolean)
         : [];
+      const endpointUrlVal   = (endpointUrlInput?.value || '').trim();
 
       // Actualizar config completa de forma consistente
       this._config = {
@@ -2077,6 +2114,7 @@ You respond in English and provide practical, production-ready code examples tha
             temperature: tempVal,
             systemPrompt: sysPromptVal,
             customModels: customModelsVal,
+            endpointUrl: endpointUrlVal,
           },
         },
       };

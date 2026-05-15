@@ -16,7 +16,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://script.google.com/home/projects/*/edit*"
+        "https://script.google.com/*"
       ],
       "js": [
         "extension/js/main-functions.js"
@@ -30,6 +30,8 @@
       "resources": [
         "extension/*.*",
         "extension/js/*.*",
+        "extension/js/services/*.*",
+        "extension/js/components/*.*",
         "themes/*.json",
         "src/vendor/codemirror/*"
       ],
@@ -47,7 +49,7 @@
       "128": "resources/icons/icon128.png"
     },
     "show_matches": [
-      "https://script.google.com/home/projects/*/edit*"
+      "https://script.google.com/*"
     ]
   },
   "content_security_policy": {
@@ -60,7 +62,9 @@
     "sidePanel"
   ],
   "host_permissions": [
-    "https://script.google.com/home/projects/*/edit*",
+    "http://localhost:*/*",
+    "http://127.0.0.1:*/*",
+    "https://script.google.com/*",
     "https://api.openai.com/*",
     "https://api.anthropic.com/*",
     "https://generativelanguage.googleapis.com/*",

@@ -1,11 +1,11 @@
 "use strict";
 
 // Importa el nombre de la propiedad global usada como clave en chrome.storage
-import { G_PROPERTY_NAME } from '../../src/js/utils/Variables.js';
+import { G_PROPERTY_NAME } from '../../../src/js/utils/Variables.js';
 // Importa la lista de temas predefinidos (protegidos)
-import { THEME_LIST } from '../../src/js/utils/Themes.js';
+import { THEME_LIST } from '../../../src/js/utils/Themes.js';
 // Importa el helper de IndexedDB para temas personalizados
-import { DB } from '../../src/js/utils/Storage.js';
+import { DB } from '../../../src/js/utils/Storage.js';
 
 /**
  * Resuelve el tema activo desde chrome.storage y, si es necesario, desde IndexedDB.
@@ -81,12 +81,11 @@ async function fetchThemeJson(themeText) {
  * @throws {Error} Si falta apiKey, provider o messages, o si el provider es desconocido.
  */
 export async function callLlmProvider(cfg) {
-  // Extrae los campos de configuración; la temperatura por defecto es 0.3
-  const { provider, apiKey, model, messages, temperature = 0.3 } = cfg;
+  const { provider, apiKey, model, messages, temperature = 0.3, endpointUrl } = cfg;
 
   // Valida que los campos obligatorios estén presentes antes de hacer cualquier llamada
-  if (!apiKey) throw new Error('API key vacía.');
   if (!provider) throw new Error('Provider no especificado.');
+  if (provider !== 'custom' && !apiKey) throw new Error('API key vacía.');
   if (!Array.isArray(messages) || !messages.length) throw new Error('No hay mensajes.');
 
   // Mapa de proveedores: cada entrada es una función lazy que ejecuta la llamada correspondiente
@@ -98,6 +97,7 @@ export async function callLlmProvider(cfg) {
     chatllm: () => _callChatLLM(apiKey, model, messages, temperature),
     nvidia: () => _callNvidia(apiKey, model, messages, temperature),
     openrouter: () => _callOpenRouter(apiKey, model, messages, temperature),
+    custom: () => _callCustom(apiKey, model, messages, temperature, endpointUrl),
   };
 
   // Busca el handler del proveedor solicitado
@@ -120,6 +120,37 @@ async function _readErr(res) {
   try { body = await res.text(); } catch (_) { /* sin cuerpo */ }
   // Trunca el mensaje a 240 caracteres para evitar errores demasiado verbosos
   return new Error(`HTTP ${res.status} ${res.statusText}: ${body.slice(0, 240)}`);
+}
+
+/**
+ * Realiza una solicitud genérica a un endpoint compatible con la API de OpenAI (ej. LM Studio, Ollama).
+ * 
+ * @async
+ * @param {string} apiKey      - Clave de API (puede ser vacía o ignorada por servidores locales).
+ * @param {string} model       - Identificador del modelo local.
+ * @param {Array}  messages    - Historial de mensajes.
+ * @param {number} temperature - Temperatura de muestreo.
+ * @param {string} endpointUrl - URL completa del endpoint (ej. http://localhost:11434/v1/chat/completions).
+ * @returns {Promise<string>} Texto de la respuesta del modelo.
+ */
+async function _callCustom(apiKey, model, messages, temperature, endpointUrl) {
+  if (!endpointUrl) throw new Error('Falta el Endpoint URL para el proveedor Custom.');
+
+  const headers = { 'Content-Type': 'application/json' };
+  // Algunos servidores locales fallan si enviamos un header de Auth vacío,
+  // así que solo lo incluimos si el usuario proporcionó una API Key explícita.
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  const res = await fetch(endpointUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model, messages, temperature }),
+  });
+
+  if (!res.ok) throw await _readErr(res);
+  return (await res.json())?.choices?.[0]?.message?.content ?? '';
 }
 
 /**

@@ -571,15 +571,7 @@ class GasSearchPanel extends HTMLElement {
       this.close();
     }
   }
-  /**
-   * Cierra el panel si el clic ocurrió completamente fuera del componente.
-   */
-  _onDocumentMouseDown(e) {
-    if (this.style.display !== 'block') return;
-    if (!e.composedPath().includes(this)) {
-      this.close();
-    }
-  }
+  _onDocumentMouseDown(e) {}
   /**
    * Coloca el panel en su posición inicial.
    * @param {boolean} [forceCenter=false]

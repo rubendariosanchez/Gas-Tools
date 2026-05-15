@@ -112,9 +112,9 @@ async function saveSingleOption_(optionId, value) {
         lastUpdated: new Date().toISOString()
     };
 
-    // Guardamos en IndexedDB
+    // Guardamos en IndexedDB y esperamos a que la notificación llegue al background
     await DB.set('settings', payload);
-    notifyEditors('settings');
+    await notifyEditors('settings');
 
     // Actualizamos la fecha de última actualización
     await syncLastUpdated();

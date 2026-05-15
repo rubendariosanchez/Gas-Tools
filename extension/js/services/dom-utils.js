@@ -5,6 +5,20 @@
  */
 
 class DomUtils {
+  /**
+   * Prefijo para clases CSS de elementos inyectados por la extensión.
+   * Permite limpiar todos los elementos de un tipo usando removeByClass.
+   * @type {string}
+   */
+  static REF_CLASS_PREFIX = 'qc-ref--';
+
+  /**
+   * Clase única para identificar elementos inyectados que deben ser limpiados
+   * al deshabilitar o reinicializar el componente.
+   * @type {string}
+   */
+  static REF_CLASS = 'qc-ref';
+
   static #policy = null;
   static #policyInitialized = false;
   
@@ -99,5 +113,15 @@ class DomUtils {
         callback.call(target, e, target);
       }
     });
+  }
+
+  /**
+   * Elimina del DOM todos los elementos que tengan la clase `qc-ref` o
+   * una clase que comience con `qc-ref--`.
+   * Útil para limpieza en disable() sin depender de IDs individuales.
+   */
+  static removeRefElements() {
+    document.querySelectorAll(`.${this.REF_CLASS}`).forEach(el => el.remove());
+    document.querySelectorAll(`[class*="${this.REF_CLASS_PREFIX}"]`).forEach(el => el.remove());
   }
 }
