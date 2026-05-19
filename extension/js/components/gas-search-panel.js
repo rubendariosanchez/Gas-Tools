@@ -113,6 +113,8 @@ class GasSearchPanel extends HTMLElement {
    */
   open(anchorEl = null) {
     if (anchorEl) this.setAnchor(anchorEl);
+    // Cerrar el panel de chat si está abierto: solo uno visible a la vez.
+    document.querySelector('gas-chat-panel')?.close?.();
     this.style.display       = 'block';
     this.style.pointerEvents = 'auto';
     this._repositionPanel(true);
@@ -739,10 +741,18 @@ class GasSearchPanel extends HTMLElement {
   _findAllMatches(searchText) {
     const grouped = {};
     const models  = window.monaco?.editor?.getModels?.() || [];
+    // Si gas-tools.js no inyectó un formateador, usamos un fallback basado
+    // en la URI para evitar que la búsqueda falle.
+    const formatName = typeof this._formatModelName === 'function'
+      ? this._formatModelName
+      : (model, idx) => {
+          const path = String(model?.uri?.path || '').replace(/^\//, '');
+          return path || `File ${idx + 1}`;
+        };
     models.forEach((model, index) => {
       const matches = model.findMatches(searchText, false, false, false, null, true);
       if (!matches?.length) return;
-      const displayName = this._formatModelName(model, index);
+      const displayName = formatName(model, index);
       const key = `${displayName}__gc__${index + 1}`;
       grouped[key] = matches.map((match) => ({
         fileName : displayName,
@@ -797,10 +807,14 @@ class GasSearchPanel extends HTMLElement {
     });
   }
   /**
-   * Renderiza la lista de coincidencias del archivo actualmente seleccionado.
+   * Renderiza la lista de coincidencias del archivo activo y deja el primer
+   * resultado seleccionado tanto visualmente como en el editor.
    * @param {string} [query='']
+   * @param {boolean} [autoGoTo=false] Si es true, navega al resultado activo
+   *   tras renderizar. Solo lo activamos en el flujo de búsqueda nueva, no
+   *   cuando el usuario navega manualmente con flechas.
    */
-  _renderResults(query = '') {
+  _renderResults(query = '', autoGoTo = false) {
     const summary          = this.shadowRoot.getElementById('gc__summary');
     const resultsContainer = this.shadowRoot.getElementById('gc__resultsContainer');
     const fileNames        = Object.keys(this._groupedResults);
@@ -852,6 +866,9 @@ class GasSearchPanel extends HTMLElement {
         this._activeIndex = 0;
       }
       this._syncActiveStyles();
+      // Tras una búsqueda nueva, además de marcar el resultado activo,
+      // navegamos a él en el editor para que la selección sea coherente.
+      if (autoGoTo) this._goTo(this._flatResults[this._activeIndex]);
     }
   }
   /**
@@ -894,9 +911,16 @@ class GasSearchPanel extends HTMLElement {
     this._editor.setSelection(result.range);
     this._editor.revealRangeInCenter(result.range);
     this._editor.focus();
-    const fileLabel = document.querySelector('#ctnCurrentFileName');
-    if (fileLabel) {
-      fileLabel.textContent = this._formatModelName(result.model, 0);
+    // Actualizar el nombre del archivo activo en la toolbar. Apuntamos al
+    // span interno del botón nuevo (`#qcCfnName`) en lugar del wrapper
+    // `#ctnCurrentFileName` para no romper la estructura del botón.
+    if (typeof this._formatModelName === 'function') {
+      const name = this._formatModelName(result.model, 0);
+      const nameEl = document.querySelector('#ctnCurrentFileName #qcCfnName');
+      if (nameEl) {
+        nameEl.textContent = name;
+        nameEl.title = name;
+      }
     }
   }
   /**

@@ -25,6 +25,8 @@ export const THEME_LIST = [
   { protected: true, text: "Espresso Libre", value: "espresso-libre", colors: "#2a211c,#43a8ed,#ffffff,#049b0a" },
   { protected: true, text: "GitHub", value: "github", colors: "#ffffff,#0550ae,#24292f,#0a3069" },
   { protected: true, text: "Idle", value: "idle", colors: "#ffffff,#0000ff,#000000,#008000" },
+  { protected: true, text: "Kiro dark", value: "kiro-dark", colors: "#ffffff,#b080ff,#211d25,#8dc8fb" },
+  { protected: true, text: "Kiro light", value: "kiro-light", colors: "#352f3d,#7138cc,#f2f1f4,#2d6a9f" },
   { protected: true, text: "Katzenmilch", value: "katzenmilch", colors: "#e0e0e0,#674917,#0e0e0e,#025f69" },
   { protected: true, text: "Kuroir Theme", value: "kuroir-theme", colors: "#e8e9e8,#24292e,#363636,#cd3228" },
   { protected: true, text: "Lazy", value: "lazy", colors: "#ffffff,#3b5bb5,#000000,#671d91" },

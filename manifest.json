@@ -32,6 +32,7 @@
         "extension/js/*.*",
         "extension/js/services/*.*",
         "extension/js/components/*.*",
+        "extension/html/*.html",
         "themes/*.json",
         "src/vendor/codemirror/*"
       ],

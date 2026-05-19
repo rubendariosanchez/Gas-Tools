@@ -33,30 +33,30 @@ class GasFolders {
   static COLLAPSED_CLASS       = 'qc__folder-collapsed';
   /** @type {string} Clase del `<span>` que envuelve el ícono SVG de un archivo. */
   static FILE_ICON_CLASS       = 'qc__file-icon';
-  /** @type {string} SVG del chevron de colapso/expansión (flecha hacia la derecha). */
-  static SVG_CHEVRON     = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M10 17l5-5-5-5v10z"/></svg>`;
-  /** @type {string} SVG de carpeta cerrada. */
-  static SVG_FOLDER      = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`;
-  /** @type {string} SVG de carpeta abierta. */
-  static SVG_FOLDER_OPEN = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/></svg>`;
-  /** @type {string} SVG para archivos `.gs` (Apps Script), color amarillo corporativo. */
-  static SVG_FILE_GS      = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 2h7l3 3v9H3z" stroke="#f4a225" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 2v3h3" stroke="#f4a225" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><text x="8" y="11.5" text-anchor="middle" font-family="monospace" font-size="6" font-weight="700" fill="#f4a225">{}</text></svg>`;
-  /** @type {string} SVG para archivos `.html`, color azul Google. */
-  static SVG_FILE_HTML    = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 2h7l3 3v9H3z" stroke="#4285f4" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 2v3h3" stroke="#4285f4" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 9 4 10.5 5.5 12M10.5 9 12 10.5 10.5 12" stroke="#4285f4" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  /** @type {string} SVG para archivos `.json`, color verde Google. */
-  static SVG_FILE_JSON    = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 2h7l3 3v9H3z" stroke="#34a853" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 2v3h3" stroke="#34a853" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 8.2c-.4 0-.7-.2-.7-.5V7c0-.5-.3-.8-.8-.8M9.5 8.2c.4 0 .7-.2.7-.5V7c0-.5.3-.8.8-.8" stroke="#34a853" stroke-width="1.2" stroke-linecap="round"/><circle cx="8" cy="10.5" r=".7" fill="#34a853"/></svg>`;
-  /** @type {string} SVG genérico para extensiones no reconocidas, color gris neutro. */
-  static SVG_FILE_GENERIC = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 2h7l3 3v9H3z" stroke="#9aa0a6" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 2v3h3" stroke="#9aa0a6" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><line x1="5.5" y1="8" x2="10.5" y2="8" stroke="#9aa0a6" stroke-width="1.1" stroke-linecap="round"/><line x1="5.5" y1="10" x2="10.5" y2="10" stroke="#9aa0a6" stroke-width="1.1" stroke-linecap="round"/><line x1="5.5" y1="12" x2="8.5" y2="12" stroke="#9aa0a6" stroke-width="1.1" stroke-linecap="round"/></svg>`;
+  /** SVG del chevron de colapso/expansión (estilo outline). */
+  static SVG_CHEVRON     = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>`;
+
+  /** SVG de carpeta cerrada en formato sólido. */
+  static SVG_FOLDER      = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
+
+  /** SVG de carpeta abierta en estilo outline. */
+  static SVG_FOLDER_OPEN = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3V7z"/><path d="M3 9h18l-2 8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z"/></svg>`;
+
   /**
-   * Mapa de extensiones de archivo a su SVG correspondiente.
-   * Las extensiones no presentes aquí caen al genérico {@link GasFolders.SVG_FILE_GENERIC}.
-   * @type {Object.<string, string>}
+   * Plantilla común: página de contorno con esquina doblada. El interior se
+   * inyecta como argumento, en coordenadas del viewBox 0 0 16 16.
+   * @param {string} color   Color del contorno y del símbolo interior.
+   * @param {string} content Markup SVG del símbolo (paths, lines, circles, etc.).
+   * @returns {string}
+   * @private
    */
-  static FILE_ICONS = {
-    gs:   GasFolders.SVG_FILE_GS,
-    html: GasFolders.SVG_FILE_HTML,
-    json: GasFolders.SVG_FILE_JSON,
-  };
+  static _filePageSvg(color, content) {
+    return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none">` +
+      `<path d="M3 2h6.5L13 5.5V14H3z" stroke="${color}" stroke-width="1.2" stroke-linejoin="round"/>` +
+      `<path d="M9.5 2v3.5H13" stroke="${color}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>` +
+      `${content}</svg>`;
+  }
+
   /**
    * Número máximo de intentos para localizar el `<ul role="listbox">` raíz
    * antes de abandonar la escucha. Evita un loop infinito si GAS nunca monta
@@ -114,6 +114,18 @@ class GasFolders {
      */
     this._folderColor    = '#5f6368';
     /**
+     * Mapa de colores por extensión de archivo. Se puede actualizar con
+     * {@link GasFolders#setFileColors} para personalizar cada tipo desde
+     * el popup. Las extensiones no listadas usan el color del icono genérico.
+     * @type {{gs:string, html:string, json:string, generic:string}}
+     */
+    this._fileColors     = {
+      gs:      '#4086f4',
+      html:    '#fc490b',
+      json:    '#1bb24b',
+      generic: '#9aa0a6',
+    };
+    /**
      * Contador de intentos acumulados para localizar el `<ul>` raíz.
      * Se resetea a 0 cada vez que se encuentra exitosamente.
      * @type {number}
@@ -151,6 +163,32 @@ class GasFolders {
     if (!color) return;
     this._folderColor = color;
     if (this._enabled) this._updateStyles_();
+  }
+
+  /**
+   * Actualiza uno o varios colores de iconos de archivo. Acepta un objeto
+   * parcial: `{ gs?: string, html?: string, json?: string, generic?: string }`.
+   * Tras actualizar fuerza un rebuild para que los SVG ya inyectados se
+   * vuelvan a generar con los nuevos colores.
+   *
+   * @param {{gs?:string, html?:string, json?:string, generic?:string}} colors
+   * @returns {void}
+   */
+  setFileColors(colors) {
+    if (!colors || typeof colors !== 'object') return;
+    let changed = false;
+    for (const key of ['gs', 'html', 'json', 'generic']) {
+      if (typeof colors[key] === 'string' && colors[key]) {
+        this._fileColors[key] = colors[key];
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    if (this._enabled) {
+      // Forzamos un rebuild para que los SVG ya inyectados se regeneren.
+      if (this._rebuildTimeout) clearTimeout(this._rebuildTimeout);
+      this._rebuildTimeout = setTimeout(() => this._rebuildFullTree(), 50);
+    }
   }
   /**
    * Habilita el componente: inyecta los estilos CSS, arranca la observación
@@ -725,18 +763,54 @@ class GasFolders {
     }
   }
   /**
-   * Determina el SVG apropiado para un archivo según su extensión.
-   * Las extensiones no registradas en {@link GasFolders.FILE_ICONS} reciben
-   * el ícono genérico {@link GasFolders.SVG_FILE_GENERIC}.
+   * Determina el SVG apropiado para un archivo según su extensión, usando
+   * los colores configurables guardados en `_fileColors`. Las extensiones
+   * sin entrada específica caen al icono genérico.
    *
    * @private
-   * @param {string} fileName - Nombre del archivo incluyendo extensión.
-   * @returns {string} Cadena SVG lista para insertar con `innerHTML`.
+   * @param {string} fileName Nombre del archivo incluyendo extensión.
+   * @returns {string} Cadena SVG lista para insertar.
    */
   _getFileIcon(fileName) {
-    // Extraer la extensión tomando el último segmento tras un punto
     const ext = (fileName || '').split('.').pop().toLowerCase();
-    return GasFolders.FILE_ICONS[ext] || GasFolders.SVG_FILE_GENERIC;
+    if (ext === 'gs')   return this._renderFileSvg_('gs');
+    if (ext === 'html') return this._renderFileSvg_('html');
+    if (ext === 'json') return this._renderFileSvg_('json');
+    return this._renderFileSvg_('generic');
+  }
+
+  /**
+   * Construye el SVG del icono para un tipo de archivo concreto, leyendo
+   * el color desde `_fileColors[type]` para que los cambios desde el popup
+   * se reflejen inmediatamente en el próximo render.
+   *
+   * @private
+   * @param {'gs'|'html'|'json'|'generic'} type
+   * @returns {string}
+   */
+  _renderFileSvg_(type) {
+    const color = this._fileColors[type] || this._fileColors.generic;
+    let inner;
+    if (type === 'gs') {
+      inner =
+        `<path d="M6.4 8.5c-.55 0-.85.3-.85.85v.55c0 .35-.2.55-.55.55.35 0 .55.2.55.55v.55c0 .55.3.85.85.85" stroke="${color}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>` +
+        `<path d="M9.6 8.5c.55 0 .85.3.85.85v.55c0 .35.2.55.55.55-.35 0-.55.2-.55.55v.55c0 .55-.3.85-.85.85" stroke="${color}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>`;
+    } else if (type === 'html') {
+      inner =
+        `<polyline points="6.6 8.6 4.9 10.7 6.6 12.8" stroke="${color}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>` +
+        `<polyline points="9.4 8.6 11.1 10.7 9.4 12.8" stroke="${color}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>`;
+    } else if (type === 'json') {
+      inner =
+        `<path d="M6 8.3c-.5 0-.8.3-.8.8v.6c0 .4-.2.6-.5.6.3 0 .5.2.5.6v.6c0 .5.3.8.8.8" stroke="${color}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>` +
+        `<path d="M10 8.3c.5 0 .8.3.8.8v.6c0 .4.2.6.5.6-.3 0-.5.2-.5.6v.6c0 .5-.3.8-.8.8" stroke="${color}" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>` +
+        `<circle cx="8" cy="10.7" r=".55" fill="${color}"/>`;
+    } else {
+      inner =
+        `<line x1="5.5" y1="8.5"  x2="10.5" y2="8.5"  stroke="${color}" stroke-width="1.1" stroke-linecap="round"/>` +
+        `<line x1="5.5" y1="10.5" x2="10.5" y2="10.5" stroke="${color}" stroke-width="1.1" stroke-linecap="round"/>` +
+        `<line x1="5.5" y1="12.5" x2="8.5"  y2="12.5" stroke="${color}" stroke-width="1.1" stroke-linecap="round"/>`;
+    }
+    return GasFolders._filePageSvg(color, inner);
   }
   /**
    * Inserta el `<span>` con el ícono SVG del archivo directamente antes del
@@ -858,6 +932,12 @@ class GasFolders {
         if (settings['gas-folders-color']) {
           folders.setColor(settings['gas-folders-color']);
         }
+        // Aplicar colores de archivo personalizados desde el popup.
+        folders.setFileColors({
+          gs:   settings['gas-file-gs-color'],
+          html: settings['gas-file-html-color'],
+          json: settings['gas-file-json-color'],
+        });
         folders.enable();
       }
       // Si gas-folders es false, el componente permanece deshabilitado (estado inicial)
@@ -866,13 +946,9 @@ class GasFolders {
     }
   });
   /**
-   * Escucha cambios de configuración en tiempo real emitidos por la extensión
-   * cuando el usuario modifica ajustes en el panel de opciones.
-   *
-   * Gestiona tres posibles cambios:
-   * - `gas-folders`: habilitar o deshabilitar el componente.
-   * - `gas-folders-color`: actualizar el color de íconos de carpeta.
-   * - `global-enable = false`: deshabilitar todos los módulos de la extensión.
+   * Escucha cambios de configuración en tiempo real desde el popup.
+   * Maneja: toggle del componente, color de carpeta, colores de archivos
+   * y el apagado global de la extensión.
    *
    * @listens document#GAS_SettingsUpdated
    * @param {CustomEvent} e - Evento con `detail` = JSON string de opciones modificadas.
@@ -891,6 +967,19 @@ class GasFolders {
           if (folders._rebuildTimeout) clearTimeout(folders._rebuildTimeout);
           folders._rebuildTimeout = setTimeout(() => folders._rebuildFullTree(), 50);
         }
+      }
+      // Colores de archivos por extensión: cualquiera de las tres claves
+      // dispara un setFileColors parcial (solo se aplica lo presente).
+      if (
+        'gas-file-gs-color'   in options ||
+        'gas-file-html-color' in options ||
+        'gas-file-json-color' in options
+      ) {
+        folders.setFileColors({
+          gs:   options['gas-file-gs-color'],
+          html: options['gas-file-html-color'],
+          json: options['gas-file-json-color'],
+        });
       }
       // Apagado global de la extensión: deshabilitar sin importar el estado actual
       if ('global-enable' in options && !options['global-enable']) {

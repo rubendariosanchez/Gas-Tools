@@ -80,14 +80,22 @@ function initAutoSave_() {
 }
 
 /**
- * Oculta o muestra el selector de color de carpetas.
+ * Oculta o muestra los selectores de color (carpeta y archivos) en función
+ * del toggle principal de gas-folders. Si el toggle está apagado, el árbol
+ * personalizado no se aplica y los color pickers no aportan nada.
  * @private
  */
 function updateFolderColorVisibility_(enabled) {
-    const colorEl = document.getElementById('gas-folders-color');
-    if (colorEl) {
-        colorEl.style.display = enabled ? 'block' : 'none';
-    }
+    const ids = [
+        'gas-folders-color',
+        'gas-file-gs-color',
+        'gas-file-html-color',
+        'gas-file-json-color',
+    ];
+    ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = enabled ? 'block' : 'none';
+    });
 }
 
 /**
@@ -172,12 +180,18 @@ async function loadQualityCodeSettings_() {
         });
 
         // Procesar color inputs
-        const colorInput = document.getElementById('gas-folders-color');
-        if (colorInput && settings['gas-folders-color']) {
-            colorInput.setAttribute('value', settings['gas-folders-color']);
-        }
-        
-        // Inicializar visibilidad del color picker
+        const colorIds = [
+            'gas-folders-color',
+            'gas-file-gs-color',
+            'gas-file-html-color',
+            'gas-file-json-color',
+        ];
+        colorIds.forEach((id) => {
+            const el = document.getElementById(id);
+            if (el && settings[id]) el.setAttribute('value', settings[id]);
+        });
+
+        // Inicializar visibilidad de los color pickers
         updateFolderColorVisibility_(settings['gas-folders'] !== false);
 
     } catch (error) {

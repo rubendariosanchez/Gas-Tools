@@ -91,6 +91,7 @@ class GasCustomEditor {
 
     // ── Cambio de archivo ────────────────────────────────────────
     this._modelChangeDisposable = null;
+    this._modelCreateDisposable = null;
     this._lastModelUri = null;
     this._fileCheckInterval = null;
 
@@ -275,6 +276,12 @@ class GasCustomEditor {
       this._modelChangeDisposable.dispose();
       this._modelChangeDisposable = null;
     }
+    // onDidCreateModel eliminado: se dispara por cada archivo al cargar
+    // el editor, no indica un cambio de archivo por acción del usuario.
+    if (this._modelCreateDisposable) {
+      this._modelCreateDisposable.dispose();
+      this._modelCreateDisposable = null;
+    }
     this._stopFileCheckInterval_();
 
     // Debounce compartido: si llegan varios eventos seguidos (p. ej. el
@@ -311,8 +318,11 @@ class GasCustomEditor {
     this._refreshRootParent_();
     if (this._snippets.length > 0) this.reloadSnippets();
     this.reloadTheme();
+    console.log("_onFileChange__onFileChange__onFileChange__onFileChange__onFileChange__onFileChange__onFileChange__onFileChange_")
     this._buildUriToNameMap();
-    // Mantener los paneles sincronizados con el editor activo y el mapa.
+    // Mantener los paneles sincronizados con el editor activo y el mapa de
+    // archivos. Si el panel quedó con una referencia stale, `_goTo` no podrá
+    // navegar correctamente.
     this._searchPanel?.setEditor?.(this.editor);
     this._searchPanel?.setFileNameObjectMap?.(this._fileNameObjectMap);
     this._chatPanel?.setEditor?.(this.editor);
@@ -342,29 +352,34 @@ class GasCustomEditor {
 
   /**
    * Recalcula `this._rootParent` apuntando a la `c-wiz` con
-   * `aria-busy="false"` (el panel SPA visible). Si solo hay una `c-wiz`
-   * y no está oculta, la usamos directamente; en caso contrario buscamos
-   * la primera no oculta y no marcada como busy.
+   * `aria-busy="false"` (el panel SPA visible). Si no encuentra ninguna,
+   * deja el valor previo intacto: prefiere una referencia "stale" sobre
+   * `null`, dado que el observador resolverá pronto y mientras tanto
+   * los métodos consumidores tienen un fallback a `document`.
    *
-   * Si no encuentra ninguna válida, deja el valor previo intacto: prefiere
-   * una referencia "stale" sobre `null`, dado que el observador resolverá
-   * pronto y los consumidores tienen un fallback a `document`.
+   * Llamar:
+   *   - Al inicio de `init()` (raíz puede haber cambiado tras navegación SPA).
+   *   - Antes de `_buildUriToNameMap_` (el árbol vive dentro de la c-wiz).
+   *   - Al detectar cambio de archivo (`_onFileChange_`).
    *
    * @returns {HTMLElement|null} Raíz activa o `null` si nunca se encontró.
    * @private
    */
   _refreshRootParent_() {
-    const containers = document.querySelectorAll('c-wiz[data-p]');
-    let next = null;
+    const containers_ = document.querySelectorAll('c-wiz[data-p]');
 
-    if (containers.length === 1 && containers[0].getAttribute('aria-hidden') !== 'true') {
-      next = containers[0];
-    } else {
-      next = document.querySelector(
-        'c-wiz[data-p]:not([aria-hidden="true"]):not([aria-busy="true"])'
-      );
+    // Se valida si solo existe uno
+    if (
+      containers_.length === 1 &&
+      containers_[0].getAttribute('aria-hidden') !== 'true'
+    ) {
+      this._rootParent = containers_[0];
+      return containers_[0];
     }
 
+    const next = document.querySelector(
+      'c-wiz[data-p]:not([aria-hidden="true"]):not([aria-busy="true"])'
+    );
     if (next) this._rootParent = next;
     return this._rootParent ?? null;
   }
@@ -391,14 +406,15 @@ class GasCustomEditor {
    * anclaje confiable es el modelo activo: Monaco nos dice qué URI está
    * abierta, la UI de GAS nos dice qué archivo está activo. Con ese par
    * fijado, asignamos el resto por posición excluyendo ese slot de ambas listas.
-   * @private
    */
   _buildUriToNameMap() {
-    const map = new Map();    
-    const scope = this._getDomScope_();
+    const map = new Map();
+    console.log(this._getDomScope_().querySelectorAll('li[role="option"][data-res-id]'))
 
     // 1. Leer los archivos del árbol DOM en el orden visual real
-    const items = [...scope.querySelectorAll('li[role="option"][data-res-id]')];
+    const items = [...this._getDomScope_().querySelectorAll('li[role="option"][data-res-id]')];
+    console.log("items", items)
+    
     const files = items
       .map(li => ({
         name: li.getAttribute('aria-label')?.trim(),
@@ -406,7 +422,7 @@ class GasCustomEditor {
       }))
       .filter(f => f.name)
       .sort((a, b) => a.index - b.index);
-
+    console.log("files", files)
     // 2. Separar appsscript.json del resto (tiene una posición especial en Monaco)
     const normalFiles = files.filter(f => f.name !== 'appsscript.json');
     const appScript = files.find(f => f.name === 'appsscript.json');
@@ -479,94 +495,18 @@ class GasCustomEditor {
     return /\.(gs|js|ts|json|html|css|md|txt)$/i.test(text);
   }
 
-  /**
-   * Limpia botones inyectados con un id dado y libera los listeners
-   * registrados en `document` por su nombre. Centraliza la lógica de
-   * teardown común a búsqueda y chat.
-   *
-   * @param {string} buttonId  ID del wrapper a remover (p.ej. `'buttonChatGas'`).
-   * @param {string} panelTag  Tag del Web Component a remover del body
-   *   (p.ej. `'gas-chat-panel'`).
-   * @param {{type:string, capture?:boolean}[]} listenerSpecs  Lista de
-   *   listeners a quitar; cada uno con la propiedad de instancia que lo
-   *   guarda (`prop`) y el tipo de evento (`type`, `capture` opcional).
-   * @private
-   */
-  _teardownToolbarUi_(buttonId, panelTag, listenerSpecs) {
-    document.querySelectorAll(`#${buttonId}`).forEach((el) => el.remove());
-    document.querySelector(panelTag)?.remove();
-    listenerSpecs.forEach(({ prop, type, capture }) => {
-      const fn = this[prop];
-      if (fn) document.removeEventListener(type, fn, capture);
-      this[prop] = null;
-    });
-  }
-
-  /**
-   * Registra un atajo global a nivel de `document` con captura. Devuelve
-   * la función registrada para que el caller la guarde y pueda removerla
-   * en su teardown.
-   *
-   * @param {string} key      Letra del atajo (no sensible a mayúsculas).
-   * @param {() => void} run  Acción a ejecutar.
-   * @returns {(evt: KeyboardEvent) => void} Listener registrado.
-   * @private
-   */
-  _bindGlobalShortcut_(key, run) {
-    const listener = (evt) => {
-      if (!(evt.key?.toLowerCase() === key && evt.altKey && evt.shiftKey)) return;
-      evt.preventDefault();
-      evt.stopPropagation();
-      run();
-    };
-    document.addEventListener('keydown', listener, true);
-    return listener;
-  }
-
-  /**
-   * Registra un atajo dentro de Monaco. `editor.addCommand` no expone
-   * API de remoción, así que el caller debe pasar un flag de "ya
-   * registrado" para evitar duplicados al re-inyectar.
-   *
-   * @param {string} flagProp   Propiedad de instancia que actúa de guard.
-   * @param {number} keyCode    `monaco.KeyCode.KeyX` correspondiente.
-   * @param {() => void} run    Acción a ejecutar.
-   * @private
-   */
-  _bindMonacoShortcut_(flagProp, keyCode, run) {
-    if (this[flagProp]) return;
-    if (!this.editor?.addCommand || !window.monaco?.KeyMod) return;
-    this[flagProp] = true;
-    this.editor.addCommand(
-      window.monaco.KeyMod.Alt | window.monaco.KeyMod.Shift | keyCode,
-      run
-    );
-  }
-
   // ──────────────────────────────────────────
   // BÚSQUEDA AVANZADA
   // ──────────────────────────────────────────
 
   /**
-   * Inserta un botón nativo (HTML del recurso) ANTES de cada toolbar
-   * `.INSTk` activa, alineado a su izquierda. Idempotente: solo añade el
-   * botón en toolbars que aún no lo tienen, evitando duplicados al
-   * reinyectar después de un cambio de panel SPA.
-   *
-   * @param {string} buttonId   ID del wrapper a crear (también usado para
-   *   evitar duplicados, p.ej. `'buttonAdvancedSearch'`).
-   * @param {string} html       HTML del botón a inyectar dentro del wrapper.
-   * @private
+   * Punto de entrada para la inyección del botón y panel de búsqueda
+   * avanzada. Precondición: `init()` garantiza que `_toolsMenuElements`
+   * esté poblado.
    */
-  _injectToolbarButton_(buttonId, html) {
-    this._toolsMenuElements.forEach((toolbar) => {
-      if (toolbar.parentNode.querySelector(`:scope > #${buttonId}`)) return;
-      const option = document.createElement('div');
-      option.className = 'yggLIc';
-      option.id = buttonId;
-      this.DomUtils.setHTML(option, html);
-      toolbar.parentNode.insertBefore(option, toolbar);
-    });
+  _enableAdvancedSearch() {
+    if (!this._toolsMenuElements?.length) return;
+    this._injectAdvancedSearch_();
   }
 
   /**
@@ -604,8 +544,22 @@ class GasCustomEditor {
     this._searchPanel.setFileNameObjectMap(this._fileNameObjectMap);
 
     // Y solo añadir los botones que falten en alguna toolbar.
-    this._injectToolbarButton_('buttonAdvancedSearch', this.options.searchButton);
-    this._injectToolbarButton_('buttonChatGas',        this.options.chatButton);
+    this._toolsMenuElements.forEach((toolbar) => {
+      if (!toolbar.parentNode.querySelector(':scope > #buttonAdvancedSearch')) {
+        const option = document.createElement('div');
+        option.className = 'yggLIc';
+        option.id = 'buttonAdvancedSearch';
+        this.DomUtils.setHTML(option, this.options.searchButton);
+        toolbar.parentNode.insertBefore(option, toolbar);
+      }
+      if (!toolbar.parentNode.querySelector(':scope > #buttonChatGas')) {
+        const option = document.createElement('div');
+        option.className = 'yggLIc';
+        option.id = 'buttonChatGas';
+        this.DomUtils.setHTML(option, this.options.chatButton);
+        toolbar.parentNode.insertBefore(option, toolbar);
+      }
+    });
 
     // El indicador de archivo activo se monta dentro de cada toolbar para
     // que aparezca alineado a la derecha.
@@ -687,7 +641,13 @@ class GasCustomEditor {
 
     // 3. Insertar un botón en cada toolbar `.INSTk` activa, ANTES del
     //    elemento, para que aparezca a su izquierda.
-    this._injectToolbarButton_('buttonAdvancedSearch', this.options.searchButton);
+    this._toolsMenuElements.forEach((toolbar) => {
+      const option = document.createElement('div');
+      option.className = 'yggLIc';
+      option.id = 'buttonAdvancedSearch';
+      this.DomUtils.setHTML(option, this.options.searchButton);
+      toolbar.parentNode.insertBefore(option, toolbar);
+    });
 
     // 4. Click delegado a nivel de documento: cualquier `#rsBtnSearchGas`
     //    en cualquier toolbar `.INSTk` dispara el panel. Verificamos que
@@ -706,19 +666,29 @@ class GasCustomEditor {
 
     // 5. Atajo global Alt+Shift+F. Siempre abre y enfoca el panel; si ya
     //    está abierto, lo deja abierto (no alterna).
-    const openSearch = () => {
+    this._onSearchShortcut = (evt) => {
+      if (!(evt.key?.toLowerCase() === 'f' && evt.altKey && evt.shiftKey)) return;
+      evt.preventDefault();
+      evt.stopPropagation();
       this._buildUriToNameMap();
       this._searchPanel?.setFileNameObjectMap(this._fileNameObjectMap);
       this._searchPanel?.open(document.querySelector('#rsBtnSearchGas'));
     };
-    this._onSearchShortcut = this._bindGlobalShortcut_('f', openSearch);
+    document.addEventListener('keydown', this._onSearchShortcut, true);
 
-    // 6. Atajo dentro de Monaco (registrado una sola vez por vida del editor).
-    this._bindMonacoShortcut_(
-      '_searchMonacoCommandBound',
-      window.monaco?.KeyCode?.KeyF,
-      openSearch
-    );
+    // 6. Atajo dentro de Monaco (registrado una sola vez por vida del editor;
+    //    `addCommand` no expone API de remoción).
+    if (!this._searchMonacoCommandBound && this.editor?.addCommand && window.monaco?.KeyMod) {
+      this._searchMonacoCommandBound = true;
+      this.editor.addCommand(
+        window.monaco.KeyMod.Alt | window.monaco.KeyMod.Shift | window.monaco.KeyCode.KeyF,
+        () => {
+          this._buildUriToNameMap();
+          this._searchPanel?.setFileNameObjectMap(this._fileNameObjectMap);
+          this._searchPanel?.open(document.querySelector('#rsBtnSearchGas'));
+        }
+      );
+    }
   }
 
   /**
@@ -727,11 +697,17 @@ class GasCustomEditor {
    * @private
    */
   _teardownAdvancedSearch_() {
-    this._teardownToolbarUi_('buttonAdvancedSearch', 'gas-search-panel', [
-      { prop: '_onSearchButtonClick', type: 'click' },
-      { prop: '_onSearchShortcut',    type: 'keydown', capture: true },
-    ]);
+    document.querySelectorAll('#buttonAdvancedSearch').forEach((el) => el.remove());
+    document.querySelector('gas-search-panel')?.remove();
+    if (this._onSearchButtonClick) {
+      document.removeEventListener('click', this._onSearchButtonClick);
+    }
+    if (this._onSearchShortcut) {
+      document.removeEventListener('keydown', this._onSearchShortcut, true);
+    }
     this._searchPanel = null;
+    this._onSearchButtonClick = null;
+    this._onSearchShortcut = null;
   }
 
   /**
@@ -750,7 +726,13 @@ class GasCustomEditor {
     this._chatPanel.setEditor(this.editor);
 
     // 3. Insertar un botón en cada toolbar `.INSTk` activa.
-    this._injectToolbarButton_('buttonChatGas', this.options.chatButton);
+    this._toolsMenuElements.forEach((toolbar) => {
+      const option = document.createElement('div');
+      option.className = 'yggLIc';
+      option.id = 'buttonChatGas';
+      this.DomUtils.setHTML(option, this.options.chatButton);
+      toolbar.parentNode.insertBefore(option, toolbar);
+    });
 
     // 4. Click delegado a nivel de documento. Verificamos que el trigger
     //    esté dentro de una toolbar `.INSTk` o del contenedor inyectado.
@@ -764,19 +746,28 @@ class GasCustomEditor {
     };
     document.addEventListener('click', this._onChatButtonClick);
 
-    // 5. Atajo global Alt+Shift+C. Siempre abre el panel.
-    const openChat = () => {
+    // 5. Atajo global Alt+Shift+C. Siempre abre el panel; si ya está
+    //    abierto, lo deja abierto (no alterna).
+    this._onChatShortcut = (evt) => {
+      if (!(evt.key?.toLowerCase() === 'c' && evt.altKey && evt.shiftKey)) return;
+      evt.preventDefault();
+      evt.stopPropagation();
       this._chatPanel?.setEditor(this.editor);
       this._chatPanel?.open();
     };
-    this._onChatShortcut = this._bindGlobalShortcut_('c', openChat);
+    document.addEventListener('keydown', this._onChatShortcut, true);
 
     // 6. Atajo dentro de Monaco (registrado una sola vez).
-    this._bindMonacoShortcut_(
-      '_chatMonacoCommandBound',
-      window.monaco?.KeyCode?.KeyC,
-      openChat
-    );
+    if (!this._chatMonacoCommandBound && this.editor?.addCommand && window.monaco?.KeyMod) {
+      this._chatMonacoCommandBound = true;
+      this.editor.addCommand(
+        window.monaco.KeyMod.Alt | window.monaco.KeyMod.Shift | window.monaco.KeyCode.KeyC,
+        () => {
+          this._chatPanel?.setEditor(this.editor);
+          this._chatPanel?.open();
+        }
+      );
+    }
   }
 
   /**
@@ -785,11 +776,17 @@ class GasCustomEditor {
    * @private
    */
   _teardownChatPanel_() {
-    this._teardownToolbarUi_('buttonChatGas', 'gas-chat-panel', [
-      { prop: '_onChatButtonClick', type: 'click' },
-      { prop: '_onChatShortcut',    type: 'keydown', capture: true },
-    ]);
+    document.querySelectorAll('#buttonChatGas').forEach((el) => el.remove());
+    document.querySelector('gas-chat-panel')?.remove();
+    if (this._onChatButtonClick) {
+      document.removeEventListener('click', this._onChatButtonClick);
+    }
+    if (this._onChatShortcut) {
+      document.removeEventListener('keydown', this._onChatShortcut, true);
+    }
     this._chatPanel = null;
+    this._onChatButtonClick = null;
+    this._onChatShortcut = null;
   }
 
   // ──────────────────────────────────────────
@@ -1414,23 +1411,26 @@ class GasCustomEditor {
    * @private
    */
   _reinjectUI_() {
-    const inject = () => {
-      this._injectAdvancedSearch_();
-      this._injectChatPanel_();
-      this._injectCurrentFile_();
-    };
-
-    requestAnimationFrame(() => {
+    const doInject = () => {
       if (this._toolsMenuElements?.length) {
-        inject();
-        return;
+        this._injectAdvancedSearch_();
+        this._injectChatPanel_();
+        this._injectCurrentFile_();
+      } else {
+        // Las toolbars pueden no existir si disable() se llamó muy temprano.
+        this._waitForToolsMenu_().then((list) => {
+          this._toolsMenuElements = list;
+          if (list.length) {
+            requestAnimationFrame(() => {
+              this._injectAdvancedSearch_();
+              this._injectChatPanel_();
+              this._injectCurrentFile_();
+            });
+          }
+        });
       }
-      // Las toolbars pueden no existir si disable() se llamó muy temprano.
-      this._waitForToolsMenu_().then((list) => {
-        this._toolsMenuElements = list;
-        if (list.length) requestAnimationFrame(inject);
-      });
-    });
+    };
+    requestAnimationFrame(doInject);
   }
 
   /**
@@ -1458,9 +1458,27 @@ class GasCustomEditor {
     // Liberar disposables de Monaco para evitar memory leaks.
     this._modelChangeDisposable?.dispose();
     this._modelChangeDisposable = null;
+    this._modelCreateDisposable?.dispose();
+    this._modelCreateDisposable = null;
 
     this._stopFileCheckInterval_();
     this._lastModelUri = null;
+  }
+
+  /**
+   * Destructor del ciclo de vida: limpia todo el estado y el DOM.
+   * Complementa a disable() liberando recursos adicionales.
+   * @private
+   */
+  _destroy_() {
+    this.disable();
+    this.options = null;
+    this._settings = null;
+    this._snippets = null;
+    this._activeTheme = null;
+    this._aiAutocomplete = null;
+    this.editor = null;
+    this.element = null;
   }
 
   /**

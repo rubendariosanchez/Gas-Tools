@@ -9,6 +9,10 @@ export const DEFAULT_SETTINGS_OPTIONS = {
     'ai-autocomplete': false,
     'gas-folders': true,
     'gas-folders-color': '#5f6368',
+    'gas-file-gs-color':   '#4086f4',
+    'gas-file-html-color': '#fc490b',
+    'gas-file-json-color': '#1bb24b',
+    'gas-error-lens': true,
     // Visuals & Layout
     'showMinimap': false,
     'lineNumbers': 'on',

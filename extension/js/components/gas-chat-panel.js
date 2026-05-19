@@ -120,11 +120,11 @@ const GAS_LLM_PROVIDERS = {
     keyHint: 'sk-or-v1-...',
   },
   custom: {
-    label: 'Custom / Local',
+    label: 'Local Provider',
     icon: '⚙',
     color: '#a0aec0',
     models: [],
-    keyHint: 'API Key (Opcional)',
+    keyHint: 'API Key (Optional)',
   },
 };
 
@@ -161,8 +161,9 @@ class GasChatPanel extends HTMLElement {
     /** @type {Map<string, Function>} Resolvers pendientes para llamadas al bridge. */
     this._pendingBridgeCalls = new Map();
 
-    // Estado del menú de autocompletado @.
-    this._mentionMenu  = null;
+    // Estado del menú de autocompletado con `@`.
+    // El elemento DOM se obtiene via `shadowRoot.getElementById('gc__mentionMenu')`
+    // cuando se necesita; aquí solo guardamos índice, posición y query.
     this._mentionIndex = -1;
     this._mentionStart = -1;
     this._mentionQuery = '';
@@ -189,6 +190,7 @@ class GasChatPanel extends HTMLElement {
   // CICLO DE VIDA
   // ──────────────────────────────────────────────────────────────────
 
+  /** Renderiza el shell, conecta listeners globales y carga la configuración. */
   connectedCallback() {
     this._render();
     this._setupListeners();
@@ -197,9 +199,7 @@ class GasChatPanel extends HTMLElement {
     this._loadConfig();
   }
 
-  /**
-   * Permite eliminar los eventos al eliminar el componente.
-   */
+  /** Libera todos los listeners globales para evitar memory leaks. */
   disconnectedCallback() {
     document.removeEventListener('GAS_LLM_RESPONSE', this._onLlmResponse);
     document.removeEventListener('GAS_LLM_CONFIG_RESULT', this._onBridgeResult);
@@ -213,15 +213,20 @@ class GasChatPanel extends HTMLElement {
   // ──────────────────────────────────────────────────────────────────
 
   /**
-   * Inyecta la instancia activa de Monaco. Llamado desde gasTools.js.
+   * Inyecta la instancia activa de Monaco. Llamado desde gas-tools.js cuando
+   * se crea o cambia el editor.
    * @param {object|null} editor
    */
   setEditor(editor) {
     this._editor = editor || null;
   }
 
-  /** Abre el panel y enfoca el textarea. */
+  /**
+   * Abre el panel y enfoca el textarea. Cierra el panel de búsqueda si está
+   * abierto (solo uno visible a la vez).
+   */
   open() {
+    document.querySelector('gas-search-panel')?.close?.();
     this.style.display = 'flex';
     this.style.pointerEvents = 'auto';
     setTimeout(() => {
@@ -229,13 +234,13 @@ class GasChatPanel extends HTMLElement {
     }, 30);
   }
 
-  /** Cierra el panel. */
+  /** Cierra el panel y deshabilita interacciones. */
   close() {
     this.style.display = 'none';
     this.style.pointerEvents = 'none';
   }
 
-  /** Alterna abierto/cerrado. */
+  /** Alterna entre abierto y cerrado. */
   toggle() {
     if (this.style.display === 'flex') this.close();
     else this.open();
@@ -300,40 +305,37 @@ class GasChatPanel extends HTMLElement {
     );
   }
 
-  /** Obtiene la configuración (temperature, systemPrompt, customModels) de un proveedor. */
+  /**
+   * Devuelve la configuración del proveedor (temperatura, prompt, modelos
+   * personalizados, endpoint) fusionando defaults con lo guardado.
+   * @param {string} providerId
+   * @returns {{temperature:number, systemPrompt:string, customModels:string[], endpointUrl:string}}
+   * @private
+   */
   _getProviderSettings_(providerId) {
-    const systemPrompt_ = `You are a senior Google Apps Script (GAS) developer with deep expertise in building enterprise automation solutions for Google Workspace.
-
-Your role:
-- Write clean, efficient, and well-documented Google Apps Script code
-- Use modern ES6+ JavaScript features appropriate for GAS
-- Follow Google Apps Script best practices and naming conventions
-- Prefer Google Workspace native services (SpreadsheetApp, DriveApp, GmailApp, etc.) over external APIs when possible
-- Include proper error handling and logging in all functions
-- Write modular and reusable code with clear comments in English
-- Use JSDoc-style comments for functions that will be used as triggers or custom functions
-
-You respond in English and provide practical, production-ready code examples that users can directly copy into their Google Apps Script projects.`;
-
     const defaults = {
       temperature: 0.3,
-      systemPrompt: systemPrompt_,
+      systemPrompt:
+`You are a senior Google Apps Script (GAS) developer with deep expertise in Google Workspace automation.
+Write clean, modern ES6+ code following GAS best practices. Prefer native Workspace services (SpreadsheetApp, DriveApp, GmailApp, etc.) over external APIs.
+Include error handling, logging and JSDoc on triggers and custom functions.
+Respond in English with practical, production-ready code examples.`,
       customModels: [],
       endpointUrl: '',
-    };    
-
-    // Retornamos el merge de propiedades por defecto y las propiedades del proveedor seleccionado
-    return { 
-      ...defaults, 
-      ...((this._config.providerSettings || {})[providerId] || {}) 
+    };
+    return {
+      ...defaults,
+      ...((this._config.providerSettings || {})[providerId] || {}),
     };
   }
 
   /**
-   * Envía un evento al bridge y espera la respuesta correlacionada (timeout 10 s).
+   * Envía un evento al bridge y resuelve cuando llega la respuesta con
+   * el mismo `requestId`. Si pasan 10 s sin respuesta, resuelve con `null`.
    * @param {string} eventName
    * @param {object} [payload]
    * @returns {Promise<any>}
+   * @private
    */
   _bridgeCall_(eventName, payload = {}) {
     return new Promise((resolve) => {
@@ -354,8 +356,10 @@ You respond in English and provide practical, production-ready code examples tha
   }
 
   /**
-   * Recibe resultados del bridge, empareja por requestId y resuelve la promesa pendiente.
+   * Recibe resultados del bridge y dispara el resolver de la promesa
+   * que coincida con el `requestId`.
    * @param {CustomEvent} e
+   * @private
    */
   _onBridgeResult(e) {
     try {
@@ -365,7 +369,7 @@ You respond in English and provide practical, production-ready code examples tha
         this._pendingBridgeCalls.delete(requestId);
         resolver(data);
       }
-    } catch (_) { /* payload corrupto, ignoramos */ }
+    } catch (_) { /* payload corrupto: ignorar */ }
   }
 
   // ──────────────────────────────────────────────────────────────────
@@ -959,12 +963,72 @@ You respond in English and provide practical, production-ready code examples tha
         .gc__assistantBody li { margin-bottom: 3px; }
         .gc__assistantBody h1,
         .gc__assistantBody h2,
-        .gc__assistantBody h3 {
+        .gc__assistantBody h3,
+        .gc__assistantBody h4,
+        .gc__assistantBody h5,
+        .gc__assistantBody h6 {
           margin: 10px 0 5px;
           font-size: 14px;
           font-weight: 600;
           letter-spacing: -.01em;
         }
+        .gc__assistantBody h1 { font-size: 17px; }
+        .gc__assistantBody h2 { font-size: 15px; }
+        .gc__assistantBody h3 { font-size: 14px; }
+
+        /* Markdown — blockquote (citas) */
+        .gc__assistantBody blockquote {
+          margin: 8px 0;
+          padding: 4px 12px;
+          border-left: 3px solid var(--gc-border);
+          color: var(--gc-text-muted);
+          background: rgba(255,255,255,.02);
+        }
+
+        /* Markdown — regla horizontal */
+        .gc__assistantBody hr {
+          border: none;
+          border-top: 1px solid var(--gc-border);
+          margin: 12px 0;
+        }
+
+        /* Markdown — enlace */
+        .gc__assistantBody a {
+          color: var(--gc-accent);
+          text-decoration: none;
+          border-bottom: 1px solid transparent;
+          transition: border-color .12s;
+        }
+        .gc__assistantBody a:hover { border-bottom-color: var(--gc-accent); }
+
+        /* Markdown — tachado */
+        .gc__assistantBody del {
+          color: var(--gc-text-faint);
+          text-decoration: line-through;
+        }
+
+        /* Markdown — tabla GFM */
+        .gc__assistantBody table.gc__table {
+          width: 100%;
+          margin: 8px 0;
+          border-collapse: collapse;
+          font-size: 12.5px;
+          background: var(--gc-bg-elevated);
+          border: 1px solid var(--gc-border);
+          border-radius: var(--gc-r-sm);
+          overflow: hidden;
+        }
+        .gc__assistantBody table.gc__table th,
+        .gc__assistantBody table.gc__table td {
+          padding: 6px 10px;
+          border-bottom: 1px solid var(--gc-border);
+          text-align: left;
+        }
+        .gc__assistantBody table.gc__table th {
+          background: rgba(255,255,255,.03);
+          font-weight: 600;
+        }
+        .gc__assistantBody table.gc__table tr:last-child td { border-bottom: none; }
 
         /* Error state */
         .gc__assistantBody--error {
@@ -1032,6 +1096,9 @@ You respond in English and provide practical, production-ready code examples tha
           background: rgba(255,255,255,.03);
           border-bottom: 1px solid var(--gc-code-border);
         }
+        :host([theme="light"]) .gc__codeBar {
+          background: rgba(0,0,0,.03);
+        }
 
         .gc__codeLang {
           font-family: var(--gc-mono);
@@ -1082,6 +1149,9 @@ You respond in English and provide practical, production-ready code examples tha
           scrollbar-width: thin;
           scrollbar-color: var(--gc-border) transparent;
         }
+        :host([theme="light"]) .gc__codeBlock {
+          color: #1f2328;
+        }
 
         .gc__inlineCode {
           font-family: var(--gc-mono);
@@ -1092,6 +1162,26 @@ You respond in English and provide practical, production-ready code examples tha
           border: 1px solid rgba(255,255,255,.08);
           color: #a5f3fc;
         }
+
+        /* Resaltado de sintaxis en bloques de código.
+           Paleta inspirada en GitHub Dark / one-dark, neutra y legible. */
+        .gc__codeBlock .hl-comment { color: #8b949e; font-style: italic; }
+        .gc__codeBlock .hl-keyword { color: #ff7b72; }
+        .gc__codeBlock .hl-string  { color: #a5d6ff; }
+        .gc__codeBlock .hl-number  { color: #79c0ff; }
+        .gc__codeBlock .hl-builtin { color: #d2a8ff; }
+        .gc__codeBlock .hl-fn      { color: #d2a8ff; }
+        .gc__codeBlock .hl-prop    { color: #7ee787; }
+        .gc__codeBlock .hl-unit    { color: #ffa657; }
+
+        :host([theme="light"]) .gc__codeBlock .hl-comment { color: #6e7781; }
+        :host([theme="light"]) .gc__codeBlock .hl-keyword { color: #cf222e; }
+        :host([theme="light"]) .gc__codeBlock .hl-string  { color: #0a3069; }
+        :host([theme="light"]) .gc__codeBlock .hl-number  { color: #0550ae; }
+        :host([theme="light"]) .gc__codeBlock .hl-builtin { color: #8250df; }
+        :host([theme="light"]) .gc__codeBlock .hl-fn      { color: #8250df; }
+        :host([theme="light"]) .gc__codeBlock .hl-prop    { color: #116329; }
+        :host([theme="light"]) .gc__codeBlock .hl-unit    { color: #953800; }
 
         /* ────────────────────────────────────────
            COMPOSER
@@ -1807,7 +1897,7 @@ You respond in English and provide practical, production-ready code examples tha
                 autocomplete="off"
                 placeholder="http://localhost:11434/v1/chat/completions"
               >
-              <p class="gc__fieldHint">URL completa del endpoint (ej. LM Studio, Ollama).</p>
+              <p class="gc__fieldHint">Full endpoint URL (e.g., LM Studio, Ollama).</p>
             </div>
 
             <!-- API Key -->
@@ -1906,6 +1996,7 @@ You respond in English and provide practical, production-ready code examples tha
     const toggleKeyBtn      = sr.getElementById('gc__toggleKeyBtn');
     const tempInput         = sr.getElementById('gc__tempInput');
     const messages          = sr.getElementById('gc__messages');
+    const customModelsInput = sr.getElementById('gc__customModels');
 
     sendBtn?.addEventListener('click', () => this._handleSendClick());
     input?.addEventListener('keydown', (e) => this._onInputKeyDown(e));
@@ -1938,6 +2029,7 @@ You respond in English and provide practical, production-ready code examples tha
     toggleKeyBtn?.addEventListener('click', () => this._onToggleKeyClick());
     tempInput?.addEventListener('input', () => this._onTempInput());
     messages?.addEventListener('click', (e) => this._onMessagesClick(e));
+    customModelsInput?.addEventListener('input', () => this._onCustomModelsInput());
 
     window.addEventListener('keydown', this._onWindowKeyDown);
   }
@@ -1949,11 +2041,14 @@ You respond in English and provide practical, production-ready code examples tha
       this._cancelRequest();
       return;
     }
-    if (this._mentionMenu?.classList.contains('gc__open')) {
+    // Navegación del menú @: usamos el elemento real del shadow DOM,
+    // no `this._mentionMenu` (que nunca se asignó).
+    const menu = this.shadowRoot.getElementById('gc__mentionMenu');
+    if (menu?.classList.contains('gc__open')) {
       if (e.key === 'ArrowDown') { e.preventDefault(); this._navigateMention_(1);  return; }
       if (e.key === 'ArrowUp')   { e.preventDefault(); this._navigateMention_(-1); return; }
-      if (e.key === 'Enter')     { e.preventDefault(); this._selectMention_();     return; }
-      if (e.key === 'Escape')    { this._hideMentionMenu_();                        return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); this._selectMention_(); return; }
+      if (e.key === 'Escape')    { e.preventDefault(); this._hideMentionMenu_(); return; }
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -1999,6 +2094,28 @@ You respond in English and provide practical, production-ready code examples tha
     }
   }
 
+  /** Actualiza la lista de modelos en tiempo real cuando se editan los custom models. */
+  _onCustomModelsInput() {
+    const settingsProvSel   = this.shadowRoot.getElementById('gc__settingsProviderSelect');
+    const settingsModelSel  = this.shadowRoot.getElementById('gc__settingsModelSelect');
+    const customModelsInput = this.shadowRoot.getElementById('gc__customModels');
+    if (!settingsProvSel || !settingsModelSel || !customModelsInput) return;
+
+    const id = settingsProvSel.value;
+    const provider = GAS_LLM_PROVIDERS[id];
+    const customModels = customModelsInput.value.split('\n').map(l => l.trim()).filter(Boolean);
+    const allModels = [...(provider?.models || []), ...customModels];
+
+    const currentModel = settingsModelSel.value;
+    DomUtils.setHTML(settingsModelSel, allModels.map(m => `<option value="${m}">${m}</option>`).join(''));
+    
+    if (allModels.includes(currentModel)) {
+      settingsModelSel.value = currentModel;
+    } else if (allModels.length > 0) {
+      settingsModelSel.value = allModels[0];
+    }
+  }
+
   /** Maneja el cambio de proveedor en el composer. */
   _onProviderChange() {
     const providerSel = this.shadowRoot.getElementById('gc__providerSelect');
@@ -2011,17 +2128,22 @@ You respond in English and provide practical, production-ready code examples tha
     const provSettings = this._getProviderSettings_(id);
     const allModels = [...(provider?.models || []), ...(provSettings.customModels || [])];
     DomUtils.setHTML(modelSel, allModels.map((m) => `<option value="${m}">${m}</option>`).join(''));
-    if (this._config.provider === id && this._config.model) modelSel.value = this._config.model;
+    if (this._config.provider === id && this._config.model && allModels.includes(this._config.model)) {
+      modelSel.value = this._config.model;
+    } else if (allModels.length > 0) {
+      modelSel.value = allModels[0];
+    }
 
     this._config.provider   = id;
     apiKeyInput.value        = this._config.apiKeys?.[id] || '';
     apiKeyInput.placeholder  = provider?.keyHint || 'API key';
   }
 
-  /** Maneja el cambio de proveedor en settings. */
   /**
-   * Actualiza los campos del formulario de ajustes cuando cambia el proveedor.
-   * Muestra u oculta campos específicos como el Endpoint URL.
+   * Actualiza los campos del formulario de ajustes cuando cambia el
+   * proveedor: modelos disponibles, API key, temperatura, system prompt,
+   * y muestra/oculta el campo Endpoint para el proveedor `custom`.
+   * @private
    */
   _onSettingsProviderChange() {
     const settingsProvSel   = this.shadowRoot.getElementById('gc__settingsProviderSelect');
@@ -2042,9 +2164,11 @@ You respond in English and provide practical, production-ready code examples tha
     const allModels = [...(provider?.models || []), ...(providerSettings.customModels || [])];
 
     DomUtils.setHTML(settingsModelSel, allModels.map(m => `<option value="${m}">${m}</option>`).join(''));
-    // Seleccionar modelo guardado solo si el proveedor coincide con el activo
-    if (this._config.provider === id && this._config.model) {
+    // Seleccionar modelo guardado solo si el proveedor coincide con el activo y el modelo existe
+    if (this._config.provider === id && this._config.model && allModels.includes(this._config.model)) {
       settingsModelSel.value = this._config.model;
+    } else if (allModels.length > 0) {
+      settingsModelSel.value = allModels[0];
     }
 
     apiKeyInput.value       = this._config.apiKeys?.[id] || '';
@@ -2123,10 +2247,10 @@ You respond in English and provide practical, production-ready code examples tha
       this._saveConfig();
       this._closeSettings_();
       this._refreshComposerProviderUI_();
-      this._appendSystemNotice_('Configuración guardada ✓');
+      this._appendSystemNotice_('Settings saved ✓');
     } catch (err) {
       console.error('Error guardando settings:', err);
-      this._appendSystemNotice_('Error al guardar: ' + err.message);
+      this._appendSystemNotice_('Error saving: ' + err.message);
     }
   }
 
@@ -2175,7 +2299,12 @@ You respond in English and provide practical, production-ready code examples tha
   // RENDER DE MENSAJES + MARKDOWN
   // ──────────────────────────────────────────────────────────────────
 
-  /** Re-renderiza la lista completa de mensajes y hace scroll al fondo. */
+  /**
+   * Re-renderiza la lista completa de mensajes y hace scroll al final.
+   * Solo procesa mensajes user/assistant; los system notices se manejan
+   * con `_appendSystemNotice_` y no persisten en `_messages`.
+   * @private
+   */
   _renderMessages_() {
     const container = this.shadowRoot.getElementById('gc__messages');
     if (!container) return;
@@ -2187,9 +2316,6 @@ You respond in English and provide practical, production-ready code examples tha
     const html = this._messages.map((m) => {
       if (m.role === 'user') {
         return `<div class="gc__msg--user">${this._escapeHtml_(m.content)}</div>`;
-      }
-      if (m.role === 'system' || m._system) {
-        return `<div class="gc__msg--system">${this._escapeHtml_(m.content)}</div>`;
       }
       const bodyCls = m._isError
         ? 'gc__assistantBody gc__assistantBody--error'
@@ -2224,11 +2350,13 @@ You respond in English and provide practical, production-ready code examples tha
   }
 
   /**
-   * Agrega un aviso de sistema al chat sin re-renderizar toda la lista.
+   * Muestra un aviso temporal del sistema (errores, "request cancelled",
+   * etc.) sin agregarlo al historial de la conversación. Aparece como una
+   * burbuja gris centrada y solo en el DOM.
    * @param {string} text
+   * @private
    */
   _appendSystemNotice_(text) {
-    this._messages.push({ role: 'system', content: text, _system: true });
     const container = this.shadowRoot.getElementById('gc__messages');
     if (!container) return;
     const div = document.createElement('div');
@@ -2265,8 +2393,12 @@ You respond in English and provide practical, production-ready code examples tha
   // ──────────────────────────────────────────────────────────────────
 
   /**
-   * Detecta si el cursor está después de "@" y muestra el menú de menciones.
+   * Detecta si el cursor está después de "@" y, si es así, abre o actualiza
+   * el menú de menciones. Conserva el `_mentionIndex` actual mientras siga
+   * dentro de los items filtrados, así la navegación con flechas no se
+   * resetea al seguir tipeando.
    * @param {HTMLTextAreaElement} input
+   * @private
    */
   _detectMention_(input) {
     const cursor = input.selectionStart ?? 0;
@@ -2280,9 +2412,12 @@ You respond in English and provide practical, production-ready code examples tha
     }
 
     if (atPos === -1) { this._hideMentionMenu_(); return; }
+
+    // Si el "@" cambió de posición (nuevo trigger), reiniciamos el índice.
+    if (this._mentionStart !== atPos) this._mentionIndex = 0;
+
     this._mentionStart = atPos;
     this._mentionQuery = text.slice(atPos + 1, cursor).toLowerCase();
-    this._mentionIndex = 0;
     this._showMentionMenu_();
   }
 
@@ -2298,6 +2433,11 @@ You respond in English and provide practical, production-ready code examples tha
     );
 
     if (!filtered.length) { this._hideMentionMenu_(); return; }
+
+    // Mantener el índice dentro de rango tras un filtrado.
+    if (this._mentionIndex < 0 || this._mentionIndex >= filtered.length) {
+      this._mentionIndex = 0;
+    }
 
     const html = `
       <div class="gc__mentionHeader">Context</div>
@@ -2394,53 +2534,117 @@ You respond in English and provide practical, production-ready code examples tha
   // ──────────────────────────────────────────────────────────────────
 
   /**
-   * Renderiza Markdown básico a HTML seguro (con protección XSS).
-   * Soporta: bloques de código con botones, inline code, headings, listas, negrita, itálica, párrafos.
-   * @param {string} src
-   * @returns {string}
+   * Convierte Markdown a HTML seguro. Implementación inspirada en GitHub
+   * Flavored Markdown, suficiente para conversaciones técnicas:
+   *  - Bloques de código cercados con barra de acciones (Copy/Insert/Replace).
+   *  - Inline code, negrita, cursiva, tachado.
+   *  - Encabezados (#, ##, ###).
+   *  - Listas no ordenadas (-, *) y ordenadas (1., 2., ...).
+   *  - Citas (> ...).
+   *  - Reglas horizontales (---).
+   *  - Tablas con header (| a | b |).
+   *  - Enlaces [texto](url) y URLs detectadas automáticamente.
+   *
+   * Todo el contenido se escapa antes de aplicar reglas para prevenir XSS;
+   * los bloques de código se extraen primero con placeholders.
+   *
+   * @param {string} src Texto en Markdown.
+   * @returns {string} HTML listo para inyectar.
+   * @private
    */
   _renderMarkdown_(src) {
     const text = String(src || '');
 
-    // Extrae bloques de código cercados con ``` para escaparlos de forma segura.
+    // 1. Aislar bloques de código (```lang ... ```) con placeholders.
     const codeBlocks = [];
-    let work = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-      const idx = codeBlocks.length;
+    let work = text.replace(/```(\w*)\r?\n?([\s\S]*?)```/g, (_, lang, code) => {
       codeBlocks.push({ lang: (lang || '').trim(), code });
-      return `\u0000CODE${idx}\u0000`;
+      return `\u0000CODE${codeBlocks.length - 1}\u0000`;
     });
 
+    // 2. Aislar inline code (`...`) para que su contenido no se procese.
+    const inlines = [];
+    work = work.replace(/`([^`\n]+)`/g, (_, code) => {
+      inlines.push(code);
+      return `\u0000INL${inlines.length - 1}\u0000`;
+    });
+
+    // 3. Escapar HTML de todo lo demás.
     work = this._escapeHtml_(work);
 
-    // Headings.
-    work = work
-      .replace(/^### (.*)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.*)$/gm,  '<h2>$1</h2>')
-      .replace(/^# (.*)$/gm,   '<h1>$1</h1>');
+    // 4. Reglas horizontales (---, ***, ___).
+    work = work.replace(/^(?:-{3,}|\*{3,}|_{3,})\s*$/gm, '<hr>');
 
-    // Listas no ordenadas.
-    work = work.replace(/(?:^|\n)((?:[-*] .+(?:\n|$))+)/g, (_, block) => {
-      const items = block.trim().split(/\n/).map((l) => l.replace(/^[-*]\s+/, ''));
-      return '\n<ul>' + items.map((i) => `<li>${i}</li>`).join('') + '</ul>';
+    // 5. Encabezados.
+    work = work
+      .replace(/^###### (.*)$/gm, '<h6>$1</h6>')
+      .replace(/^##### (.*)$/gm,  '<h5>$1</h5>')
+      .replace(/^#### (.*)$/gm,   '<h4>$1</h4>')
+      .replace(/^### (.*)$/gm,    '<h3>$1</h3>')
+      .replace(/^## (.*)$/gm,     '<h2>$1</h2>')
+      .replace(/^# (.*)$/gm,      '<h1>$1</h1>');
+
+    // 6. Tablas GFM. Detectamos: línea header + línea separadora |---|---|.
+    work = work.replace(
+      /(^\|[^\n]+\|\r?\n\|[\s|:-]+\|(?:\r?\n\|[^\n]+\|)+)/gm,
+      (block) => this._renderTable_(block)
+    );
+
+    // 7. Citas: agrupar líneas consecutivas que empiezan con ">".
+    work = work.replace(/(?:^&gt; ?.*(?:\r?\n|$))+/gm, (block) => {
+      const inner = block.replace(/^&gt; ?/gm, '').replace(/\s+$/, '');
+      return `<blockquote>${inner}</blockquote>\n`;
     });
 
-    // Inline code, negrita, itálica.
+    // 8. Listas ordenadas: bloques de líneas "1. texto".
+    work = work.replace(/(?:^\d+\. .+(?:\r?\n|$))+/gm, (block) => {
+      const items = block.trim().split(/\r?\n/).map((l) => l.replace(/^\d+\.\s+/, ''));
+      return '<ol>' + items.map((i) => `<li>${i}</li>`).join('') + '</ol>\n';
+    });
+
+    // 9. Listas no ordenadas: bloques de líneas "- texto" o "* texto".
+    work = work.replace(/(?:^[-*] .+(?:\r?\n|$))+/gm, (block) => {
+      const items = block.trim().split(/\r?\n/).map((l) => l.replace(/^[-*]\s+/, ''));
+      return '<ul>' + items.map((i) => `<li>${i}</li>`).join('') + '</ul>\n';
+    });
+
+    // 10. Negrita, cursiva, tachado.
     work = work
-      .replace(/`([^`]+)`/g,             '<code class="gc__inlineCode">$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g,       '<strong>$1</strong>')
-      .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+      .replace(/\*\*([^*\n]+)\*\*/g,        '<strong>$1</strong>')
+      .replace(/__([^_\n]+)__/g,            '<strong>$1</strong>')
+      .replace(/(^|[^*])\*([^*\n]+)\*/g,    '$1<em>$2</em>')
+      .replace(/(^|[^_])_([^_\n]+)_/g,      '$1<em>$2</em>')
+      .replace(/~~([^~\n]+)~~/g,            '<del>$1</del>');
 
-    // Párrafos (evitar envolver bloques estructurales).
+    // 11. Enlaces explícitos y URLs sueltas.
+    work = work.replace(
+      /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener">$1</a>'
+    );
+    work = work.replace(
+      /(^|[\s(])(https?:\/\/[^\s<)]+)/g,
+      '$1<a href="$2" target="_blank" rel="noopener">$2</a>'
+    );
+
+    // 12. Párrafos: separar por dobles saltos, omitir bloques estructurales.
     work = work.split(/\n{2,}/).map((para) => {
-      if (/^\s*<(h\d|ul|ol|pre|div)/.test(para)) return para;
-      return `<p>${para.replace(/\n/g, '<br>')}</p>`;
-    }).join('');
+      const t = para.trim();
+      if (!t) return '';
+      if (/^<(h[1-6]|ul|ol|pre|blockquote|table|hr|div)/.test(t)) return t;
+      return `<p>${t.replace(/\r?\n/g, '<br>')}</p>`;
+    }).filter(Boolean).join('\n');
 
-    // Reinsertar bloques de código con botones de acción.
+    // 13. Reinyectar inline code.
+    work = work.replace(/\u0000INL(\d+)\u0000/g, (_, idx) => {
+      return `<code class="gc__inlineCode">${this._escapeHtml_(inlines[Number(idx)])}</code>`;
+    });
+
+    // 14. Reinyectar bloques de código con barra de acciones y highlight.
     work = work.replace(/\u0000CODE(\d+)\u0000/g, (_, idx) => {
       const { lang, code } = codeBlocks[Number(idx)];
-      const escaped   = this._escapeHtml_(code.replace(/\n+$/, ''));
+      const trimmed   = code.replace(/\n+$/, '');
       const langLabel = lang || 'code';
+      const highlighted = this._highlightCode_(trimmed, lang);
       return `
         <div class="gc__codeWrap">
           <div class="gc__codeBar">
@@ -2451,11 +2655,264 @@ You respond in English and provide practical, production-ready code examples tha
               <button class="gc__codeBtn" data-action="replace" title="Replace editor selection">Replace</button>
             </div>
           </div>
-          <pre class="gc__codeBlock"><code>${escaped}</code></pre>
+          <pre class="gc__codeBlock"><code>${highlighted}</code></pre>
         </div>`;
     });
 
     return work;
+  }
+
+  /**
+   * Resalta sintaxis de un fragmento de código sin librerías externas.
+   * Soporta JavaScript/TypeScript, CSS, HTML y JSON. Para otros lenguajes
+   * devuelve el texto escapado sin coloreado.
+   *
+   * El highlighter trabaja sobre texto CRUDO (sin escapar). Cada token se
+   * escapa individualmente al envolverlo en su `<span>`. Esto evita que
+   * las entidades HTML inyectadas por el escape choquen con los regex
+   * (p. ej. `'` impidiendo matchear comillas simples).
+   *
+   * @param {string} src
+   * @param {string} lang
+   * @returns {string} HTML con spans de coloreado.
+   * @private
+   */
+  _highlightCode_(src, lang) {
+    const id = String(lang || '').toLowerCase().trim();
+
+    if (['js', 'javascript', 'ts', 'typescript', 'gas', 'google-apps-script'].includes(id)) {
+      return this._highlightJs_(src);
+    }
+    if (['css', 'scss', 'less'].includes(id)) {
+      return this._highlightCss_(src);
+    }
+    if (['html', 'xml', 'svg'].includes(id)) {
+      return this._highlightHtml_(src);
+    }
+    if (['json', 'jsonc'].includes(id)) {
+      return this._highlightJson_(src);
+    }
+    return this._escapeHtml_(src);
+  }
+
+  /**
+   * Resalta JavaScript/TypeScript en un solo pase. Recibe texto crudo y
+   * escapa cada fragmento al construir el HTML resultante.
+   * @param {string} s Texto sin escapar.
+   * @returns {string}
+   * @private
+   */
+  _highlightJs_(s) {
+    const KEYWORDS = new Set([
+      'const','let','var','function','return','if','else','for','while','do',
+      'switch','case','break','continue','default','try','catch','finally',
+      'throw','new','delete','typeof','instanceof','in','of','class','extends',
+      'super','this','async','await','yield','import','export','from','as',
+      'static','get','set','true','false','null','undefined','void',
+    ]);
+    const BUILTINS = new Set([
+      'console','Math','JSON','Object','Array','String','Number','Boolean',
+      'Date','RegExp','Map','Set','Promise','Error','Symbol','Logger',
+      'SpreadsheetApp','DocumentApp','DriveApp','GmailApp','CalendarApp',
+      'PropertiesService','UrlFetchApp','Utilities','HtmlService',
+      'ScriptApp','Session','document','window',
+    ]);
+
+    const re = /(\/\*[\s\S]*?\*\/|\/\/[^\n]*)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(0x[0-9a-fA-F]+|\d+(?:\.\d+)?(?:e[+-]?\d+)?)|(\.\s*[A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)/g;
+
+    return this._tokenize_(s, re, (m, groups) => {
+      const [comment, str, num, prop, ident] = groups;
+      if (comment) return this._wrap_('hl-comment', comment);
+      if (str)     return this._wrap_('hl-string',  str);
+      if (num)     return this._wrap_('hl-number',  num);
+      if (prop) {
+        const dot  = prop[0];
+        const name = prop.slice(1).trim();
+        return dot + this._wrap_('hl-prop', name);
+      }
+      if (ident) {
+        if (KEYWORDS.has(ident)) return this._wrap_('hl-keyword', ident);
+        if (BUILTINS.has(ident)) return this._wrap_('hl-builtin', ident);
+        return this._escapeHtml_(ident);
+      }
+      return this._escapeHtml_(m);
+    });
+  }
+
+  /**
+   * Resalta CSS en un solo pase.
+   * @param {string} s Texto sin escapar.
+   * @returns {string}
+   * @private
+   */
+  _highlightCss_(s) {
+    const UNITS = 'px|em|rem|vh|vw|vmin|vmax|%|ms|s|deg|fr|ch|ex|pt|pc|cm|mm|in';
+    const re = new RegExp(
+      `(\\/\\*[\\s\\S]*?\\*\\/)` +
+      `|("(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*')` +
+      `|(@[\\w-]+)` +
+      `|(#[0-9a-fA-F]{3,8})\\b` +
+      `|(\\d+(?:\\.\\d+)?)(${UNITS})?\\b` +
+      `|(^|[\\s;{}])([\\w-]+)(?=\\s*:)`,
+      'gm'
+    );
+
+    return this._tokenize_(s, re, (m, groups) => {
+      const [comment, str, atRule, hex, num, unit, lead, prop] = groups;
+      if (comment) return this._wrap_('hl-comment', comment);
+      if (str)     return this._wrap_('hl-string',  str);
+      if (atRule)  return this._wrap_('hl-keyword', atRule);
+      if (hex)     return this._wrap_('hl-number',  hex);
+      if (num !== undefined && num !== '') {
+        const u = unit ? this._wrap_('hl-unit', unit) : '';
+        return `<span class="hl-number">${this._escapeHtml_(num)}${u}</span>`;
+      }
+      if (prop)    return this._escapeHtml_(lead) + this._wrap_('hl-prop', prop);
+      return this._escapeHtml_(m);
+    });
+  }
+
+  /**
+   * Resalta HTML/XML en un solo pase. Trabaja sobre texto crudo: matchea
+   * los `<` y `>` reales y escapa al envolver.
+   * @param {string} s Texto sin escapar.
+   * @returns {string}
+   * @private
+   */
+  _highlightHtml_(s) {
+    const re = /(<!--[\s\S]*?-->)|(<\/?)([\w-]+)([^<>]*?)(\/?>)/g;
+    return this._tokenize_(s, re, (m, groups) => {
+      const [comment, open, name, attrs, close] = groups;
+      if (comment) return this._wrap_('hl-comment', comment);
+      if (open) {
+        const attrsHl = String(attrs || '').replace(
+          /([\w-]+)(=)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g,
+          (_, k, eq, v) =>
+            this._wrap_('hl-prop', k) + this._escapeHtml_(eq) + this._wrap_('hl-string', v)
+        );
+        // Las partes de `attrs` que no son atributos completos quedan sin envolver
+        // pero ya pasaron por escape parcial dentro del replace. Para los huecos
+        // que no matchearon (espacios), escapamos individualmente.
+        const safeAttrs = this._escapeAttrSegment_(attrs, attrsHl);
+        return this._wrap_('hl-keyword', open + name) + safeAttrs + this._wrap_('hl-keyword', close);
+      }
+      return this._escapeHtml_(m);
+    });
+  }
+
+  /**
+   * Helper para HTML: si el procesado de atributos contiene caracteres
+   * peligrosos no escapados (porque no eran clave/valor), aplica un escape
+   * mínimo de `<` y `>` sobre los huecos.
+   * @param {string} originalAttrs
+   * @param {string} processedAttrs
+   * @returns {string}
+   * @private
+   */
+  _escapeAttrSegment_(originalAttrs, processedAttrs) {
+    // Si processedAttrs sigue siendo idéntico al original (no había atributos
+    // matcheables), escapamos completo. Si hubo replaces, asumimos que los
+    // segmentos sin envolver son seguros (espacios típicamente).
+    if (processedAttrs === originalAttrs) {
+      return this._escapeHtml_(originalAttrs);
+    }
+    return processedAttrs;
+  }
+
+  /**
+   * Resalta JSON en un solo pase. Distingue claves (string seguida de `:`)
+   * de strings ordinarios.
+   * @param {string} s Texto sin escapar.
+   * @returns {string}
+   * @private
+   */
+  _highlightJson_(s) {
+    const re = /("(?:\\.|[^"\\])*")(\s*:)?|\b(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\b|\b(true|false|null)\b/g;
+    return this._tokenize_(s, re, (m, groups) => {
+      const [str, colon, num, lit] = groups;
+      if (str) {
+        return colon
+          ? this._wrap_('hl-prop', str) + this._escapeHtml_(colon)
+          : this._wrap_('hl-string', str);
+      }
+      if (num) return this._wrap_('hl-number',  num);
+      if (lit) return this._wrap_('hl-keyword', lit);
+      return this._escapeHtml_(m);
+    });
+  }
+
+  /**
+   * Recorre `src` con `regex` (debe ser global), pasa cada match al callback
+   * y escapa los segmentos que no matchearon. Construye el resultado.
+   * @param {string} src
+   * @param {RegExp} regex
+   * @param {(m:string, groups:Array<string|undefined>) => string} cb
+   * @returns {string}
+   * @private
+   */
+  _tokenize_(src, regex, cb) {
+    const out = [];
+    let lastIndex = 0;
+    let match;
+    regex.lastIndex = 0;
+    while ((match = regex.exec(src)) !== null) {
+      if (match.index > lastIndex) {
+        out.push(this._escapeHtml_(src.slice(lastIndex, match.index)));
+      }
+      out.push(cb(match[0], match.slice(1)));
+      lastIndex = match.index + match[0].length;
+      // Evitar bucles infinitos si el regex matchea cadena vacía.
+      if (match[0].length === 0) regex.lastIndex++;
+    }
+    if (lastIndex < src.length) {
+      out.push(this._escapeHtml_(src.slice(lastIndex)));
+    }
+    return out.join('');
+  }
+
+  /**
+   * Envuelve el texto en un `<span>` con la clase indicada, escapando el
+   * contenido para evitar inyección.
+   * @param {string} cls
+   * @param {string} text
+   * @returns {string}
+   * @private
+   */
+  _wrap_(cls, text) {
+    return `<span class="${cls}">${this._escapeHtml_(text)}</span>`;
+  }
+
+  /**
+   * Convierte un bloque de tabla GFM ya escapado a `<table>`. Detecta la
+   * alineación por columna a partir de la línea separadora.
+   * @param {string} block Bloque ya pasado por escape HTML.
+   * @returns {string}
+   * @private
+   */
+  _renderTable_(block) {
+    const lines = block.trim().split(/\r?\n/);
+    if (lines.length < 2) return block;
+
+    const splitRow = (l) => l.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+    const header = splitRow(lines[0]);
+    const align  = splitRow(lines[1]).map((c) => {
+      if (/^:-+:$/.test(c)) return 'center';
+      if (/^-+:$/.test(c))  return 'right';
+      if (/^:-+$/.test(c))  return 'left';
+      return '';
+    });
+    const rows = lines.slice(2).map(splitRow);
+
+    const th = header
+      .map((h, i) => `<th${align[i] ? ` style="text-align:${align[i]}"` : ''}>${h}</th>`)
+      .join('');
+    const trs = rows.map((r) =>
+      '<tr>' + r.map((c, i) =>
+        `<td${align[i] ? ` style="text-align:${align[i]}"` : ''}>${c}</td>`
+      ).join('') + '</tr>'
+    ).join('');
+
+    return `<table class="gc__table"><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>\n`;
   }
 
   /**
@@ -2582,8 +3039,10 @@ You respond in English and provide practical, production-ready code examples tha
     const tempInput        = sr.getElementById('gc__tempInput');
     const tempVal          = sr.getElementById('gc__tempVal');
     const sysPrompt        = sr.getElementById('gc__systemPrompt');
-    const keyLabel         = sr.getElementById('gc__apiKeyLabel');
+    const keyLabel          = sr.getElementById('gc__apiKeyLabel');
     const customModelsInput = sr.getElementById('gc__customModels');
+    const endpointField     = sr.getElementById('gc__endpointField');
+    const endpointUrlInput  = sr.getElementById('gc__endpointUrl');
 
     const providerId = this._config.provider || 'gemini';
     const provider   = GAS_LLM_PROVIDERS[providerId] || GAS_LLM_PROVIDERS.gemini;
@@ -2616,6 +3075,13 @@ You respond in English and provide practical, production-ready code examples tha
 
     if (customModelsInput) {
       customModelsInput.value = (provSettings.customModels || []).join('\n');
+    }
+
+    if (endpointUrlInput) {
+      endpointUrlInput.value = provSettings.endpointUrl || '';
+    }
+    if (endpointField) {
+      endpointField.style.display = providerId === 'custom' ? 'block' : 'none';
     }
 
     this._refreshComposerProviderUI_();
