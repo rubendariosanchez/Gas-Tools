@@ -14,6 +14,7 @@ export const DEFAULT_SETTINGS_OPTIONS = {
     'gas-file-json-color': '#1bb24b',
     'gas-error-lens': true,
     // Visuals & Layout
+    'ide-dark-mode': false,
     'showMinimap': false,
     'lineNumbers': 'on',
     'wordWrap': true,

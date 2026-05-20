@@ -52,10 +52,11 @@ class GasSearchPanel extends HTMLElement {
     this._resizeState = null;
     /**
      * Cache de nombres de archivo indexado por la URI del modelo Monaco.
-     * Evita recalcular el nombre en cada búsqueda.
-     * @type {Map<string, string>}
+     * Apunta al singleton global `window.gasFileMap` para que la búsqueda
+     * use siempre el mapa más reciente sin necesidad de inyecciones.
+     * @type {Map<string, string>|object}
      */
-    this._fileNameObjectMap = new Map();
+    this._fileNameObjectMap = window.gasFileMap || new Map();
     /**
      * Timer de debounce para la búsqueda.
      * Se cancela en cada pulsación de tecla para evitar búsquedas excesivas.
@@ -113,8 +114,11 @@ class GasSearchPanel extends HTMLElement {
    */
   open(anchorEl = null) {
     if (anchorEl) this.setAnchor(anchorEl);
-    // Cerrar el panel de chat si está abierto: solo uno visible a la vez.
+    // Cerrar otros paneles flotantes: solo uno visible a la vez.
     document.querySelector('gas-chat-panel')?.close?.();
+    document.querySelector('gas-actions-panel')?.close?.();
+    document.querySelector('gas-current-file')?.close?.();
+    document.querySelector('gas-github-panel')?.close?.();
     this.style.display       = 'block';
     this.style.pointerEvents = 'auto';
     this._repositionPanel(true);

@@ -21,7 +21,6 @@ export async function initThemeModule() {
 
     // Carga inicial: podemos obtener el tema activo para loguear o verificar
     const activeTheme = await getActiveThemeData_();
-    console.log("Current active theme configuration:", activeTheme);
 
     // Renderiza los temas
     renderThemes_(true);
@@ -153,12 +152,9 @@ function initThemeModal_() {
  */
 async function fetchThemeDefinition_(themeText) {
     const fileName = themeText;
-    console.log(`${fileName}.json`);
     const url = chrome.runtime.getURL(`themes/${fileName}.json`);
-    console.log("Fetching theme from:", url);
     try {
         const response = await fetch(url);
-        console.log("Fetch response:", response);
         if (!response.ok) throw new Error();
         return await response.json();
     } catch (e) {

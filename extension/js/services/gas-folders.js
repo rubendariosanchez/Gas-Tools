@@ -901,6 +901,10 @@ class GasFolders {
 }
 ;(function() {
   const folders = new GasFolders();
+  // Exponemos la instancia para que otros componentes (popover de archivo
+  // activo, paneles, etc.) puedan reutilizar sus iconos SVG y los colores
+  // configurados sin replicar lógica.
+  if (typeof window !== 'undefined') window.gasFolders = folders;
   /**
    * Bandera que indica si la configuración inicial ya fue aplicada desde
    * `GAS_TransferData`. Impide que navegaciones SPA posteriores (que vuelven

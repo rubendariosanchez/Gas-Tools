@@ -13,7 +13,6 @@
  * - Contexto alrededor del cursor (líneas previas) para mejor inferencia.
  * - Corrección del mensaje de retorno en prompts de comentario vacío.
  */
-console.log('[AIAutocomplete] Script cargado');
 
 class GasAiAutocomplete {
   // ── Constantes de clase ──────────────────────────────────────────────────
@@ -170,7 +169,6 @@ class GasAiAutocomplete {
     if (this._enabled || !this._editor) return;
 
     if (typeof window.monaco?.languages?.registerInlineCompletionsProvider !== 'function') {
-      console.warn('[AIAutocomplete] Monaco no disponible, reintentando en 500ms…');
       setTimeout(() => this.enable(), 500);
       return;
     }
@@ -179,7 +177,6 @@ class GasAiAutocomplete {
 
     if (!this._providersRegistered) {
       this._providersRegistered = true;
-      console.log('[AIAutocomplete] Registrando providers para lenguajes soportados…');
 
       GasAiAutocomplete.SUPPORTED_LANGUAGES.forEach(lang => {
         try {
@@ -206,7 +203,6 @@ class GasAiAutocomplete {
         window.monaco.KeyCode.Space,
         () => this._editor.trigger('keyboard', 'editor.action.inlineSuggest.trigger', {})
       );
-      console.log('[AIAutocomplete] Atajo Ctrl+Shift+Espacio registrado');
     }
 
     // Detecta cuando el usuario acepta una sugerencia inline para suprimir
@@ -236,8 +232,6 @@ class GasAiAutocomplete {
         });
       }
     }
-
-    console.log('[AIAutocomplete] Habilitado.');
   }
 
   /**
@@ -250,7 +244,6 @@ class GasAiAutocomplete {
     this._cancelPending_('disable');
     this._disposables.forEach(d => d?.dispose?.());
     this._disposables = [];
-    console.log('[AIAutocomplete] Deshabilitado.');
   }
 
   /**
@@ -259,7 +252,6 @@ class GasAiAutocomplete {
    */
   setDebounceMs(ms) {
     this._debounceMs = Math.max(0, ms);
-    console.log('[AIAutocomplete] Debounce actualizado a', this._debounceMs, 'ms');
   }
 
   // ── Inline completions ───────────────────────────────────────────────────
@@ -337,7 +329,6 @@ class GasAiAutocomplete {
     if (this._pendingAbort) {
       this._pendingAbort.abort();
       this._pendingAbort = null;
-      if (reason) console.log(`[AIAutocomplete] LLM request cancelado (${reason})`);
     }
   }
 
@@ -734,9 +725,6 @@ class GasAiAutocomplete {
       'color:#10b981',
       'color:#94a3b8',
     );
-    console.log('%cSystem prompt', 'color:#94a3b8; font-style:italic', systemPrompt);
-    console.log('%cUser prompt',   'color:#94a3b8; font-style:italic', userPrompt);
-    // El grupo se cierra en _logResult_ o _logError_
   }
 
   /**

@@ -29,8 +29,6 @@ function initAutoSave_() {
         const optionId = toggleEl.id;
         const isChecked = e.detail.checked;
 
-        console.log(`[Settings] Auto-saving toggle: ${optionId} = ${isChecked}`);
-
         try {
             await saveSingleOption_(optionId, isChecked);
             Toast.show('Setting saved', 'success', 800);
@@ -51,8 +49,6 @@ function initAutoSave_() {
         const optionId = selectEl.id;
         const value = e.detail.value;
 
-        console.log(`[Settings] Auto-saving select: ${optionId} = ${value}`);
-
         try {
             await saveSingleOption_(optionId, value);
             Toast.show('Setting saved', 'success', 800);
@@ -66,8 +62,6 @@ function initAutoSave_() {
     optionsContainer.addEventListener('color-change', async (e) => {
         const optionId = e.target.id;
         const value = e.detail.value;
-
-        console.log(`[Settings] Auto-saving color component: ${optionId} = ${value}`);
 
         try {
             await saveSingleOption_(optionId, value);
@@ -148,9 +142,9 @@ async function loadQualityCodeSettings_() {
         const settings = settingsData?.options || {};
 
         const optionIds = [
-            'global-enable', 'ai-autocomplete', 'gas-folders',
+            'global-enable', 'ai-autocomplete', 'gas-folders', 'gas-error-lens',
             // Visuals & Layout
-            'showMinimap', 'lineNumbers', 'wordWrap', 'renderLineHighlight',
+            'ide-dark-mode', 'showMinimap', 'lineNumbers', 'wordWrap', 'renderLineHighlight',
             'rulers', 'occurrencesHighlight', 'renderWhitespace',
             // Code Assistance
             'bracketPairs', 'quickSuggestions', 'autoClosingBrackets', 'guides-indentation',

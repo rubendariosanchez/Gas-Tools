@@ -1,5 +1,4 @@
 "use strict";
-
 /**
  * @fileoverview Clase principal del editor personalizado para Google Apps
  * Script. Encapsula toda la lógica de aplicación de settings, snippets,
@@ -27,6 +26,7 @@ class GasCustomEditor {
    * @param {string} options.searchButton  - HTML del botón de búsqueda avanzada.
    * @param {string} options.chatButton    - HTML del botón del chat AI.
    * @param {string} options.fileButton    - HTML del indicador de archivo activo.
+   * @param {string} options.actionsButton - HTML del botón de acciones del proyecto.
    * @param {string} options.themeUrl      - URL base de la carpeta de temas.
    * @param {string} options.referenceId   - UUID del editor Monaco al que corresponde esta instancia.
    */
@@ -48,6 +48,15 @@ class GasCustomEditor {
     this.editor = null;
     // Nombre del tema aplicado por GAS por defecto; se captura en init()
     this._defaultThemeName = 'vs-light';
+    /**
+     * Modelo principal: el modelo que estaba activo en `init()`, justo al
+     * cargar la página. Se captura UNA SOLA VEZ y no se reasigna al
+     * navegar entre archivos. Útil para acciones que necesitan referirse
+     * al "archivo de entrada" del proyecto (p. ej. la URI inicial al
+     * abrir el chat o el panel de búsqueda).
+     * @type {object|null}
+     */
+    this._initialModel = null;
 
     // ── UI inyectada ─────────────────────────────────────────────
     this.DomUtils = DomUtils;
@@ -75,6 +84,18 @@ class GasCustomEditor {
     /** @type {HTMLElement|null} Web Component <gas-current-file>. */
     this._currentFile = null;
 
+    // ── Acciones del proyecto ────────────────────────────────────
+    /** @type {HTMLElement|null} Web Component <gas-actions-panel>. */
+    this._actionsPanel = null;
+    this._onActionsButtonClick = null;
+
+    // ── GitHub sync ──────────────────────────────────────────────
+    /** @type {HTMLElement|null} Web Component <gas-github-panel>. */
+    this._githubPanel = null;
+    this._onGithubButtonClick = null;
+    this._onGithubShortcut = null;
+    this._githubMonacoCommandBound = false;
+
     // ── Flags de registro único ──────────────────────────────────
     // Solo aplican a comandos registrados con `editor.addCommand` (Monaco
     // no expone API para deshacerlos, por eso se registran una sola vez).
@@ -95,7 +116,10 @@ class GasCustomEditor {
     this._fileCheckInterval = null;
 
     // ── Mapa URI → nombre legible de archivo ─────────────────────
-    this._fileNameObjectMap = new Map();
+    // Apuntamos al singleton global `window.gasFileMap` para que los
+    // web components (gas-current-file, gas-search-panel, gas-chat-panel)
+    // lo consuman directamente sin que tengamos que pasarles el mapa.
+    this._fileNameObjectMap = window.gasFileMap;
     this._aiAutocomplete = null;
   }
 
@@ -202,6 +226,14 @@ class GasCustomEditor {
     // Capturamos el tema por defecto de GAS para poder restaurarlo en disable()
     this._defaultThemeName = this.editor._themeService._theme.themeName;
 
+    // Capturamos el modelo principal UNA SOLA VEZ. Solo lo asignamos si
+    // aún no existe, para que las re-inicializaciones por navegación SPA
+    // (que pasan por `mergeAndReinit`) no lo sobrescriban con el modelo
+    // del archivo en el que estuviera el usuario en ese momento.
+    if (!this._initialModel) {
+      this._initialModel = this.editor.getModel?.() || null;
+    }
+
     // Esperamos hasta 15 s a que aparezcan toolbars; sin ellas no podemos
     // inyectar la UI, pero el resto del editor sigue operando.
     this._toolsMenuElements = await this._waitForToolsMenu_();
@@ -231,6 +263,13 @@ class GasCustomEditor {
 
     // Escuchar cambios de modelo para mantener snippets y tema activos al cambiar de archivo
     this._setupModelListeners_();
+
+    // Si hay un return-to-editor pendiente porque el evento llegó antes
+    // de que la nueva instancia estuviera lista, lo consumimos aquí.
+    if (window.__gasReturnPending) {
+      window.__gasReturnPending = false;
+      this.refreshInitialModel();
+    }
     
     // Log estructurado al inicializar la instancia: facilita diagnosticar
     // re-inicializaciones causadas por navegación SPA o por toggles del popup.
@@ -247,6 +286,33 @@ class GasCustomEditor {
     console.log('rootParent :', this._rootParent || '(DOM)');
     console.groupEnd();
     
+  }
+
+  /**
+   * Devuelve el modelo Monaco principal (el que estaba activo cuando se
+   * inicializó la clase). No cambia al navegar entre archivos.
+   * @returns {object|null}
+   */
+  getInitialModel() {
+    return this._initialModel;
+  }
+
+  /**
+   * Re-captura el modelo principal usando el modelo activo actual del
+   * editor. Llamado por el bootstrap cuando detecta una vuelta al editor
+   * desde otra subruta (Ejecuciones, Despliegues, etc.); en ese instante
+   * GAS suele abrir el archivo principal del proyecto, así que el modelo
+   * activo es el que queremos anclar.
+   *
+   * También dispara un sync del mapa de archivos para que los componentes
+   * que dependen del nombre del archivo principal se refresquen.
+   */
+  refreshInitialModel() {
+    const next = this.editor?.getModel?.() || window.jsWireMonacoEditor?.getModel?.() || null;
+    if (next) this._initialModel = next;
+    // Refrescamos consumidores en cadena (mapa, botón, popover).
+    this._buildUriToNameMap?.();
+    this._renderCurrentFileButton_?.();
   }
 
   /**
@@ -421,44 +487,59 @@ class GasCustomEditor {
    * @private
    */
   _buildUriToNameMap() {
-    const map = new Map();    
-    const scope = this._getDomScope_();
+    const map = new Map(window.gasFileMap?.entries?.() || []);
 
-    // 1. Leer los archivos del árbol DOM en el orden visual real
-    const items = [...scope.querySelectorAll('li[role="option"][data-res-id]')];
+    const items = [...this._getDomScope_().querySelectorAll('li[role="option"][data-res-id]')];
+    if (!items.length) {
+      window.gasFileMap?.replace(map);
+      return;
+    }
+
     const files = items
       .map(li => ({
-        name: li.getAttribute('aria-label')?.trim(),
-        index: parseInt(li.getAttribute('data-index'), 10),
+        name:   li.getAttribute('aria-label')?.trim(),
+        index:  parseInt(li.getAttribute('data-index'), 10),
+        active: li.getAttribute('aria-selected') === 'true',
       }))
       .filter(f => f.name)
       .sort((a, b) => a.index - b.index);
 
-    // 2. Separar appsscript.json del resto (tiene una posición especial en Monaco)
     const normalFiles = files.filter(f => f.name !== 'appsscript.json');
-    const appScript = files.find(f => f.name === 'appsscript.json');
+    const appScript = files.find(f  => f.name === 'appsscript.json');
 
-    // 3. Obtener los modelos de Monaco ordenados por su ID numérico
+    // Modelos de Monaco ordenados por ID numérico
     const models = (window.monaco?.editor?.getModels?.() || [])
       .map(m => ({
         uri: m.uri.toString(),
-        id: parseInt(m.uri.path.replace('/', ''), 10),
+        id:  parseInt(m.uri.path.replace('/', ''), 10),
       }))
       .sort((a, b) => a.id - b.id);
+      
+    // Determinar el índice de inicio dentro del array de modelos
+    // usando el modelo inicial capturado como ancla
+    let startIdx = 0;
+    if (this._initialModel) {
+      const initialId = parseInt(
+        this._initialModel.uri.path.replace('/', ''), 10
+      );
+      const found = models.findIndex(m => m.id === initialId);
+      if (found !== -1) startIdx = found;
+    }
 
-    // 4. Asignar archivos normales en orden posicional
+    // Mapear cada archivo normal al modelo en (startIdx + i)
     normalFiles.forEach((file, i) => {
-      if (models[i]) map.set(models[i].uri, file.name);
+      const offset = (appScript && i >= 1) ? 1 : 0;
+      const model = models[startIdx + i + offset];
+      if (model) map.set(model.uri, file.name);
     });
 
-    // 5. Asignar appsscript.json al modelo con ID 3 (posición fija en GAS)
+    // appsscript.json → modelo justo antes del inicial (startIdx - 1)
     if (appScript) {
-      const target = models.find(m => m.id === 3);
+      const target = models[startIdx + 1];
       if (target) map.set(target.uri, appScript.name);
     }
 
-    this._fileNameObjectMap = map;
-    console.log('[GASTools] Mapa URI → archivo actualizado:', map);
+    window.gasFileMap?.replace(map);
   }
 
   /**
@@ -615,6 +696,8 @@ class GasCustomEditor {
     if (!panelsAlive) {
       this._injectAdvancedSearch_();
       this._injectChatPanel_();
+      this._injectActionsPanel_();
+      this._injectGithubPanel_();
       this._injectCurrentFile_();
       return;
     }
@@ -633,10 +716,25 @@ class GasCustomEditor {
     // Y solo añadir los botones que falten en alguna toolbar.
     this._injectToolbarButton_('buttonAdvancedSearch', this.options.searchButton);
     this._injectToolbarButton_('buttonChatGas',        this.options.chatButton);
+    this._injectToolbarButton_('buttonActionsGas',     this.options.actionsButton);
+    this._injectToolbarButton_('buttonGithubGas',      this.options.githubButton);
 
     // El indicador de archivo activo se monta dentro de cada toolbar para
     // que aparezca alineado a la derecha.
     this._injectCurrentFile_();
+
+    // El panel de acciones del proyecto es independiente del flujo de
+    // re-inyección de paneles porque conserva estado propio.
+    if (!document.querySelector('gas-actions-panel')) {
+      this._injectActionsPanel_();
+    }
+    if (!document.querySelector('gas-github-panel')) {
+      this._injectGithubPanel_();
+    } else {
+      // El panel ya existía: solo refrescamos el indicador para que el
+      // dot verde aparezca en los botones recién creados de la toolbar.
+      document.querySelector('gas-github-panel')?.refreshBadge?.();
+    }
   }
 
   /**
@@ -820,6 +918,116 @@ class GasCustomEditor {
   }
 
   // ──────────────────────────────────────────
+  // ACCIONES DEL PROYECTO
+  // ──────────────────────────────────────────
+
+  /**
+   * Inyecta el botón "Actions" junto al chat. El popover se monta una sola
+   * vez en `<body>` como Web Component `<gas-actions-panel>` (Shadow DOM
+   * aislado) y conserva su propio estado (toggle de visibilidad del árbol,
+   * etc.) entre re-inyecciones.
+   * @private
+   */
+  _injectActionsPanel_() {
+    this._teardownActionsPanel_();
+
+    // 1. Crear el popover único en body.
+    this._actionsPanel = document.createElement('gas-actions-panel');
+    document.body.appendChild(this._actionsPanel);
+
+    // 2. Insertar el botón en cada toolbar activa (idempotente vía helper).
+    this._injectToolbarButton_('buttonActionsGas', this.options.actionsButton);
+
+    // 3. Click delegado: abre / cierra el popover anclado al botón.
+    this._onActionsButtonClick = (e) => {
+      const trigger = e.target.closest('#rsBtnActionsGas');
+      if (!trigger) return;
+      if (!trigger.closest('.INSTk') && !trigger.closest('#buttonActionsGas')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this._actionsPanel?.toggle?.(trigger);
+    };
+    document.addEventListener('click', this._onActionsButtonClick);
+  }
+
+  /**
+   * Elimina el botón "Actions" de las toolbars y el popover del body.
+   * @private
+   */
+  _teardownActionsPanel_() {
+    this._teardownToolbarUi_('buttonActionsGas', 'gas-actions-panel', [
+      { prop: '_onActionsButtonClick', type: 'click' },
+    ]);
+    this._actionsPanel = null;
+  }
+
+  // ──────────────────────────────────────────
+  // PANEL DE GITHUB
+  // ──────────────────────────────────────────
+
+  /**
+   * Inyecta el botón "GitHub" en cada toolbar y monta el Web Component
+   * `<gas-github-panel>` en el body. Atajo global: Alt+Shift+H.
+   *
+   * El panel decide internamente qué vista mostrar (login / conectado)
+   * leyendo el estado de auth desde el background. Aquí solo nos
+   * encargamos del cableado UI.
+   * @private
+   */
+  _injectGithubPanel_() {
+    this._teardownGithubPanel_();
+
+    // 1. Crear el panel único en body.
+    this._githubPanel = document.createElement('gas-github-panel');
+    document.body.appendChild(this._githubPanel);
+    this._githubPanel.setEditor(this.editor);
+
+    // 2. Insertar el botón en cada toolbar activa.
+    this._injectToolbarButton_('buttonGithubGas', this.options.githubButton);
+
+    // 3. Aplicar el indicador de conexión en los botones recién creados.
+    //    El panel valida la sesión y pinta el dot verde si corresponde.
+    this._githubPanel.refreshBadge?.();
+
+    // 3. Click delegado: abre/cierra el panel anclado al botón.
+    this._onGithubButtonClick = (e) => {
+      const trigger = e.target.closest('#rsBtnGithubGas');
+      if (!trigger) return;
+      if (!trigger.closest('.INSTk') && !trigger.closest('#buttonGithubGas')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this._githubPanel?.toggle?.(trigger);
+    };
+    document.addEventListener('click', this._onGithubButtonClick);
+
+    // 4. Atajos: global (Alt+Shift+H) y Monaco (mismo combo) si disponible.
+    this._onGithubShortcut = this._bindGlobalShortcut_('h', () => {
+      const anchor = document.querySelector('#rsBtnGithubGas');
+      this._githubPanel?.toggle?.(anchor);
+    });
+    this._bindMonacoShortcut_(
+      '_githubMonacoCommandBound',
+      window.monaco?.KeyCode?.KeyH,
+      () => {
+        const anchor = document.querySelector('#rsBtnGithubGas');
+        this._githubPanel?.toggle?.(anchor);
+      }
+    );
+  }
+
+  /**
+   * Elimina el botón "GitHub" de las toolbars y el panel del body.
+   * @private
+   */
+  _teardownGithubPanel_() {
+    this._teardownToolbarUi_('buttonGithubGas', 'gas-github-panel', [
+      { prop: '_onGithubButtonClick', type: 'click' },
+      { prop: '_onGithubShortcut',    type: 'keydown', capture: true },
+    ]);
+    this._githubPanel = null;
+  }
+
+  // ──────────────────────────────────────────
   // INDICADOR DE ARCHIVO ACTIVO
   // ──────────────────────────────────────────
 
@@ -912,15 +1120,28 @@ class GasCustomEditor {
         display: inline-flex !important;
         align-items: center;
         gap: 8px;
-        min-width: 180px;
-        max-width: 240px;
+        min-width: 200px;
+        max-width: 260px;
+        padding: 0 12px !important;
+        border-radius: 18px !important;
+        background: #e8f0fe !important;
+        border: 1px solid #d2e3fc !important;
+        transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+      }
+      .qc__cfn-btn:hover {
+        background: #d2e3fc !important;
+        border-color: #aecbfa !important;
+        box-shadow: 0 1px 3px rgba(26,115,232,0.18);
       }
       .qc__cfn-btn .qc__cfn-name {
         flex: 1 1 auto;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        text-align: left;
+        text-align: center;
+        font-weight: 600 !important;
+        color: #1a73e8 !important;
+        letter-spacing: 0.2px;
       }
       .qc__cfn-dot {
         flex: 0 0 auto;
@@ -1102,6 +1323,12 @@ class GasCustomEditor {
           val ? this._aiAutocomplete.enable() : this._aiAutocomplete.disable();
         }
       },
+
+      /**
+       * Aplica o remueve el tema dark al entorno completo del IDE de GAS.
+       * @param {boolean} val - Estado de habilitación.
+       */
+      'ide-dark-mode': (val) => this._applyIdeDarkMode(val),
     };
 
     Object.entries(settings).forEach(([key, value]) => {
@@ -1172,6 +1399,194 @@ class GasCustomEditor {
       };
       document.head.appendChild(link);
     });
+  }
+
+  /**
+   * Aplica o remueve el tema dark al entorno completo del IDE de Google Apps Script.
+   * Usa colores fijos y las clases específicas de GAS para máxima compatibilidad.
+   *
+   * @param {boolean} enabled - true para aplicar dark mode, false para removerlo.
+   * @private
+   */
+  _applyIdeDarkMode(enabled) {
+    const styleId = 'qc__ide-dark-mode';
+    const existing = document.getElementById(styleId);
+
+    if (!enabled) {
+      existing?.remove();
+      return;
+    }
+
+    if (existing) return; // Ya aplicado
+
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      /* ═══════════════════════════════════════════════════════════════
+         IDE DARK MODE - Google Apps Script Tools
+         Tema dark para el entorno completo del IDE de GAS
+         Basado en clases específicas de Google Apps Script
+         ═══════════════════════════════════════════════════════════════ */
+      :root{
+        --gc__root-background: #19161d;
+        --gc__root-forenground: #dfdedb;
+      }
+
+      /* ── Fondo principal y body ────────────────────────────────── */
+      body {
+        background: var(--gc__root-background) !important;
+      }
+
+      /* ── Header y navegación superior ──────────────────────────── */
+      .voS0mf,
+      .xifBgf {
+        background: var(--gc__root-background) !important;
+        border-bottom: 1px #25231f solid !important;
+      }
+
+      header {
+        background: black !important;
+      }
+
+      /* ── Separadores y bordes ──────────────────────────────────── */
+      .ZHQ5U,
+      .GLLFQe:not(:first-child) {
+        border-top: 1px #25231f solid !important;
+      }
+
+      .yggLIc::after {
+        border-right: 1px #4c4c4c solid !important;
+      }
+
+      .LDouke,
+      .MJnCFe {
+        border-left: 1px #25231f solid !important;
+      }
+
+      /* ── Texto y colores de fuente ─────────────────────────────── */
+      .AVdUn {
+        color: #cfcfcf !important;
+      }
+
+      :not(.UeVsd) > .dxw0vf,
+      .qc__folder-children li[role="option"] div[title]::before,
+      .qc__folder-header {
+        color: var(--gc__root-forenground) !important;
+      }
+
+      .ry3kXd,
+      .cfWmIb,
+      .orScbe,
+      .VfPpkd-fmcmS-yrriRe,
+      .VfPpkd-fmcmS-yrriRe-OWXEXe-mWPk3d {
+        color: white !important;
+      }
+
+      .MocG8c {
+        color: #f7f7f7 !important;
+      }
+
+      .ncFHed .MocG8c,
+      .eU809d {
+        color: var(--gc__root-background) !important;
+      }
+
+      /* ── Paneles, modales y menús (inversión de colores) ───────── */
+      div[aria-modal="true"],
+      .vL6DV,
+      .vZzXQ,
+      .awn63d,
+      .ZBGfLd,
+      .N3bjuf,
+      .td5WLe,
+      .hmN6tf,
+      .OaLLmb,
+      div[role="menu"],
+      div[role="complementary"],
+      .wNGeMc {
+        background: #F7F7F7 !important;
+        filter: invert(1) !important;
+        text-shadow: 0 0 0 rgba(0, 0, 0, 1);
+      }
+
+      /* ── Sidebar y árbol de archivos ───────────────────────────── */
+      .UeVsd,
+      .z2IeMc {
+        filter: invert(1) !important;
+        text-shadow: 0 0 0 rgba(0, 0, 0, 1);
+      }
+
+      /* Excepción: iconos de carpetas y archivos personalizados NO se invierten */
+      .qc__folder-icon-wrapper,
+      .qc__file-icon {
+        filter: invert(1) !important;
+      }
+
+      /* ── Inputs y campos de texto ──────────────────────────────── */
+      .MocG8c,
+      .icpHQc,
+      input[type="text"] {
+        text-shadow: 0 0 0 rgba(0, 0, 0, 1);
+      }
+
+      /* ── Toolbar y botones ─────────────────────────────────────── */
+      .g3VIld {
+        background: #F7F7F7 !important;
+        filter: invert(100%) !important;
+        text-shadow: 0 0 0 rgba(0, 0, 0, 1);
+      }
+
+      div.g3VIld .ncFHed {
+        position: static !important;
+      }
+
+      div.yggLIc .ncFHed,
+      .CtTFvc .eU809d {
+        filter: invert(100%) !important;
+      }
+
+      /* ── Editor Monaco y área de código ────────────────────────── */
+      .LjDxcd,
+      .ry3kXd {
+        filter: invert(1) contrast(1) !important;
+        -webkit-font-smoothing: none;
+        -moz-osx-font-smoothing: unset;
+        font-smoothing: unset;
+        font-smooth: never;
+      }
+
+      /* ── Fondos claros para elementos invertidos ───────────────── */
+      .z9lUof,
+      .Y7MQLd {
+        background: #F7F7F7 !important;
+      }
+
+      /* ── Scrollbars personalizados ─────────────────────────────── */
+      ::-webkit-scrollbar {
+        background: var(--gc__root-background) !important;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #4c4c4c !important;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: #5c5c5c !important;
+      }
+
+      /* ── Ajustes adicionales para compatibilidad ───────────────── */
+      c-wiz[data-p] {
+        background: var(--gc__root-background) !important;
+      }
+
+      /* Prevenir doble inversión en elementos anidados */
+      .UeVsd .UeVsd,
+      .z2IeMc .z2IeMc {
+        filter: none !important;
+      }
+    `;
+
+    document.head.appendChild(style);
   }
 
   // ──────────────────────────────────────────
@@ -1383,6 +1798,12 @@ class GasCustomEditor {
    * Desactiva la extensión y limpia todos los cambios inyectados.
    */
   disable() {
+    //  Mostramos el sidebar
+    const actionsPanel_ = document.querySelector('gas-actions-panel');
+    if (actionsPanel_){
+      actionsPanel_.showPanel();
+    }
+    
     // 1. Limpiar el estado interno
     this._settings = {};
     this._snippets = [];
@@ -1393,8 +1814,10 @@ class GasCustomEditor {
     this._resetEditorDefaults();
     // 4. Eliminar la UI inyectada y los listeners
     this._teardownInjectedUi_();
+    // 5. Remover el tema dark del IDE si está aplicado
+    document.getElementById('qc__ide-dark-mode')?.remove();
 
-    // 5. Deshabilitar autocompletado AI si existe
+    // 6. Deshabilitar autocompletado AI si existe
     if (this._aiAutocomplete) {
       this._aiAutocomplete.disable();
     }
@@ -1444,6 +1867,8 @@ class GasCustomEditor {
     const inject = () => {
       this._injectAdvancedSearch_();
       this._injectChatPanel_();
+      this._injectActionsPanel_();
+      this._injectGithubPanel_();
       this._injectCurrentFile_();
     };
 
@@ -1472,10 +1897,14 @@ class GasCustomEditor {
     // Cerrar paneles antes de eliminarlos para que cierren listeners propios.
     this._searchPanel?.close?.();
     this._chatPanel?.close?.();
+    this._actionsPanel?.close?.();
+    this._githubPanel?.close?.();
 
     // Delegar el teardown específico (botones + paneles + listeners + atajos).
     this._teardownAdvancedSearch_();
     this._teardownChatPanel_();
+    this._teardownActionsPanel_();
+    this._teardownGithubPanel_();
     this._teardownCurrentFile_();
 
     // Limpiar elementos auxiliares que pudieran haber quedado de versiones

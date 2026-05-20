@@ -17,14 +17,10 @@ import { initThemeModule } from './modules/themes.js';
 import { initSnippetModule } from './modules/snippets.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('QualityCode Engine Started');
-
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    console.log("Current active tab:", tab);
 
     // Validamos la URL del editor de Google Apps Script
     const isEditor_ = tab?.url?.includes('script.google.com/') && tab?.url?.includes('/edit');
-    console.log("Is Google Apps Script Editor?", isEditor_);
 
     // Si no estamos en el editor, mostramos una pantalla de créditos o información básica
     if (!isEditor_) {

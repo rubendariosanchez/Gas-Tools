@@ -12,7 +12,6 @@ export function initTabs_() {
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
             const target = tab.dataset.target;
-            console.log(`Tab clicked: ${target}`);
 
             // Limpiar estados activos previos
             tabs.forEach(t => t.classList.remove('qc__active'));

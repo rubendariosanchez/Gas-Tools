@@ -333,6 +333,34 @@
   };
   document.addEventListener('GAS_HidePanels', _listeners.onHidePanels);
 
+  // Vuelta al editor desde otra subruta (Ejecuciones, Despliegues, etc.).
+  // Pedimos a la instancia que recapture el modelo principal: cuando el
+  // usuario regresa, GAS abre por defecto el archivo "principal" del
+  // proyecto, así que ese es el momento natural para refrescar el ancla.
+  //
+  // Nota: el evento puede llegar ANTES de que la nueva instancia esté
+  // lista (la limpieza de `data-gasreference` en el content script
+  // dispara `GAS_TransferData` y ese flujo crea la instancia con un
+  // pequeño delay). Para no perderlo, marcamos un flag que será leído
+  // por `mergeAndReinit` / `init` cuando la instancia esté disponible.
+  _listeners.onReturnToEditor = () => {    
+    window.__gasReturnPending = true;
+    G_GAS_TOOLS_INSTANCE?.refreshInitialModel?.();
+
+    // Disparar Ctrl+S para que GAS guarde antes de recargar
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 's',
+      code: 'KeyS',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
+
+    // Dar tiempo a GAS para procesar el guardado antes de recargar
+    setTimeout(() => window.location.reload(), 1000);
+  };
+  document.addEventListener('GAS_ReturnToEditor', _listeners.onReturnToEditor);
+
   // Datos iniciales del editor (settings, snippets, tema, botones).
   _listeners.onTransferData = (e) => {
     try {

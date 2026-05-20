@@ -227,6 +227,9 @@ class GasChatPanel extends HTMLElement {
    */
   open() {
     document.querySelector('gas-search-panel')?.close?.();
+    document.querySelector('gas-actions-panel')?.close?.();
+    document.querySelector('gas-current-file')?.close?.();
+    document.querySelector('gas-github-panel')?.close?.();
     this.style.display = 'flex';
     this.style.pointerEvents = 'auto';
     setTimeout(() => {

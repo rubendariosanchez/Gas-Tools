@@ -58,7 +58,6 @@ export class StorageAPI {
         return new Promise((resolve, reject) => {
             const tx = db.transaction(storeName, 'readwrite');
             const store = tx.objectStore(storeName);
-            console.log(`Saving to store "${storeName}":`, data);
 
             // Si el objeto tiene un 'id', lo usamos como clave, sino se asume que el store es de tipo key-value
             const request = store.put(data);

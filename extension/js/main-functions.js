@@ -17,6 +17,23 @@ const GAS_EVENTS = {
   LLM_CONFIG_RESULT: 'GAS_LLM_CONFIG_RESULT',
   LLM_GET_GLOBAL_AI_CONTEXT: 'GAS_LLM_GET_GLOBAL_AI_CONTEXT',
   LLM_SAVE_CONFIG:  'GAS_LLM_SAVE_CONFIG',
+  DOWNLOAD_PROJECT: 'GAS_DownloadProject',
+  DOWNLOAD_RESULT:  'GAS_DownloadProjectResult',
+  GH_GET_AUTH:        'GAS_GH_GET_AUTH',
+  GH_AUTH_RESULT:     'GAS_GH_AUTH_RESULT',
+  GH_AUTHENTICATE:    'GAS_GH_AUTHENTICATE',
+  GH_AUTH_DONE:       'GAS_GH_AUTH_DONE',
+  GH_CANCEL_AUTH:     'GAS_GH_CANCEL_AUTH',
+  GH_CANCEL_AUTH_DONE:'GAS_GH_CANCEL_AUTH_DONE',
+  GH_DEVICE_CODE:     'GAS_GH_DEVICE_CODE',
+  GH_LOGOUT:          'GAS_GH_LOGOUT',
+  GH_LOGOUT_DONE:     'GAS_GH_LOGOUT_DONE',
+  GH_GET_PROJECT:     'GAS_GH_GET_PROJECT',
+  GH_PROJECT_RESULT:  'GAS_GH_PROJECT_RESULT',
+  GH_SAVE_PROJECT:    'GAS_GH_SAVE_PROJECT',
+  GH_SAVE_DONE:       'GAS_GH_SAVE_DONE',
+  GH_API_CALL:        'GAS_GH_API_CALL',
+  GH_API_RESULT:      'GAS_GH_API_RESULT',
 };
 
 /**
@@ -49,11 +66,18 @@ function dispatchGAS(eventName, detail, useWindow = false) {
  * @returns {Function} stop() para detener el polling.
  */
 function createNavigationDetector(callbacks) {
+  // Regex unificado de subrutas conocidas dentro de un proyecto. Lo
+  // reutilizamos en la inicialización y en el polling para no dejar
+  // ninguna ruta fuera (omitirlas hace que `lastKey` quede `null` y la
+  // siguiente transición se interprete como cambio de proyecto).
+  const SUBROUTE_RE =
+    /\/([^/]+?)\/(?:edit|executions|deployments|libraries|services|metrics|triggers|settings|versions|history|projecthistory)/;
+
   let lastPath  = document.location.pathname;
   // Inicializamos `lastKey` desde la URL actual para que la primera
   // navegación dentro del mismo proyecto se detecte como `onLeaveEditor`
   // y no como `onProjectChange`.
-  const initMatch = lastPath.match(/\/([^/]+?)\/(?:edit|executions|deployments|libraries|services|metrics|triggers|settings|versions|history)/);
+  const initMatch = lastPath.match(SUBROUTE_RE);
   let lastKey      = initMatch ? initMatch[1] : null;
   // Última subruta dentro del proyecto: 'edit', 'executions', 'deployments', etc.
   let lastInEditor = /\/edit(\/|$)/.test(lastPath);
@@ -64,13 +88,13 @@ function createNavigationDetector(callbacks) {
     // Refrescar el estado inicial: durante el delay el usuario puede haber
     // navegado, y queremos comparar contra la URL real al iniciar el polling.
     lastPath = document.location.pathname;
-    const m  = lastPath.match(/\/([^/]+?)\/(?:edit|executions|deployments|libraries|services|metrics|triggers|settings|versions|history)/);
+    const m  = lastPath.match(SUBROUTE_RE);
     lastKey  = m ? m[1] : null;
     lastInEditor = /\/edit(\/|$)/.test(lastPath);
 
     interval = setInterval(() => {
       const path  = document.location.pathname;
-      const match = path.match(/\/([^/]+?)\/(?:edit|executions|deployments|libraries|services|metrics|triggers|settings|versions|history)/);
+      const match = path.match(SUBROUTE_RE);
       const key   = match ? match[1] : null;
       const inEditor = /\/edit(\/|$)/.test(path);
 
@@ -78,13 +102,15 @@ function createNavigationDetector(callbacks) {
       if (path === lastPath) return;
       lastPath = path;
 
-      if (key && key !== lastKey) {
+      // Cambio real de proyecto (clave nueva distinta a una previa).
+      if (key && lastKey && key !== lastKey) {
         lastKey = key;
         lastInEditor = inEditor;
         callbacks.onProjectChange?.(key);
         return;
       }
 
+      // Salida total del proyecto (sin clave ni subruta conocida).
       if (!key && lastKey) {
         lastKey = null;
         lastInEditor = false;
@@ -92,9 +118,12 @@ function createNavigationDetector(callbacks) {
         return;
       }
 
-      // Mismo proyecto: detectar transición a la subruta de edición.
-      // Caso clave: /XYZ/executions → /XYZ/edit (volver al editor).
-      if (key && key === lastKey && inEditor && !lastInEditor) {
+      // Mismo proyecto (o primera vez que reconocemos una clave) y se
+      // entra a `/edit`. Cubrimos también el caso en que `lastKey` era
+      // `null` porque la ruta previa no estaba en `SUBROUTE_RE` (p. ej.
+      // un alias/legacy que no hayamos contemplado).
+      if (key && inEditor && !lastInEditor) {
+        lastKey = key;
         lastInEditor = true;
         callbacks.onReturnToEditor?.(key);
         return;
@@ -123,6 +152,8 @@ async function loadResources() {
     searchButton: 'extension/html/searchButton.html',
     chatButton:   'extension/html/chatButton.html',
     fileButton:   'extension/html/currentFileButton.html',
+    actionsButton:'extension/html/actionsButton.html',
+    githubButton: 'extension/html/githubButton.html',
   };
   const entries = await Promise.all(
     Object.entries(urls).map(async ([key, path]) => {
@@ -141,12 +172,17 @@ async function loadResources() {
 async function injectScripts() {
   const scriptPaths = [
     'extension/js/services/dom-utils.js',
+    'extension/js/services/gas-file-map.js',
     'extension/js/services/gas-ai-autocomplete.js',
     'extension/js/services/gas-folders.js',
     'extension/js/services/gas-error-lens.js',
+    'src/vendor/diff/diff.min.js',
+    'src/vendor/diff2html/diff2html-ui.min.js',
     'extension/js/components/gas-search-panel.js',
     'extension/js/components/gas-chat-panel.js',
     'extension/js/components/gas-current-file.js',
+    'extension/js/components/gas-actions-panel.js',
+    'extension/js/components/gas-github-panel.js',
     'extension/js/gas-tools.js',
     'extension/js/gas-tools-main.js',
   ];
@@ -161,6 +197,7 @@ async function injectScripts() {
     const isLast = i === scriptPaths.length - 1;
     await new Promise((resolve, reject) => {
       const el = document.createElement('script');
+      console.log(chrome.runtime.getURL(path))
       el.src = chrome.runtime.getURL(path);
       el.addEventListener('load',  () => {
         if (isLast) {
@@ -306,9 +343,6 @@ function watchForEditors(payload) {
     const editors = document.querySelectorAll('.monaco-editor');
     const present = editors.length > 0;
 
-    if (!present && _editorsWerePresent) {
-      console.log('[GASTools] Navegación saliente detectada');
-    }
     if (present && !_editorsWerePresent) {
       console.log('[GASTools] Editores reaparecieron, re-inicializando');
       clearAllReferences();
@@ -338,6 +372,7 @@ async function init() {
       return;
     }
 
+    // Cargamos las librerias a usar
     await injectScripts();
 
     // Monitoreo de navegación SPA por cambio de URL
@@ -357,6 +392,9 @@ async function init() {
         document.querySelectorAll('.monaco-editor[data-gasreference]').forEach(el => {
           delete el.dataset.gasreference;
         });
+        // Notificamos al world MAIN para que `gas-tools.js` recapture el
+        // modelo principal y refresque el mapa de archivos.
+        dispatchGAS('GAS_ReturnToEditor', { scriptKey });
       },
       onLeaveEditor(scriptKey) {
         // Salir del editor a otra subruta del mismo proyecto: ocultar paneles.
@@ -369,10 +407,12 @@ async function init() {
     });
 
     watchForEditors({
-      searchButton: resources.searchButton,
-      chatButton:   resources.chatButton,
-      fileButton:   resources.fileButton,
-      themeUrl:     chrome.runtime.getURL('themes'),
+      searchButton:  resources.searchButton,
+      chatButton:    resources.chatButton,
+      fileButton:    resources.fileButton,
+      actionsButton: resources.actionsButton,
+      githubButton:  resources.githubButton,
+      themeUrl:      chrome.runtime.getURL('themes'),
       settings,
       snippets,
       activeTheme,
@@ -388,6 +428,12 @@ async function init() {
 // ─────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener(async (msg) => {
+  // Push del device flow desde el background → MAIN world.
+  if (msg.type === 'GITHUB_DEVICE_CODE') {
+    dispatchGAS(GAS_EVENTS.GH_DEVICE_CODE, msg.payload || {});
+    return;
+  }
+
   if (msg.type !== 'SETTINGS_UPDATED') return;
 
   const { options, data, updateType } = msg.payload;
@@ -458,6 +504,75 @@ const G_LLM_BRIDGE = [
     responseEvent: null,
     buildMessage:  (payload) => ({ type: 'LLM_SAVE_CONFIG', payload }),
     buildDetail:   null,
+  },
+  {
+    listenEvent:   GAS_EVENTS.DOWNLOAD_PROJECT,
+    responseEvent: GAS_EVENTS.DOWNLOAD_RESULT,
+    buildMessage:  ({ scriptId }) => ({ type: 'DOWNLOAD_GAS_PROJECT', scriptId }),
+    buildDetail:   (response, requestId) => ({
+      requestId,
+      ok:    response?.ok ?? false,
+      data:  response?.ok ? (response.data || null) : null,
+      error: response?.ok ? null : (response?.error || 'Unknown error'),
+    }),
+  },
+  {
+    listenEvent:   GAS_EVENTS.GH_GET_AUTH,
+    responseEvent: GAS_EVENTS.GH_AUTH_RESULT,
+    buildMessage:  () => ({ type: 'GITHUB_GET_AUTH' }),
+    buildDetail:   (data, requestId) => ({ requestId, data: data || null }),
+  },
+  {
+    listenEvent:   GAS_EVENTS.GH_AUTHENTICATE,
+    responseEvent: GAS_EVENTS.GH_AUTH_DONE,
+    buildMessage:  () => ({ type: 'GITHUB_AUTHENTICATE' }),
+    buildDetail:   (response, requestId) => ({
+      requestId,
+      ok:    response?.ok ?? false,
+      user:  response?.ok ? (response.user || null) : null,
+      error: response?.ok ? null : (response?.error || 'Unknown error'),
+    }),
+  },
+  {
+    listenEvent:   GAS_EVENTS.GH_CANCEL_AUTH,
+    responseEvent: GAS_EVENTS.GH_CANCEL_AUTH_DONE,
+    buildMessage:  () => ({ type: 'GITHUB_CANCEL_AUTH' }),
+    buildDetail:   (response, requestId) => ({ requestId, ok: response?.ok ?? false }),
+  },
+  {
+    listenEvent:   GAS_EVENTS.GH_LOGOUT,
+    responseEvent: GAS_EVENTS.GH_LOGOUT_DONE,
+    buildMessage:  () => ({ type: 'GITHUB_LOGOUT' }),
+    buildDetail:   (response, requestId) => ({ requestId, ok: response?.ok ?? false }),
+  },
+  {
+    listenEvent:   GAS_EVENTS.GH_GET_PROJECT,
+    responseEvent: GAS_EVENTS.GH_PROJECT_RESULT,
+    buildMessage:  ({ scriptId }) => ({ type: 'GITHUB_GET_PROJECT_CONFIG', payload: { scriptId } }),
+    buildDetail:   (data, requestId) => ({ requestId, data: data || null }),
+  },
+  {
+    listenEvent:   GAS_EVENTS.GH_SAVE_PROJECT,
+    responseEvent: GAS_EVENTS.GH_SAVE_DONE,
+    buildMessage:  ({ scriptId, config }) => ({
+      type:    'GITHUB_SAVE_PROJECT_CONFIG',
+      payload: { scriptId, config },
+    }),
+    buildDetail:   (response, requestId) => ({ requestId, ok: response?.ok ?? false }),
+  },
+  {
+    listenEvent:   GAS_EVENTS.GH_API_CALL,
+    responseEvent: GAS_EVENTS.GH_API_RESULT,
+    buildMessage:  ({ action, payload }) => ({
+      type:    'GITHUB_API_CALL',
+      payload: { action, payload },
+    }),
+    buildDetail:   (response, requestId) => ({
+      requestId,
+      ok:    response?.ok ?? false,
+      data:  response?.ok ? (response.data || null) : null,
+      error: response?.ok ? null : (response?.error || 'Unknown error'),
+    }),
   },
 ];
 

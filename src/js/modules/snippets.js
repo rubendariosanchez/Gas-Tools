@@ -53,7 +53,6 @@ export async function loadSnippets_(startModule_, query = '', category = current
 
     // Determinar pestaña por defecto según existan snippets personalizados
     if(startModule_){
-        console.log('userSnippets', userSnippets.length);
         const hasCustomSnippets = userSnippets && userSnippets.length > 0;
         const defaultCategory = hasCustomSnippets ? 'custom' : 'default';
         
@@ -144,9 +143,7 @@ async function saveSnippet_(newSnip, modalInstance) {
         // Almacenamos los datos en IndexedDB para optimizar rendimiento y evitar bloqueos
         await DB.set('snippets', newSnip); // Guarda o actualiza directamente
         await syncLastUpdated();
-        console.log('[Snippets] Saved, notifying editors...');
         notifyEditors('snippets');
-        console.log('[Snippets] Notification sent');
 
         // Después de guardar, cerramos el modal y recargamos la lista para reflejar cambios
         modalInstance.close_();

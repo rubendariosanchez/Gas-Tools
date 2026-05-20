@@ -34,7 +34,9 @@
         "extension/js/components/*.*",
         "extension/html/*.html",
         "themes/*.json",
-        "src/vendor/codemirror/*"
+        "src/vendor/codemirror/*",
+        "src/vendor/diff/*",
+        "src/vendor/diff2html/*"
       ],
       "matches": [
         "<all_urls>"
@@ -66,11 +68,14 @@
     "http://localhost:*/*",
     "http://127.0.0.1:*/*",
     "https://script.google.com/*",
+    "https://*.googleusercontent.com/*",
     "https://api.openai.com/*",
     "https://api.anthropic.com/*",
     "https://generativelanguage.googleapis.com/*",
     "https://api.deepseek.com/*",
     "https://apps.abacus.ai/*",
-    "https://integrate.api.nvidia.com/*"
+    "https://integrate.api.nvidia.com/*",
+    "https://api.github.com/*",
+    "https://github.com/login/*"
   ]
 }

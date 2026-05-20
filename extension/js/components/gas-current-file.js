@@ -22,8 +22,13 @@ class GasCurrentFile extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     /** @type {object|null} Instancia de Monaco Editor. */
     this._editor = null;
-    /** @type {Map<string,string>} Mapa URI → nombre legible. */
-    this._fileNameObjectMap = new Map();
+    /**
+     * Mapa URI → nombre legible. Por defecto apunta al singleton global
+     * `window.gasFileMap` para que el componente lea siempre el estado
+     * más reciente sin necesidad de inyecciones manuales.
+     * @type {Map<string,string>|object}
+     */
+    this._fileNameObjectMap = window.gasFileMap || new Map();
     /** @type {Array<{dispose:Function}>} Disposables de Monaco. */
     this._monacoDisposables = [];
     /** @type {boolean} Estado de visibilidad del popover. */
@@ -35,6 +40,7 @@ class GasCurrentFile extends HTMLElement {
     this._onDocumentMouseDown = this._onDocumentMouseDown.bind(this);
     this._onWindowKeyDown     = this._onWindowKeyDown.bind(this);
     this._onWindowResize      = this._onWindowResize.bind(this);
+    this._onFileMapChange     = this._onFileMapChange.bind(this);
   }
 
   connectedCallback() {
@@ -42,6 +48,9 @@ class GasCurrentFile extends HTMLElement {
     document.addEventListener('mousedown', this._onDocumentMouseDown, true);
     window.addEventListener('keydown',     this._onWindowKeyDown);
     window.addEventListener('resize',      this._onWindowResize);
+    // Suscripción al singleton global: nos refrescamos automáticamente
+    // cuando `gas-tools.js` actualiza el mapa.
+    window.gasFileMap?.addEventListener?.('change', this._onFileMapChange);
   }
 
   disconnectedCallback() {
@@ -49,6 +58,7 @@ class GasCurrentFile extends HTMLElement {
     document.removeEventListener('mousedown', this._onDocumentMouseDown, true);
     window.removeEventListener('keydown',     this._onWindowKeyDown);
     window.removeEventListener('resize',      this._onWindowResize);
+    window.gasFileMap?.removeEventListener?.('change', this._onFileMapChange);
   }
 
   // ── API pública ────────────────────────────────────────────────────────
@@ -66,20 +76,36 @@ class GasCurrentFile extends HTMLElement {
   }
 
   /**
-   * Inyecta el resolver URI → nombre real construido por gasTools.
-   * @param {Map<string,string>} map
+   * Sobre-escribe el mapa URI → nombre real con un Map externo.
+   *
+   * Mantenido por compatibilidad: el componente lee el singleton
+   * `window.gasFileMap` automáticamente, así que normalmente no es
+   * necesario llamar este método.
+   *
+   * @param {Map<string,string>|object} map
    */
   setFileNameObjectMap(map) {
-    this._fileNameObjectMap = map || new Map();
+    this._fileNameObjectMap = map || window.gasFileMap || new Map();
+    if (this._popoverOpen) this.refresh();
+  }
+
+  /** Handler del evento `change` del singleton. @private */
+  _onFileMapChange() {
     if (this._popoverOpen) this.refresh();
   }
 
   /**
-   * Abre el popover anclado al elemento dado.
+   * Abre el popover anclado al elemento dado. Cierra otros paneles
+   * flotantes (búsqueda y chat) para que la información no quede tapada.
    * @param {HTMLElement} anchorEl Botón que actúa de ancla visual.
    */
   open(anchorEl) {
     if (anchorEl) this._anchorEl = anchorEl;
+    // Cerramos paneles que ocuparían el mismo espacio visual.
+    document.querySelector('gas-search-panel')?.close?.();
+    document.querySelector('gas-chat-panel')?.close?.();
+    document.querySelector('gas-actions-panel')?.close?.();
+    document.querySelector('gas-github-panel')?.close?.();
     this._popoverOpen = true;
     this._renderPopover_(this._collectInfo_());
     this._positionPopover_();
@@ -128,18 +154,20 @@ class GasCurrentFile extends HTMLElement {
           position: fixed;
           background: #ffffff;
           border: 1px solid rgba(0,0,0,0.08);
-          border-radius: 10px;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.16);
-          padding: 12px 14px;
+          border-radius: 12px;
+          box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+          padding: 0;
           font-size: 12px;
           color: #3c4043;
-          width: 240px;
+          width: 280px;
+          overflow: visible;
           display: none;
           pointer-events: auto;
         }
         .qc__popover.qc__open { display: block; }
 
-        /* Flecha conectora apuntando al botón. */
+        /* Flecha conectora apuntando al botón. Usa el color del header
+           para no romper la continuidad visual. */
         .qc__popover::before,
         .qc__popover::after {
           content: '';
@@ -151,50 +179,98 @@ class GasCurrentFile extends HTMLElement {
           border-left: 7px solid transparent;
           border-right: 7px solid transparent;
         }
-        .qc__popover::before { border-bottom: 7px solid rgba(0,0,0,0.08); }
-        .qc__popover::after  { top: -6px; border-bottom: 7px solid #ffffff; }
+        .qc__popover::before { border-bottom: 7px solid #d2e3fc; }
+        .qc__popover::after  { top: -6px; border-bottom: 7px solid #e8f0fe; }
 
         .qc__popover.qc__above::before,
         .qc__popover.qc__above::after {
           top: auto;
           bottom: -7px;
           border-bottom: none;
-          border-top: 7px solid rgba(0,0,0,0.08);
+          border-top: 7px solid #d2e3fc;
         }
         .qc__popover.qc__above::after {
           bottom: -6px;
           border-top-color: #ffffff;
         }
 
-        .qc__pop-title {
-          margin: 0 0 10px;
+        /* Cabecera con icono + nombre destacado (color sólido). */
+        .qc__pop-header {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 12px 14px;
+          background: #e8f0fe;
+          border-bottom: 1px solid #d2e3fc;
+          border-top-left-radius: 12px;
+          border-top-right-radius: 12px;
+        }
+        .qc__pop-icon {
+          flex: 0 0 auto;
+          width: 32px;
+          height: 32px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #ffffff;
+          border-radius: 8px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .qc__pop-icon svg { width: 18px; height: 18px; }
+        .qc__pop-name {
+          flex: 1 1 auto;
           font-size: 13px;
           font-weight: 600;
-          color: #202124;
+          color: #174ea6;
           word-break: break-all;
           line-height: 1.3;
         }
 
-        .qc__row {
-          display: flex;
-          justify-content: space-between;
-          padding: 5px 0;
-          border-bottom: 1px solid rgba(0,0,0,0.06);
+        .qc__pop-body { padding: 12px 14px; }
+
+        /* Grilla de stats principales. */
+        .qc__stats {
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 6px;
+          margin-bottom: 12px;
         }
-        .qc__row:last-of-type { border-bottom: none; }
-        .qc__row .qc__k { color: #5f6368; }
-        .qc__row .qc__v { color: #202124; font-weight: 500; }
+        .qc__stat {
+          background: #f1f3f4;
+          border: 1px solid #e8eaed;
+          border-radius: 8px;
+          padding: 8px 6px;
+          text-align: center;
+        }
+        .qc__stat-value {
+          font-size: 14px;
+          font-weight: 700;
+          color: #202124;
+          line-height: 1.2;
+        }
+        .qc__stat-label {
+          font-size: 10px;
+          text-transform: uppercase;
+          letter-spacing: 0.4px;
+          color: #5f6368;
+          margin-top: 2px;
+        }
 
         .qc__section-title {
-          margin-top: 12px;
           font-weight: 600;
           color: #202124;
-          font-size: 12px;
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin: 8px 0 6px;
         }
 
+        /* Lista de markers: siempre los 3 niveles principales. Las filas
+           con conteo > 0 reciben un acento de color a la izquierda y
+           contraste fuerte para que se distingan de un vistazo. */
         .qc__markers {
           list-style: none;
-          margin: 8px 0 0;
+          margin: 0;
           padding: 0;
           display: flex;
           flex-direction: column;
@@ -203,10 +279,24 @@ class GasCurrentFile extends HTMLElement {
         .qc__marker {
           display: flex;
           align-items: center;
-          gap: 8px;
-          padding: 4px 0;
+          gap: 10px;
+          padding: 8px 10px;
+          border-radius: 6px;
           font-size: 12px;
+          background: #ffffff;
+          border: 1px solid #e8eaed;
+          border-left-width: 3px;
         }
+        .qc__marker.qc__zero {
+          background: #fafafa;
+          border-color: #ececec;
+          border-left-color: #dadce0;
+          color: #80868b;
+        }
+        .qc__marker.qc__has.qc__error   { border-left-color: #d93025; background: #fce8e6; border-color: #f5c8c2; }
+        .qc__marker.qc__has.qc__warning { border-left-color: #f9ab00; background: #fef7e0; border-color: #f5dca0; }
+        .qc__marker.qc__has.qc__info    { border-left-color: #1a73e8; background: #e8f0fe; border-color: #c6dafc; }
+
         .qc__circle {
           width: 10px;
           height: 10px;
@@ -216,16 +306,16 @@ class GasCurrentFile extends HTMLElement {
         .qc__circle.qc__error   { background: #d93025; }
         .qc__circle.qc__warning { background: #f9ab00; }
         .qc__circle.qc__info    { background: #1a73e8; }
-        .qc__circle.qc__hint    { background: #34a853; }
 
-        .qc__marker .qc__label { flex: 1 1 auto; color: #3c4043; }
-        .qc__marker .qc__count { font-weight: 600; color: #202124; }
-
-        .qc__no-issues {
-          color: #5f6368;
-          font-style: italic;
-          padding: 4px 0;
+        .qc__marker .qc__label { flex: 1 1 auto; color: #3c4043; font-weight: 500; }
+        .qc__marker.qc__zero .qc__label { color: #80868b; font-weight: 500; }
+        .qc__marker .qc__count {
+          font-weight: 700;
+          color: #202124;
+          min-width: 18px;
+          text-align: right;
         }
+        .qc__marker.qc__zero .qc__count { color: #9aa0a6; font-weight: 600; }
       </style>
 
       <div class="qc__popover" id="qcPopover" role="dialog" aria-label="File info"></div>
@@ -268,14 +358,17 @@ class GasCurrentFile extends HTMLElement {
     const lines = model.getLineCount?.() || 0;
     const bytes = new Blob([text]).size;
 
-    const markers = { error: 0, warning: 0, info: 0, hint: 0 };
+    // Contadores de markers. Tratamos `hint` (severity 1) como `info`
+    // (severity 2) para simplificar la lectura: ambos son sugerencias o
+    // mejoras no bloqueantes que el usuario interpreta igual.
+    const markers = { error: 0, warning: 0, info: 0 };
     const list = window.monaco?.editor?.getModelMarkers?.({ resource: model.uri }) || [];
     for (const m of list) {
       switch (m.severity) {
         case 8: markers.error++;   break; // Error
         case 4: markers.warning++; break; // Warning
         case 2: markers.info++;    break; // Info
-        case 1: markers.hint++;    break; // Hint
+        case 1: markers.info++;    break; // Hint → unificado con Info
       }
     }
 
@@ -309,53 +402,139 @@ class GasCurrentFile extends HTMLElement {
     const pop = this.shadowRoot.getElementById('qcPopover');
     if (!pop) return;
     if (!info) {
-      DomUtils.setHTML(pop, '<h4 class="qc__pop-title">No active file</h4>');
+      DomUtils.setHTML(pop, `
+        <div class="qc__pop-header">
+          <span class="qc__pop-icon">${this._svgFor_('generic')}</span>
+          <span class="qc__pop-name">No active file</span>
+        </div>
+      `);
       pop.classList.add('qc__open');
       return;
     }
 
     const sizeStr = info.bytes < 1024
       ? `${info.bytes} B`
-      : `${(info.bytes / 1024).toFixed(1)} KB`;
+      : info.bytes < 1024 * 1024
+        ? `${(info.bytes / 1024).toFixed(1)} KB`
+        : `${(info.bytes / 1024 / 1024).toFixed(2)} MB`;
+
+    const icon = this._iconForLanguage_(info.language, info.name);
+    const lang = this._humanLanguage_(info.language);
 
     DomUtils.setHTML(pop, `
-      <h4 class="qc__pop-title">${this._escape_(info.name)}</h4>
-      <div class="qc__row"><span class="qc__k">Language</span><span class="qc__v">${this._escape_(info.language)}</span></div>
-      <div class="qc__row"><span class="qc__k">Lines</span><span class="qc__v">${info.lines.toLocaleString()}</span></div>
-      <div class="qc__row"><span class="qc__k">Size</span><span class="qc__v">${sizeStr}</span></div>
-      <div class="qc__section-title">Diagnostics</div>
-      ${this._renderMarkersList_(info.markers)}
+      <div class="qc__pop-header">
+        <span class="qc__pop-icon">${icon}</span>
+        <span class="qc__pop-name">${this._escape_(info.name)}</span>
+      </div>
+      <div class="qc__pop-body">
+        <div class="qc__stats">
+          <div class="qc__stat">
+            <div class="qc__stat-value">${this._escape_(lang)}</div>
+            <div class="qc__stat-label">Language</div>
+          </div>
+          <div class="qc__stat">
+            <div class="qc__stat-value">${info.lines.toLocaleString()}</div>
+            <div class="qc__stat-label">Lines</div>
+          </div>
+          <div class="qc__stat">
+            <div class="qc__stat-value">${sizeStr}</div>
+            <div class="qc__stat-label">Size</div>
+          </div>
+        </div>
+        <div class="qc__section-title">Diagnostics</div>
+        ${this._renderMarkersList_(info.markers)}
+      </div>
     `);
     pop.classList.add('qc__open');
   }
 
   /**
-   * Lista de markers (círculo + categoría + cantidad). Solo severidades > 0.
+   * Lista de markers. Muestra siempre los 3 niveles principales (error,
+   * warning, info) aunque el conteo sea cero, para que el usuario tenga
+   * una lectura inmediata del estado del archivo.
+   *
    * @param {{error:number, warning:number, info:number, hint:number}} m
    * @returns {string}
    * @private
    */
   _renderMarkersList_(m) {
-    const total = m.error + m.warning + m.info + m.hint;
-    if (total === 0) return '<div class="qc__no-issues">No issues found</div>';
-
-    const rows = [];
-    if (m.error)   rows.push(this._markerRow_('error',   'Errors',   m.error));
-    if (m.warning) rows.push(this._markerRow_('warning', 'Warnings', m.warning));
-    if (m.info)    rows.push(this._markerRow_('info',    'Info',     m.info));
-    if (m.hint)    rows.push(this._markerRow_('hint',    'Hints',    m.hint));
+    const rows = [
+      this._markerRow_('error',   'Errors',   m.error),
+      this._markerRow_('warning', 'Warnings', m.warning),
+      this._markerRow_('info',    'Info',     m.info),
+    ];
     return `<ul class="qc__markers">${rows.join('')}</ul>`;
   }
 
-  /** Una fila: punto de color + label + cantidad. @private */
+  /**
+   * Una fila: punto de color + label + cantidad. Las filas con conteo
+   * cero se atenúan con `qc__zero` para distinguirlas de las activas.
+   * @private
+   */
   _markerRow_(severity, label, count) {
+    const cls = count > 0
+      ? `qc__has qc__${severity}`
+      : `qc__zero qc__${severity}`;
     return `
-      <li class="qc__marker">
+      <li class="qc__marker ${cls}">
         <span class="qc__circle qc__${severity}"></span>
         <span class="qc__label">${label}</span>
         <span class="qc__count">${count}</span>
       </li>
     `;
+  }
+
+  /**
+   * Devuelve el SVG del icono de archivo usando la instancia compartida
+   * `window.gasFolders` (la misma que pinta los iconos del árbol). Así el
+   * popover mantiene coherencia visual con el resto del IDE y respeta
+   * cualquier color personalizado que el usuario haya configurado.
+   *
+   * @param {'gs'|'html'|'json'|'generic'} type
+   * @returns {string}
+   * @private
+   */
+  _svgFor_(type) {
+    const folders = window.gasFolders;
+    if (folders?._renderFileSvg_) {
+      try { return folders._renderFileSvg_(type); }
+      catch (_) { /* fallback inline */ }
+    }
+    // Fallback mínimo si gasFolders no está disponible.
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none">' +
+      '<path d="M3 2h6.5L13 5.5V14H3z" stroke="#5f6368" stroke-width="1.2" stroke-linejoin="round"/>' +
+      '</svg>';
+  }
+
+  /**
+   * Mapea el lenguaje del modelo o la extensión del archivo a uno de los
+   * 4 tipos que entiende `gasFolders._renderFileSvg_`.
+   * @private
+   */
+  _iconForLanguage_(language, name) {
+    const lang = String(language || '').toLowerCase();
+    const ext  = String(name || '').toLowerCase().split('.').pop();
+    if (ext === 'gs'   || lang === 'google apps script') return this._svgFor_('gs');
+    if (ext === 'html' || lang === 'html')               return this._svgFor_('html');
+    if (ext === 'json' || lang === 'json')               return this._svgFor_('json');
+    return this._svgFor_('generic');
+  }
+
+  /**
+   * Pasa el id de lenguaje de Monaco a una etiqueta legible.
+   * @private
+   */
+  _humanLanguage_(language) {
+    const lang = String(language || '').toLowerCase();
+    if (lang === 'google apps script') return 'GAS';
+    if (lang === 'javascript')         return 'GS';
+    if (lang === 'typescript')         return 'GS';
+    if (lang === 'html')               return 'HTML';
+    if (lang === 'css')                return 'CSS';
+    if (lang === 'json')               return 'JSON';
+    if (lang === 'markdown')           return 'MD';
+    if (!lang || lang === '—')         return '—';
+    return language;
   }
 
   /**
@@ -372,29 +551,40 @@ class GasCurrentFile extends HTMLElement {
     if (!pop || !this._anchorEl) return;
 
     const rect = this._anchorEl.getBoundingClientRect();
-    const popW = pop.offsetWidth || 240;
+    const popW = pop.offsetWidth || 280;
+    const popH = pop.offsetHeight || 240;
     const margin = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
 
-    // Borde derecho del popover = borde derecho del ancla.
+    // Horizontal: alinear borde derecho del popover al borde derecho
+    // del ancla; clampeamos al viewport en ambos extremos.
     let left = rect.right - popW;
     if (left < margin) left = margin;
-    if (left + popW + margin > window.innerWidth) {
-      left = window.innerWidth - popW - margin;
-    }
+    if (left + popW + margin > vw) left = vw - popW - margin;
 
-    let top = rect.bottom + 10;
-    const popH = pop.offsetHeight || 200;
+    // Vertical: preferir abajo; si no cabe, intentamos arriba; si tampoco,
+    // tomamos el lado con más espacio y clampeamos para no salirnos.
+    const spaceBelow = vh - rect.bottom - margin;
+    const spaceAbove = rect.top - margin;
+    let top;
     let above = false;
-    if (top + popH + margin > window.innerHeight) {
+    if (spaceBelow >= popH + 10) {
+      top = rect.bottom + 10;
+    } else if (spaceAbove >= popH + 10) {
       top = rect.top - popH - 10;
       above = true;
+    } else if (spaceAbove >= spaceBelow) {
+      top = Math.max(margin, rect.top - popH - 10);
+      above = true;
+    } else {
+      top = Math.min(vh - popH - margin, rect.bottom + 10);
     }
 
     pop.style.left = `${left}px`;
     pop.style.top  = `${top}px`;
 
-    // Flecha apuntando al centro del ancla, expresada como offset desde el
-    // borde derecho del popover.
+    // Flecha apuntando al centro del ancla.
     const anchorCenter = rect.left + rect.width / 2;
     const arrowOffset = Math.max(
       14,
