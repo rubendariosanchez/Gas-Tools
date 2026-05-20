@@ -750,9 +750,15 @@ class GasErrorLens {
         // Saltar propiedad (después de `:` o `?`).
         const before = m[1];
         if (before === ':' || before === '?') continue;
-        // Saltar `==` y `===`: nuestra regex usa `=` simple.
+        // Saltar `==`, `===` y `=>` (arrow): nuestra regex usa `=` simple
+        // como ancla de asignación.
         const after = bare.slice(m.index + m[0].length, m.index + m[0].length + 1);
-        if (m[0].endsWith('=') && after === '=') continue;
+        if (m[0].endsWith('=') && (after === '=' || after === '>')) continue;
+        // Saltar parámetros de arrow function: `(NAME)` o `NAME` justo
+        // antes de `=>` no son asignaciones aunque la regex los matchee
+        // porque tras el nombre puede venir `=>` con espacios intermedios.
+        const restAfter = bare.slice(m.index + m[1].length + name.length).trimStart();
+        if (restAfter.startsWith('=>')) continue;
         const col = m.index + (m[1] ? m[1].length : 0) + 1;
         this._addMarker_(out, {
           line, col, length: name.length,

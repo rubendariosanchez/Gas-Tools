@@ -734,13 +734,31 @@ class GasSearchPanel extends HTMLElement {
     this._renderResults(query);
   }
   /**
-   * Busca la query en todos los modelos Monaco y agrupa por archivo.
+   * Busca la query en los modelos Monaco que pertenecen al proyecto y
+   * agrupa los resultados por archivo.
+   *
+   * Solo incluye modelos cuya URI exista en `_fileNameObjectMap` (es
+   * decir, archivos reales del proyecto inyectados por `gas-tools.js`).
+   * De este modo evitamos buscar en modelos internos de Monaco (workers,
+   * peek views, output panels, diff editors, etc.) que producen
+   * resultados ruidosos.
+   *
    * @param {string} searchText
    * @returns {Object.<string, Array>}
    */
   _findAllMatches(searchText) {
     const grouped = {};
-    const models  = window.monaco?.editor?.getModels?.() || [];
+    const allModels = window.monaco?.editor?.getModels?.() || [];
+
+    // Filtramos a SOLO los modelos del proyecto. Si el mapa aún no se ha
+    // inyectado (caso edge: panel abierto antes de la primera sincro),
+    // caemos al comportamiento anterior para no romper la búsqueda.
+    const map    = this._fileNameObjectMap;
+    const hasMap = map instanceof Map && map.size > 0;
+    const models = hasMap
+      ? allModels.filter((m) => map.has(String(m.uri)))
+      : allModels;
+
     // Si gas-tools.js no inyectó un formateador, usamos un fallback basado
     // en la URI para evitar que la búsqueda falle.
     const formatName = typeof this._formatModelName === 'function'

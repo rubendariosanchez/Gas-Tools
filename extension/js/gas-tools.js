@@ -301,6 +301,13 @@ class GasCustomEditor {
 
   /**
    * Acciones a ejecutar cuando se detecta un cambio de archivo (modelo).
+   *
+   * El árbol de archivos de GAS actualiza `aria-selected` con un pequeño
+   * delay tras el cambio de modelo en Monaco. Eso provoca que un único
+   * `_buildUriToNameMap` justo al detectar el cambio NO encuentre el
+   * archivo activo y el botón caiga a "File N". Para evitarlo,
+   * reintentamos el build en ventanas crecientes hasta confirmar que el
+   * URI activo ya tiene nombre, o agotar los intentos.
    * @private
    */
   _onFileChange_() {
@@ -311,18 +318,38 @@ class GasCustomEditor {
     this._refreshRootParent_();
     if (this._snippets.length > 0) this.reloadSnippets();
     this.reloadTheme();
-    this._buildUriToNameMap();
-    // Mantener los paneles sincronizados con el editor activo y el mapa.
-    this._searchPanel?.setEditor?.(this.editor);
-    this._searchPanel?.setFileNameObjectMap?.(this._fileNameObjectMap);
-    this._chatPanel?.setEditor?.(this.editor);
 
-    // Indicador de archivo activo: refrescar editor y nombre.
-    document.querySelectorAll('gas-current-file').forEach((el) => {
-      el.setEditor?.(this.editor);
-      el.setFileNameObjectMap?.(this._fileNameObjectMap);
+    // Construye el mapa y refresca todos los consumidores en cadena.
+    const syncAll = () => {
+      this._buildUriToNameMap();
+      this._searchPanel?.setEditor?.(this.editor);
+      this._searchPanel?.setFileNameObjectMap?.(this._fileNameObjectMap);
+      this._chatPanel?.setEditor?.(this.editor);
+      document.querySelectorAll('gas-current-file').forEach((el) => {
+        el.setEditor?.(this.editor);
+        el.setFileNameObjectMap?.(this._fileNameObjectMap);
+      });
+      this._renderCurrentFileButton_();
+    };
+
+    // Pase inmediato.
+    syncAll();
+
+    // Reintentos diferidos: el árbol DOM puede tardar en marcar el nuevo
+    // archivo como `aria-selected="true"`. Si el URI activo ya tiene
+    // nombre, abortamos los reintentos restantes.
+    const activeUri = this.editor?.getModel?.()?.uri
+      ? String(this.editor.getModel().uri)
+      : null;
+    const isResolved = () =>
+      !activeUri || this._fileNameObjectMap.has(activeUri);
+
+    [120, 350, 800].forEach((delay) => {
+      setTimeout(() => {
+        if (isResolved()) return;
+        syncAll();
+      }, delay);
     });
-    this._renderCurrentFileButton_();
   }
 
   /**
