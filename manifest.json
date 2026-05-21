@@ -62,7 +62,9 @@
   "permissions": [
     "declarativeContent",
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "identity",
+    "alarms"
   ],
   "host_permissions": [
     "http://localhost:*/*",
@@ -76,6 +78,18 @@
     "https://apps.abacus.ai/*",
     "https://integrate.api.nvidia.com/*",
     "https://api.github.com/*",
-    "https://github.com/login/*"
-  ]
+    "https://github.com/login/*",
+    "https://script.googleapis.com/*",
+    "https://www.googleapis.com/*",
+    "https://oauth2.googleapis.com/*",
+    "https://accounts.google.com/*"
+  ],
+  "oauth2": {
+    "client_id": "1013353101079-6hdb0u6ee0qqpv1h332tma9f6622etf9.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/script.projects",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile"
+    ]
+  }
 }

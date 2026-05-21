@@ -3,6 +3,7 @@ import { DB } from '../src/js/utils/Storage.js';
 import { G_PROPERTY_NAME, DEFAULT_SNIPPETS } from '../src/js/utils/Variables.js';
 import { getActiveTheme, callLlmProvider } from './js/services/llm-providers.js';
 import { callGithubApi, startDeviceFlow, pollDeviceToken, getAuthenticatedUser } from './js/services/github-api.js';
+import { callGoogleApi, getGoogleUser } from './js/services/google-api.js';
 
 // ─────────────────────────────────────────────
 // CLAVES DE STORAGE PARA GITHUB
@@ -17,6 +18,15 @@ const GH_PROJECTS_KEY = 'gasToolsGithubProjects';  // { [scriptId]: { repo, bran
 // por diseño (Device Flow no usa client_secret) y va embebido en el
 // código para que la autenticación sea click → autorizar → conectado.
 const GH_CLIENT_ID = 'Ov23liwkN4OIewqxXF7m';
+
+// ─────────────────────────────────────────────
+// CLAVES DE STORAGE PARA GOOGLE
+// ─────────────────────────────────────────────
+// Solo persistimos el perfil del usuario (email/avatar) para reabrir el
+// panel sin tener que volver a llamar a userinfo. El token NO se guarda
+// porque chrome.identity.getAuthToken ya lo cachea internamente y lo
+// revoca/refresca cuando es necesario.
+const GG_USER_KEY = 'gasToolsGoogleUser';
 
 /** Lee la auth global de GitHub desde chrome.storage.sync. */
 function _getGithubAuth() {
@@ -33,14 +43,84 @@ function _setGithubAuth(value) {
 }
 
 // ─────────────────────────────────────────────
+// HELPERS DE GOOGLE
+// ─────────────────────────────────────────────
+
+/** Lee el perfil de Google cacheado (sin tocar el token). */
+function _getGoogleUserCached() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get([GG_USER_KEY], (r) => resolve(r?.[GG_USER_KEY] || null));
+  });
+}
+
+/** Persiste o limpia el perfil de Google. */
+function _setGoogleUserCached(value) {
+  return new Promise((resolve) => {
+    chrome.storage.sync.set({ [GG_USER_KEY]: value || null }, () => resolve(!chrome.runtime.lastError));
+  });
+}
+
+/**
+ * Pide un access token a chrome.identity. Si `interactive` es false y no
+ * hay sesión cacheada, devuelve null (ideal para verificar al abrir).
+ *
+ * @param {{interactive?:boolean}} [opts]
+ * @returns {Promise<string|null>}
+ */
+function _getGoogleToken({ interactive = false } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!chrome.identity?.getAuthToken) {
+      reject(new Error('chrome.identity is not available. Reload the extension.'));
+      return;
+    }
+    try {
+      chrome.identity.getAuthToken({ interactive }, (token) => {
+        const err = chrome.runtime.lastError?.message || '';
+        if (err) {
+          // OAuth2 not granted o user not signed in son benignos para
+          // verificación silenciosa: simplemente no hay sesión.
+          if (!interactive && /(not granted|not signed in|user did not approve|invalidated)/i.test(err)) {
+            resolve(null);
+            return;
+          }
+          reject(new Error(err));
+          return;
+        }
+        resolve(token || null);
+      });
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+/** Limpia el token cacheado por chrome.identity y opcionalmente lo revoca. */
+function _clearGoogleToken(token) {
+  return new Promise((resolve) => {
+    if (!token) return resolve();
+    try {
+      chrome.identity.removeCachedAuthToken({ token }, () => {
+        // Best-effort revoke. Si falla por offline/firewall, ya no hay
+        // forma de revocar desde aquí; el usuario puede hacerlo en
+        // myaccount.google.com.
+        fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`, {
+          method: 'POST',
+        }).catch(() => {}).finally(resolve);
+      });
+    } catch (_) { resolve(); }
+  });
+}
+
+// ─────────────────────────────────────────────
 // DEVICE FLOW STATE
 // ─────────────────────────────────────────────
 // Mantenemos UNA sola sesión activa de Device Flow: si el usuario hace
-// click dos veces, descartamos la anterior. Como el service worker puede
-// dormirse, el polling debe usar `chrome.alarms` para sobrevivir; aquí
-// usamos setTimeout porque el polling es corto (<= 15 min) y mientras
-// haya intervalos activos el SW se mantiene vivo.
+// click dos veces, descartamos la anterior. Como el service worker de
+// MV3 se duerme a los ~30 s aunque haya `setTimeout` pendientes, el
+// polling se complementa con `chrome.alarms` (los alarms despiertan al
+// SW): el flow nunca queda detenido aunque el SW haya entrado en idle.
 let G_DEVICE_FLOW = null;
+const G_DEVICE_FLOW_ALARM = 'gh-device-flow-poll';
 
 /**
  * Inicia (o reinicia) un Device Flow. Resuelve cuando el usuario autoriza,
@@ -64,9 +144,11 @@ async function _runDeviceFlow(clientId, scope, onCode) {
 
   let cancelled = false;
   const session = {
-    cancel: () => { cancelled = true; },
+    cancel: () => { cancelled = true; _wakeFlow(); },
     /** windowId del popup de autorización; lo setea el caller. */
     popupWindowId: null,
+    /** Resolver que el alarm/cancel/timer despierta. */
+    wake: null,
   };
   G_DEVICE_FLOW = session;
 
@@ -79,13 +161,49 @@ async function _runDeviceFlow(clientId, scope, onCode) {
     }
   };
 
+  /** Despierta el await del polling sin esperar al próximo alarm. */
+  function _wakeFlow() {
+    const w = session.wake; session.wake = null;
+    if (w) w();
+  }
+
+  // El alarm es nuestro "timer que sobrevive al sleep del SW".
+  const alarmListener = (alarm) => {
+    if (alarm?.name === G_DEVICE_FLOW_ALARM) _wakeFlow();
+  };
+  chrome.alarms.onAlarm.addListener(alarmListener);
+
+  /**
+   * Espera `ms` milisegundos usando chrome.alarms (que sí mantiene vivo
+   * al SW y lo despierta si se durmió). Si el flow se cancela en el
+   * medio, _wakeFlow() lo resuelve antes de tiempo.
+   */
+  function waitWithAlarm(ms) {
+    return new Promise((resolve) => {
+      session.wake = resolve;
+      // chrome.alarms tiene precisión mínima de 1 minuto en producción,
+      // pero en desarrollo (extensión sin firmar) acepta intervalos más
+      // cortos. Para garantizar que GitHub recibe los polls dentro del
+      // intervalo solicitado usamos un setTimeout corto como respaldo:
+      // si el SW está vivo, se dispara el setTimeout; si se durmió, el
+      // alarm igual lo despierta cerca del minuto.
+      try {
+        // delayInMinutes mínimo 0.5 sin warning en MV3.
+        chrome.alarms.create(G_DEVICE_FLOW_ALARM, {
+          delayInMinutes: Math.max(ms / 60000, 0.5),
+        });
+      } catch (_) { /* fallback puro a setTimeout */ }
+      setTimeout(_wakeFlow, ms);
+    });
+  }
+
   const expiresAt = Date.now() + (init.expires_in * 1000);
   let interval    = (init.interval || 5) * 1000;
 
   try {
     while (!cancelled) {
       if (Date.now() >= expiresAt) throw new Error('Authorization expired. Please try again.');
-      await new Promise((r) => setTimeout(r, interval));
+      await waitWithAlarm(interval);
       if (cancelled) throw new Error('Cancelled.');
 
       let resp;
@@ -113,10 +231,11 @@ async function _runDeviceFlow(clientId, scope, onCode) {
     }
     throw new Error('Cancelled.');
   } finally {
-    // Garantizamos cerrar la popup en TODOS los caminos: éxito, error,
-    // expiración, cancelación. El listener onRemoved que se monta más
-    // abajo tolera que la ventana ya esté cerrada.
+    // Garantizamos cerrar la popup, parar el alarm y limpiar el listener
+    // en TODOS los caminos: éxito, error, expiración, cancelación.
     closePopup();
+    chrome.alarms.clear(G_DEVICE_FLOW_ALARM).catch(() => {});
+    chrome.alarms.onAlarm.removeListener(alarmListener);
     if (G_DEVICE_FLOW === session) G_DEVICE_FLOW = null;
   }
 }
@@ -364,6 +483,115 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!auth?.token) throw new Error('Not authenticated.');
         const data = await callGithubApi(action, auth.token, payload || {});
         sendResponse({ ok: true, data });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  // ── GOOGLE_GET_AUTH ───────────────────────────────────────────────
+  // Verificación silenciosa: si chrome.identity tiene un token válido,
+  // devolvemos el perfil cacheado; si no, null. No pedimos consentimiento.
+  if (msg.type === 'GOOGLE_GET_AUTH') {
+    (async () => {
+      try {
+        const token = await _getGoogleToken({ interactive: false });
+        if (!token) {
+          await _setGoogleUserCached(null);
+          sendResponse(null);
+          return;
+        }
+        // Si tenemos token pero no perfil cacheado (primer arranque tras
+        // recarga), lo refrescamos.
+        let user = await _getGoogleUserCached();
+        if (!user) {
+          try { user = await getGoogleUser(token); await _setGoogleUserCached(user); }
+          catch (e) {
+            // Token presente pero inválido: lo descartamos para forzar
+            // re-login en el siguiente intento interactivo.
+            await _clearGoogleToken(token);
+            sendResponse(null);
+            return;
+          }
+        }
+        sendResponse({ user });
+      } catch (err) {
+        console.warn('[Background] GOOGLE_GET_AUTH failed:', err);
+        sendResponse(null);
+      }
+    })();
+    return true;
+  }
+
+  // ── GOOGLE_AUTHENTICATE ───────────────────────────────────────────
+  // Login interactivo: muestra el consent screen de Google la primera
+  // vez. Si el usuario ya autorizó la extensión, normalmente devuelve
+  // el token sin UI.
+  if (msg.type === 'GOOGLE_AUTHENTICATE') {
+    (async () => {
+      try {
+        const token = await _getGoogleToken({ interactive: true });
+        if (!token) {
+          sendResponse({ ok: false, error: 'No token returned by Chrome.' });
+          return;
+        }
+        const user = await getGoogleUser(token);
+        await _setGoogleUserCached(user);
+        sendResponse({ ok: true, user });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  // ── GOOGLE_LOGOUT ─────────────────────────────────────────────────
+  // Limpia el token cacheado, intenta revocarlo y borra el perfil
+  // persistido. La cuenta queda con un consent expirado: el siguiente
+  // login mostrará el consent screen de nuevo.
+  if (msg.type === 'GOOGLE_LOGOUT') {
+    (async () => {
+      try {
+        const token = await _getGoogleToken({ interactive: false }).catch(() => null);
+        if (token) await _clearGoogleToken(token);
+        await _setGoogleUserCached(null);
+        sendResponse({ ok: true });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
+  // ── GOOGLE_API_CALL ───────────────────────────────────────────────
+  // Despachador genérico (GET_USER / GET_CONTENT / PUT_CONTENT). Si el
+  // token cacheado expiró, lo refrescamos transparentemente con un
+  // segundo intento; si sigue sin existir, fallamos para que el panel
+  // pida login.
+  if (msg.type === 'GOOGLE_API_CALL') {
+    const { action, payload } = msg.payload || {};
+    (async () => {
+      try {
+        let token = await _getGoogleToken({ interactive: false });
+        if (!token) throw new Error('Not authenticated with Google.');
+        try {
+          const data = await callGoogleApi(action, token, payload || {});
+          sendResponse({ ok: true, data });
+        } catch (err) {
+          // 401/403: el token cacheado caducó. Lo descartamos y reintentamos
+          // una sola vez con uno nuevo (sigue siendo no-interactivo: si
+          // chrome.identity no puede emitir uno, el panel lo avisa).
+          if (/\b(401|403)\b/.test(String(err?.message || ''))) {
+            await _clearGoogleToken(token);
+            token = await _getGoogleToken({ interactive: false });
+            if (!token) throw new Error('Session expired. Please reconnect Google.');
+            const data = await callGoogleApi(action, token, payload || {});
+            sendResponse({ ok: true, data });
+            return;
+          }
+          throw err;
+        }
       } catch (err) {
         sendResponse({ ok: false, error: String(err?.message || err) });
       }

@@ -4,15 +4,22 @@
  * @fileoverview <gas-github-panel> - Panel de sincronización con GitHub.
  *
  * Vistas (`_view`):
- *   - 'loading'   : Verificando sesión contra el background.
- *   - 'unauth'    : Pantalla "Connect with GitHub".
+ *   - 'loading'   : Verificando sesiones contra el background.
+ *   - 'unauth'    : Pantalla de dos pasos (Google + GitHub).
  *   - 'connected' : Panel principal (tabs Changes/Diff + repo + push/pull).
  *
  * API pública:
  *   open(anchor) / close() / toggle(anchor) / setEditor(editor) / refreshBadge()
  *
- * Las llamadas a la API de GitHub se enrutan al background vía
- * CustomEvents (`GAS_GH_*`). El token nunca toca el MAIN world.
+ * Sincronización:
+ *   - Lado GAS: Apps Script API (GET/PUT /v1/projects/{id}/content) vía
+ *     `GAS_GG_API_CALL`. Es la fuente de verdad: ve TODOS los archivos
+ *     del proyecto y permite crear/borrar atómicamente.
+ *   - Lado GitHub: REST API vía `GAS_GH_API_CALL` (Git Data API para el
+ *     push, blobs/trees para el pull).
+ *
+ * Los tokens de Google y GitHub viven solo en el background; nunca llegan
+ * al MAIN world ni a este Shadow DOM.
  */
 class GasGithubPanel extends HTMLElement {
 
@@ -25,7 +32,6 @@ class GasGithubPanel extends HTMLElement {
     super();
     this.attachShadow({ mode: 'open' });
 
-    // ── Auth / profile state ─────────────────────────────────────────
     /** @type {object|null} Active Monaco editor (injected by gas-tools.js). */
     this._editor = null;
     /** @type {HTMLElement|null} Anchor button of the popover. */
@@ -34,18 +40,25 @@ class GasGithubPanel extends HTMLElement {
     this._view = 'loading';
     /** @type {{login:string,name:string|null,avatar_url:string,html_url:string}|null} */
     this._user = null;
+    /**
+     * Perfil de la cuenta de Google conectada (para usar la Apps Script
+     * API). Sin esta sesión no es posible leer/escribir el contenido del
+     * proyecto, así que el panel exige conectar Google antes que GitHub.
+     * @type {{email:string,name:string|null,picture:string|null}|null}
+     */
+    this._googleUser = null;
+    /** @type {boolean} Una autenticación de Google está en vuelo. */
+    this._googleAuthInFlight = false;
     /** @type {{user_code:string,verification_uri:string}|null} */
     this._deviceCode = null;
     /** @type {boolean} */
     this._waitingAuth = false;
 
-    // ── Mapeo proyecto → repo ─────────────────────────────────────────
     /** @type {{repo:string,branch:string,basePath:string}|null} */
     this._project = null;
     /** @type {string} */
     this._scriptId = '';
 
-    // ── Listas ────────────────────────────────────────────────────────
     /** @type {Array<{full_name:string,default_branch:string,private:boolean,html_url:string}>} */
     this._repos = [];
     /** @type {Array<{name:string,commitSha:string}>} */
@@ -54,7 +67,6 @@ class GasGithubPanel extends HTMLElement {
     this._loadingRepos = false;
     this._loadingBranches = false;
 
-    // ── UI: dropdown abierto, filtro, tab activa ──────────────────────
     /** @type {''|'repo'|'branch'} */
     this._openDropdown = '';
     this._repoFilter = '';
@@ -62,7 +74,6 @@ class GasGithubPanel extends HTMLElement {
     /** @type {'changes'|'diff'} */
     this._activeTab = 'changes';
 
-    // ── Diff state ────────────────────────────────────────────────────
     /** @type {Array<{path:string,status:string,local:string,remote:string,plus:number,minus:number}>} */
     this._diffItems = [];
     this._loadingDiff = false;
@@ -96,13 +107,11 @@ class GasGithubPanel extends HTMLElement {
     /** @type {string} Commit message (persists while the panel is open). */
     this._commitMessage = '';
 
-    // ── Monaco diff editor (en el shadow DOM, fallback a HTML) ───────
     /** @type {object|null} */
     this._diffEditor = null;
     this._diffOriginalModel = null;
     this._diffModifiedModel = null;
 
-    // ── Bridge resolver pool ──────────────────────────────────────────
     /** @type {Map<string,Function>} */
     this._pendingBridgeCalls = new Map();
 
@@ -114,7 +123,6 @@ class GasGithubPanel extends HTMLElement {
     this._onDeviceCodePush_   = this._onDeviceCodePush_.bind(this);
   }
 
-  // ── Lifecycle ────────────────────────────────────────────────────────
 
   /**
    * Se ejecuta cuando el componente entra en el DOM. Pinta el shell,
@@ -135,6 +143,10 @@ class GasGithubPanel extends HTMLElement {
       'GAS_GH_PROJECT_RESULT',
       'GAS_GH_SAVE_DONE',
       'GAS_GH_API_RESULT',
+      'GAS_GG_AUTH_RESULT',
+      'GAS_GG_AUTH_DONE',
+      'GAS_GG_LOGOUT_DONE',
+      'GAS_GG_API_RESULT',
     ].forEach((evt) => document.addEventListener(evt, this._onBridgeResult));
 
     document.addEventListener('GAS_GH_DEVICE_CODE', this._onDeviceCodePush_);
@@ -159,16 +171,26 @@ class GasGithubPanel extends HTMLElement {
       'GAS_GH_PROJECT_RESULT',
       'GAS_GH_SAVE_DONE',
       'GAS_GH_API_RESULT',
+      'GAS_GG_AUTH_RESULT',
+      'GAS_GG_AUTH_DONE',
+      'GAS_GG_LOGOUT_DONE',
+      'GAS_GG_API_RESULT',
     ].forEach((evt) => document.removeEventListener(evt, this._onBridgeResult));
     document.removeEventListener('GAS_GH_DEVICE_CODE', this._onDeviceCodePush_);
     this._disposeDiffEditor_();
   }
 
-  // ── API pública ──────────────────────────────────────────────────────
 
   /**
    * Inyecta la instancia activa de Monaco. Llamado por `gas-tools.js`
    * cada vez que cambia el editor del usuario.
+   * @param {object|null} editor
+   */
+  /**
+   * Inyecta la instancia activa de Monaco. Conservado por compatibilidad
+   * con `gas-tools.js`; el panel ya no necesita el editor para sincronizar
+   * porque ahora usa la Apps Script API como fuente de verdad. La
+   * referencia se guarda solo por si futuras features la requieren.
    * @param {object|null} editor
    */
   setEditor(editor) {
@@ -213,12 +235,6 @@ class GasGithubPanel extends HTMLElement {
     this._commitMessage = '';
     this._selectedFiles.clear();
 
-    // Forzar guardado en GAS antes de comparar contra el remoto. Si el
-    // usuario tenía cambios sin guardar, sin esto los compararíamos como
-    // pendientes pero al hacer push se irían igual (nuestra fuente es
-    // Monaco, no el snapshot guardado en GAS). El Save ejecuta Ctrl+S.
-    this._triggerGasSave_();
-
     this._refreshAuth_();
     requestAnimationFrame(() => this._positionPanel_());
   }
@@ -226,21 +242,14 @@ class GasGithubPanel extends HTMLElement {
   /**
    * Dispara la acción "Save all" de GAS simulando Ctrl+S sobre el editor
    * Monaco activo. GAS no expone API pública para esto, así que usamos
-   * el atajo registrado por su propio editor. Es asíncrono: GAS guarda
-   * en background y no nos avisa, pero como nuestra comparación se hace
-   * desde los modelos de Monaco (no desde el storage de GAS), el push
-   * funcionará igual aunque el guardado del editor termine después.
+   * el atajo registrado por su propio editor. La Apps Script API lee
+   * del storage interno de GAS (no de Monaco), así que sin este Ctrl+S
+   * los cambios sin guardar quedarían fuera del diff. Es asíncrono:
+   * el caller debe esperar (~300 ms) a que GAS persista antes del GET.
    * @private
    */
   _triggerGasSave_() {
     try {
-      // Preferimos el comando interno de Monaco si está expuesto.
-      const editor = this._editor || window.jsWireMonacoEditor;
-      if (editor?.trigger) {
-        editor.trigger('gas-tools', 'editor.action.formatDocument', null); // no-op si no aplica
-        editor.trigger('keyboard', 'editor.action.commit', null);          // por si el comando existe
-      }
-      // Atajo nativo de GAS: Ctrl+S sobre el documento.
       const ev = new KeyboardEvent('keydown', {
         key: 's',
         code: 'KeyS',
@@ -272,7 +281,6 @@ class GasGithubPanel extends HTMLElement {
     else this.open(anchorEl);
   }
 
-  // ── render shell (Shadow DOM) ────────────────────────────────────────
 
   _renderShell_() {
     DomUtils.setHTML(this.shadowRoot, `
@@ -299,8 +307,8 @@ class GasGithubPanel extends HTMLElement {
         /* Modos compactos para login y verificación. */
         :host([data-view="unauth"]),
         :host([data-view="loading"]) {
-          width: 380px;
-          max-height: min(420px, calc(100vh - 130px));
+          width: 420px;
+          max-height: min(540px, calc(100vh - 130px));
         }
         /* Flecha tipo popover apuntando hacia el botón ancla. */
         :host::before,
@@ -342,7 +350,6 @@ class GasGithubPanel extends HTMLElement {
           overflow: hidden;
         }
 
-        /* ── header ── */
         .qc__gh-header {
           display: flex; align-items: center; gap: 12px;
           padding: 14px 16px 12px;
@@ -388,7 +395,6 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-hdrAction:hover { background: rgba(0,0,0,.06); color: #1f2328; }
         .qc__gh-hdrAction .material-icons { font-size: 18px; }
 
-        /* ── Body ── */
         .qc__gh-body {
           padding: 14px 16px;
           overflow: hidden;        /* el scroll lo gestiona cada columna */
@@ -397,7 +403,6 @@ class GasGithubPanel extends HTMLElement {
           min-height: 0;
         }
 
-        /* ── Layout en dos columnas ── */
         .qc__gh-grid {
           display: grid;
           grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
@@ -443,7 +448,6 @@ class GasGithubPanel extends HTMLElement {
           overflow-x: hidden;
         }
 
-        /* ── Sección título ── */
         .qc__gh-sectionTitle {
           font-size: 11px; font-weight: 600;
           letter-spacing: 0.6px; text-transform: uppercase;
@@ -453,18 +457,15 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-sectionHead .qc__gh-sectionTitle { flex: 1; }
         .qc__gh-sectionActions { display: flex; gap: 2px; flex: 0 0 auto; }
 
-        /* ── Field group ── */
         .qc__gh-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
         .qc__gh-fieldLabel {
           font-size: 12px; font-weight: 500; color: #1f2328;
         }
         .qc__gh-optional { color: #8b949e; font-weight: 400; font-size: 11px; }
 
-        /* ── Filas ── */
         .qc__gh-row { display: flex; gap: 8px; align-items: stretch; }
         .qc__gh-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
-        /* ── Selector pill ── */
         .qc__gh-selectorWrap { position: relative; flex: 1; min-width: 0; }
         .qc__gh-selector {
           display: flex; align-items: center; gap: 8px;
@@ -501,7 +502,6 @@ class GasGithubPanel extends HTMLElement {
           flex: 0 0 auto;
         }
 
-        /* ── Dropdown overlay ── */
         .qc__gh-dropdown {
           position: absolute;
           top: calc(100% + 4px); left: 0; right: 0;
@@ -568,7 +568,6 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-ddFooterBtn:hover { background: rgba(26,115,232,.08); }
         .qc__gh-ddFooterBtn .material-icons { font-size: 16px; color: inherit; }
 
-        /* ── Input ── */
         .qc__gh-input {
           height: 38px; padding: 0 12px;
           border: 1px solid #d0d7de; border-radius: 8px;
@@ -589,7 +588,6 @@ class GasGithubPanel extends HTMLElement {
           font-family: inherit;
         }
 
-        /* ── Iconbutton ── */
         .qc__gh-iconBtn {
           background: transparent; border: 1px solid transparent;
           border-radius: 8px;
@@ -608,7 +606,20 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-openExternal:hover { background: rgba(0,0,0,.07); color: #1f2328; }
         .qc__gh-openExternal .material-icons { font-size: 16px; }
 
-        /* ── Tabs ── */
+        /* Fila que contiene los tabs y el botón de refrescar diff. */
+        .qc__gh-tabsRow {
+          display: flex; align-items: center; gap: 6px;
+          flex: 0 0 auto;
+        }
+        .qc__gh-tabsRow .qc__gh-tabs { flex: 1; min-width: 0; }
+        .qc__gh-tabsRow .qc__gh-iconBtn {
+          width: 38px; height: 38px; border-radius: 10px;
+          background: rgba(0,0,0,.04);
+        }
+        .qc__gh-tabsRow .qc__gh-iconBtn:hover { background: rgba(0,0,0,.08); }
+        .qc__gh-tabsRow .qc__gh-iconBtn[disabled] {
+          opacity: .55; cursor: not-allowed;
+        }
         .qc__gh-tabs {
           display: grid; grid-template-columns: 1fr 1fr;
           background: rgba(0,0,0,.04);
@@ -630,7 +641,6 @@ class GasGithubPanel extends HTMLElement {
           box-shadow: 0 1px 3px rgba(0,0,0,.08);
         }
 
-        /* ── Changes list ── */
         .qc__gh-changesCard {
           border: 1px solid rgba(0,0,0,.08);
           border-radius: 10px;
@@ -715,7 +725,6 @@ class GasGithubPanel extends HTMLElement {
           font-size: 12.5px; color: #8b949e;
         }
 
-        /* ── Diff (collapsible cards à la GitHub) ── */
         .qc__gh-diffWrap { display: flex; flex-direction: column; gap: 8px; }
 
         .qc__gh-diffCard {
@@ -758,7 +767,27 @@ class GasGithubPanel extends HTMLElement {
         }
         .qc__gh-diffCardBody:empty { display: none; }
 
-        /* ── diff2html overrides (force light theme inside shadow) ── */
+        /* Badge compacto en el header de cada card que aclara qué lado
+           del diff es Remote (GitHub) y cuál Local (GAS). El tooltip
+           expande la información completa. */
+        .qc__gh-diffOrigin {
+          display: inline-flex; align-items: center; gap: 3px;
+          padding: 1px 6px;
+          border-radius: 4px;
+          font-size: 10px; font-weight: 600;
+          letter-spacing: .3px;
+          font-family: "Roboto Mono", Consolas, monospace;
+          flex: 0 0 auto;
+          line-height: 1;
+          white-space: nowrap;
+        }
+        .qc__gh-diffOrigin.mod { background: rgba(0,0,0,.06); color: #57606a; }
+        .qc__gh-diffOrigin.add { background: #dafbe1; color: #1a7f37; }
+        .qc__gh-diffOrigin.del { background: #ffebe9; color: #cf222e; }
+        .qc__gh-diffOrigin .material-icons {
+          font-size: 11px !important; line-height: 1;
+        }
+
         .qc__gh-diff2html {
           max-height: 320px;
           overflow: auto;
@@ -781,6 +810,12 @@ class GasGithubPanel extends HTMLElement {
           color: #1f2328 !important;
           font-family: "Roboto Mono", Consolas, monospace !important;
           font-size: 11.5px !important;
+          /* Estirar la tabla al ancho del contenido más largo para que
+             el fondo de cada fila (rojo en del, verde en ins) cubra
+             toda la línea aunque tenga scroll horizontal. Sin esto el
+             fondo se corta donde termina la columna visible. */
+          width: max-content !important;
+          min-width: 100% !important;
         }
         .qc__gh-diff2html .d2h-code-line,
         .qc__gh-diff2html .d2h-code-side-line {
@@ -827,6 +862,15 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-diff2html .d2h-emptyplaceholder { background: #f6f8fa !important; }
         .qc__gh-diff2html .d2h-code-line-ctn,
         .qc__gh-diff2html .d2h-code-side-line-ctn { color: inherit !important; }
+        /* Cada celda de código se estira para que el fondo coloreado de
+           la fila (ins/del) ocupe toda la línea, no solo la parte
+           visible en el viewport. */
+        .qc__gh-diff2html .d2h-code-line,
+        .qc__gh-diff2html .d2h-code-side-line {
+          width: max-content !important;
+          min-width: 100% !important;
+          box-sizing: border-box !important;
+        }
 
         /* highlight.js inside diff2html: light scheme. */
         .qc__gh-diff2html .hljs { background: transparent !important; color: inherit !important; }
@@ -856,7 +900,7 @@ class GasGithubPanel extends HTMLElement {
           font-family: "Roboto Mono", Consolas, monospace;
           font-size: 11.5px; line-height: 1.5;
         }
-        .qc__gh-diffLine { white-space: pre; padding: 0 6px; border-radius: 2px; }
+        .qc__gh-diffLine { white-space: pre; padding: 0 6px; border-radius: 2px; overflow: hidden; }
         .qc__gh-diffLine.add { background: #dafbe1; color: #1a7f37; }
         .qc__gh-diffLine.del { background: #ffebe9; color: #cf222e; }
         .qc__gh-diffEmpty {
@@ -864,7 +908,6 @@ class GasGithubPanel extends HTMLElement {
           color: #8b949e; font-size: 12px;
         }
 
-        /* ── Botones ── */
         .qc__gh-btn {
           display: inline-flex; align-items: center; justify-content: center;
           gap: 8px; height: 40px; padding: 0 16px;
@@ -889,7 +932,6 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-btn.qc__gh-ghost:hover { background: #f6f8fa; }
         .qc__gh-btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 
-        /* ── Footer (Pull / Push) ── */
         .qc__gh-footer {
           padding: 10px 16px 14px;
           border-top: 1px solid rgba(0,0,0,.06);
@@ -901,7 +943,6 @@ class GasGithubPanel extends HTMLElement {
           font-size: 11px; color: #8b949e; min-height: 14px;
         }
 
-        /* ── Vista unauth (mismos estilos antes/después) ── */
         .qc__gh-connectCard {
           padding: 14px;
           border: 1px dashed rgba(26,115,232,.30);
@@ -920,6 +961,49 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-connectHint a { color: #1a73e8; text-decoration: none; }
         .qc__gh-connectHint a:hover { text-decoration: underline; }
 
+        /* Layout en pasos para la pantalla unauth (Google + GitHub). */
+        .qc__gh-connectStep {
+          display: flex; gap: 10px; align-items: flex-start;
+          padding: 4px 2px;
+          text-align: left;
+        }
+        .qc__gh-connectStepIcon {
+          flex: 0 0 auto;
+          width: 28px; height: 28px;
+          border-radius: 999px;
+          background: rgba(26,115,232,.10);
+          color: #1a73e8;
+          display: grid; place-items: center;
+          margin-top: 2px;
+        }
+        .qc__gh-connectStepIcon .material-icons { font-size: 18px; }
+        .qc__gh-connectStepBody { flex: 1; min-width: 0; }
+        .qc__gh-connectStepTitle {
+          font-size: 13px; font-weight: 600; color: #1f2328;
+        }
+        .qc__gh-connectStepHint {
+          font-size: 11.5px; color: #656d76;
+          line-height: 1.45; margin-top: 2px;
+        }
+        .qc__gh-connectStepActions {
+          display: flex; gap: 6px; margin-top: 8px;
+        }
+        .qc__gh-connectStep.qc__gh-stepDisabled .qc__gh-connectStepIcon {
+          background: rgba(0,0,0,.05); color: #8b949e;
+        }
+        .qc__gh-connectStep.qc__gh-stepDisabled .qc__gh-connectStepTitle { color: #8b949e; }
+        .qc__gh-connectDivider {
+          height: 1px; background: rgba(0,0,0,.06);
+          margin: 8px 0;
+        }
+        /* Pequeño badge "G" para el botón de logout de Google en el header. */
+        .qc__gh-hdrIconG {
+          font-family: "Google Sans", Roboto, Arial, sans-serif;
+          font-weight: 700; font-size: 14px;
+          line-height: 1;
+          color: #1a73e8;
+        }
+
         .qc__gh-codeBox {
           display: flex; align-items: center; gap: 8px;
           margin-top: 10px; padding: 8px 10px;
@@ -933,7 +1017,6 @@ class GasGithubPanel extends HTMLElement {
           color: #1a73e8; text-align: center; user-select: all;
         }
 
-        /* ── Spinner ── */
         .qc__gh-spinner {
           display: inline-block; width: 12px; height: 12px;
           margin-right: 6px;
@@ -998,7 +1081,6 @@ class GasGithubPanel extends HTMLElement {
           z-index: 4;
         }
 
-        /* ── Pull-required warning banner ── */
         .qc__gh-pullWarning {
           display: flex;
           align-items: center;
@@ -1020,7 +1102,6 @@ class GasGithubPanel extends HTMLElement {
           font-weight: 600;
         }
 
-        /* ── Skeleton ── */
         .qc__gh-skeleton {
           background: linear-gradient(90deg, #eaeef2 0%, #f6f8fa 50%, #eaeef2 100%);
           background-size: 200% 100%;
@@ -1047,7 +1128,6 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-log.qc__gh-error { background: #fde7eb; color: #cf222e; border-color: rgba(207,34,46,.20); }
         .qc__gh-log.qc__gh-ok    { background: #dafbe1; color: #1a7f37; border-color: rgba(45,164,78,.25); }
 
-        /* ── Toasts (mensajes flotantes superiores) ── */
         .qc__gh-toastStack {
           position: absolute;
           top: 64px;        /* alineado debajo del header (58px alto + margen) */
@@ -1118,7 +1198,6 @@ class GasGithubPanel extends HTMLElement {
         }
         .qc__gh-toast--info .qc__gh-toastIcon { color: #0969da; }
 
-        /* ── Mini modal (Create Repository) ── */
         .qc__gh-modalOverlay {
           position: absolute; inset: 0;
           background: rgba(20,22,28,.45);
@@ -1236,6 +1315,88 @@ class GasGithubPanel extends HTMLElement {
           border-color: #1a73e8;
           box-shadow: 0 0 0 3px rgba(26,115,232,.14);
         }
+
+        /* Modal especializado de pull: cabecera + lista de archivos
+           afectados + footer fijo. */
+        .qc__gh-pullSummary {
+          display: flex; align-items: center; gap: 8px;
+          padding: 8px 10px;
+          background: #f6f8fa;
+          border: 1px solid rgba(0,0,0,.06);
+          border-radius: 8px;
+          font-size: 12.5px;
+          color: #1f2328;
+        }
+        .qc__gh-pullSummary .material-icons {
+          font-size: 18px; color: #0969da;
+        }
+        .qc__gh-pullSummaryCount { font-weight: 600; }
+        .qc__gh-pullList {
+          margin-top: 8px;
+          margin-bottom: 8px;
+          border: 1px solid rgba(0,0,0,.06);
+          border-radius: 8px;
+          overflow: hidden;
+          max-height: 220px;
+          overflow-y: auto;
+          background: #fff;
+        }
+        .qc__gh-pullItem {
+          display: flex; align-items: center; gap: 8px;
+          padding: 6px 10px;
+          font-size: 12px;
+          line-height: 1.3;
+          border-bottom: 1px solid rgba(0,0,0,.04);
+        }
+        .qc__gh-pullItem:last-child { border-bottom: none; }
+        .qc__gh-pullStatus {
+          width: 18px; height: 18px;
+          border-radius: 4px;
+          display: grid; place-items: center;
+          font-size: 11px; font-weight: 700;
+          flex: 0 0 auto;
+        }
+        .qc__gh-pullStatus.add { background: rgba(45,164,78,.16); color: #1a7f37; }
+        .qc__gh-pullStatus.mod { background: rgba(154,103,0,.16); color: #9a6700; }
+        .qc__gh-pullPath {
+          flex: 1; min-width: 0;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          font-family: "Roboto Mono", Consolas, monospace;
+          font-size: 11.5px;
+          color: #1f2328;
+        }
+        .qc__gh-pullDelta {
+          flex: 0 0 auto;
+          font-family: "Roboto Mono", Consolas, monospace;
+          font-size: 10.5px;
+          color: #656d76;
+        }
+        .qc__gh-pullDelta .add { color: #1a7f37; }
+        .qc__gh-pullDelta .del { color: #cf222e; }
+        .qc__gh-pullNote {
+          margin-top: 10px;
+          padding: 8px 10px;
+          background: rgba(26,115,232,.06);
+          border-left: 3px solid #1a73e8;
+          border-radius: 4px;
+          font-size: 11.5px;
+          color: #1f2328;
+          line-height: 1.45;
+        }
+        .qc__gh-pullNote.warn {
+          background: rgba(207,34,46,.06);
+          border-left-color: #cf222e;
+        }
+        .qc__gh-pullNote strong { font-weight: 600; }
+        .qc__gh-pullCheckRow {
+          display: flex; align-items: center; gap: 8px;
+          margin-top: 10px;
+          font-size: 12px;
+          color: #1f2328;
+          cursor: pointer;
+          user-select: none;
+        }
+        .qc__gh-pullCheckRow input { margin: 0; cursor: pointer; }
       </style>
 
       <div class="qc__gh-shell">
@@ -1246,7 +1407,6 @@ class GasGithubPanel extends HTMLElement {
     `);
   }
 
-  // ── Auth flow ────────────────────────────────────────────────────────
 
   /**
    * Verifica la sesión de GitHub y decide qué vista mostrar:
@@ -1255,11 +1415,36 @@ class GasGithubPanel extends HTMLElement {
    *   - con token válido → vista 'connected' + carga repos y diff frescos
    * @private
    */
+  /**
+   * Verifica el estado de las dos sesiones que el panel necesita
+   * (Google primero, GitHub después). Reglas:
+   *   - sin Google → vista 'unauth' Step 1 (botón "Connect Google")
+   *   - con Google + sin GitHub → vista 'unauth' Step 2 (botón "Connect GitHub")
+   *   - con ambos válidos → vista 'connected'
+   *   - token revocado en cualquiera → logout silencioso de ese y vuelta al paso correspondiente
+   * @private
+   */
   async _refreshAuth_() {
     this._view = 'loading';
     this._renderHeader_();
     this._renderBody_();
 
+    // Paso 1: verificar Google. Sin esta sesión no avanzamos.
+    const gg = await this._bridgeCall_('GAS_GG_GET_AUTH');
+    this._googleUser = gg?.user || null;
+
+    if (!this._googleUser) {
+      // No hay sesión Google: la pantalla unauth muestra Step 1 enfocado.
+      this._user = null;
+      this._view = 'unauth';
+      this._renderHeader_();
+      this._renderBody_();
+      this._updateAnchorBadge_();
+      this._positionPanel_();
+      return;
+    }
+
+    // Paso 2: verificar GitHub.
     const auth = await this._bridgeCall_('GAS_GH_GET_AUTH');
     if (!auth?.token || !auth?.user) {
       this._user = null;
@@ -1271,7 +1456,7 @@ class GasGithubPanel extends HTMLElement {
       return;
     }
 
-    // Validar token contra /user. Si fue revocado → logout silencioso.
+    // Validar token de GitHub. Si fue revocado → logout silencioso.
     const ping = await this._bridgeCall_('GAS_GH_API_CALL', {
       action: 'GET_USER', payload: {},
     });
@@ -1362,11 +1547,6 @@ class GasGithubPanel extends HTMLElement {
    * @param {string} fullName  `owner/repo`
    * @private
    */
-  /**
-   * Trae las branches del repo indicado y refresca el dropdown.
-   * @param {string} fullName  `owner/repo`
-   * @private
-   */
   async _loadBranches_(fullName) {
     this._loadingBranches = true;
     const res = await this._bridgeCall_('GAS_GH_API_CALL', {
@@ -1403,7 +1583,6 @@ class GasGithubPanel extends HTMLElement {
     return true;
   }
 
-  // ── Render: header ──────────────────────────────────────────────────
 
   _renderHeader_() {
     const header = this.shadowRoot.getElementById('ghHeader');
@@ -1411,6 +1590,7 @@ class GasGithubPanel extends HTMLElement {
 
     if (this._view === 'connected' && this._user) {
       const u = this._user;
+      const gg = this._googleUser;
       DomUtils.setHTML(header, `
         <span class="qc__gh-avatar">
           ${u.avatar_url
@@ -1419,9 +1599,12 @@ class GasGithubPanel extends HTMLElement {
         </span>
         <span class="qc__gh-hdrText">
           <div class="qc__gh-hdrTitle">${this._escape_(u.name || u.login)}</div>
-          <div class="qc__gh-hdrSub">@${this._escape_(u.login)}</div>
+          <div class="qc__gh-hdrSub">@${this._escape_(u.login)}${
+            gg ? ` · <span title="${this._escape_(gg.email || '')}">${this._escape_(gg.email || gg.name || '')}</span>` : ''
+          }</div>
         </span>
-        <button class="qc__gh-hdrAction" id="ghLogout" title="Sign out">
+        <button class="qc__gh-hdrAction" id="ghLogoutAll"
+                title="Sign out of GitHub${gg ? ' and Google' : ''}">
           <i class="material-icons">logout</i>
         </button>
         <button class="qc__gh-hdrAction" id="ghClose" title="Close">
@@ -1442,10 +1625,9 @@ class GasGithubPanel extends HTMLElement {
     }
 
     header.querySelector('#ghClose')?.addEventListener('click', () => this.close());
-    header.querySelector('#ghLogout')?.addEventListener('click', () => this._logout_());
+    header.querySelector('#ghLogoutAll')?.addEventListener('click', () => this._logoutAll_());
   }
 
-  // ── Render: body (delega por vista) ─────────────────────────────────
 
   _renderBody_() {
     // Reflejamos la vista en un atributo del host para que el CSS pueda
@@ -1491,8 +1673,17 @@ class GasGithubPanel extends HTMLElement {
     this._renderConnectedView_(body, footer);
   }
 
-  // ── Vista unauth (login + waiting) ──────────────────────────────────
 
+  /**
+   * Vista de "no autenticado". Es un flujo en dos pasos:
+   *   Step 1 → Conectar Google (necesario para la Apps Script API,
+   *            que es lo que vamos a usar como fuente de verdad para
+   *            push/pull en lugar de Monaco).
+   *   Step 2 → Conectar GitHub (Device Flow).
+   * El paso 2 queda visible pero deshabilitado mientras Google esté sin
+   * conectar; así el usuario ve la secuencia de un vistazo.
+   * @private
+   */
   _renderUnauthView_(body) {
     if (this._waitingAuth) {
       const Code = this._deviceCode?.user_code || '••••-••••';
@@ -1536,27 +1727,75 @@ class GasGithubPanel extends HTMLElement {
       return;
     }
 
+    const googleConnected = !!this._googleUser;
+    const googleStepIcon  = googleConnected
+      ? `<i class="material-icons" style="color:#1a7f37">check_circle</i>`
+      : `<i class="material-icons">looks_one</i>`;
+    const githubStepIcon  = `<i class="material-icons">looks_two</i>`;
+
+    const googleStatus = googleConnected
+      ? `Signed in as <strong>${this._escape_(this._googleUser.email || this._googleUser.name || '')}</strong>`
+      : 'Required to read and write files in your Apps Script project.';
+
+    const googleBtnLabel = this._googleAuthInFlight
+      ? `<span class="qc__gh-spinner"></span> Connecting…`
+      : (googleConnected
+          ? `<i class="material-icons">refresh</i> Switch account`
+          : `<i class="material-icons">login</i> Sign in with Google`);
+
+    const githubDisabled = !googleConnected;
+
     DomUtils.setHTML(body, `
       <div class="qc__gh-connectCard">
-        <div class="qc__gh-connectIcon"><i class="material-icons">code</i></div>
-        <div class="qc__gh-connectTitle">Connect with GitHub</div>
-        <div class="qc__gh-connectHint">
-          A small authorization window will open. Approve the app and
-          you'll be signed in automatically. Your token never leaves your browser.
+        <div class="qc__gh-connectStep">
+          <div class="qc__gh-connectStepIcon">${googleStepIcon}</div>
+          <div class="qc__gh-connectStepBody">
+            <div class="qc__gh-connectStepTitle">Connect Google</div>
+            <div class="qc__gh-connectStepHint">${googleStatus}</div>
+            <div class="qc__gh-connectStepActions">
+              <button id="ggConnect"
+                      class="qc__gh-btn ${googleConnected ? 'qc__gh-ghost' : 'qc__gh-primary'}"
+                      ${this._googleAuthInFlight ? 'disabled' : ''}>
+                ${googleBtnLabel}
+              </button>
+              ${googleConnected ? `
+                <button id="ggDisconnect" class="qc__gh-btn qc__gh-ghost"
+                        title="Disconnect this Google account">
+                  <i class="material-icons">logout</i>
+                </button>
+              ` : ''}
+            </div>
+          </div>
         </div>
-        <div style="margin-top:12px">
-          <button id="ghConnect" class="qc__gh-btn qc__gh-primary" style="width:100%; height:38px">
-            <i class="material-icons">login</i>
-            Sign in with GitHub
-          </button>
+
+        <div class="qc__gh-connectDivider"></div>
+
+        <div class="qc__gh-connectStep ${githubDisabled ? 'qc__gh-stepDisabled' : ''}">
+          <div class="qc__gh-connectStepIcon">${githubStepIcon}</div>
+          <div class="qc__gh-connectStepBody">
+            <div class="qc__gh-connectStepTitle">Connect GitHub</div>
+            <div class="qc__gh-connectStepHint">
+              ${githubDisabled
+                ? 'Available after connecting Google.'
+                : 'A small window will open. Approve the app to finish. Your token never leaves your browser.'}
+            </div>
+            <div class="qc__gh-connectStepActions">
+              <button id="ghConnect" class="qc__gh-btn qc__gh-primary"
+                      ${githubDisabled ? 'disabled' : ''}>
+                <i class="material-icons">login</i>
+                Sign in with GitHub
+              </button>
+            </div>
+          </div>
         </div>
       </div>
       <div id="ghLog" class="qc__gh-log"></div>
     `);
+    body.querySelector('#ggConnect')?.addEventListener('click', () => this._authenticateGoogle_());
+    body.querySelector('#ggDisconnect')?.addEventListener('click', () => this._logoutGoogle_());
     body.querySelector('#ghConnect')?.addEventListener('click', () => this._authenticate_());
   }
 
-  // ── Vista conectada (selector + tabs + push/pull) ───────────────────
 
   _renderConnectedView_(body, footer) {
     const project = this._project;
@@ -1617,7 +1856,6 @@ class GasGithubPanel extends HTMLElement {
 
     DomUtils.setHTML(body, `
       <div class="qc__gh-grid">
-        <!-- ── Columna izquierda: configuración del repo ── -->
         <div class="qc__gh-col qc__gh-colLeft">
           <div class="qc__gh-sectionHead">
             <span class="qc__gh-sectionTitle">Repository</span>
@@ -1680,18 +1918,26 @@ class GasGithubPanel extends HTMLElement {
           </div>
         </div>
 
-        <!-- ── Columna derecha: tabs Changes / Diff ── -->
+        <!-- Columna derecha: tabs Changes / Diff -->
         <div class="qc__gh-col qc__gh-colRight">
-          <div class="qc__gh-tabs" role="tablist">
-            <button class="qc__gh-tab ${tabActive === 'changes' ? 'qc__gh-activeTab' : ''}"
-                    data-tab="changes">
-              <i class="material-icons">list_alt</i>
-              Changes${totalChanges ? ` (${totalChanges})` : ''}
-            </button>
-            <button class="qc__gh-tab ${tabActive === 'diff' ? 'qc__gh-activeTab' : ''}"
-                    data-tab="diff">
-              <i class="material-icons">visibility</i>
-              Diff
+          <div class="qc__gh-tabsRow">
+            <div class="qc__gh-tabs" role="tablist">
+              <button class="qc__gh-tab ${tabActive === 'changes' ? 'qc__gh-activeTab' : ''}"
+                      data-tab="changes">
+                <i class="material-icons">list_alt</i>
+                Changes${totalChanges ? ` (${totalChanges})` : ''}
+              </button>
+              <button class="qc__gh-tab ${tabActive === 'diff' ? 'qc__gh-activeTab' : ''}"
+                      data-tab="diff">
+                <i class="material-icons">visibility</i>
+                Diff
+              </button>
+            </div>
+            <button id="ghRefreshDiff"
+                    class="qc__gh-iconBtn ${this._loadingDiff ? 'qc__gh-spin' : ''}"
+                    title="Re-check changes against the repository"
+                    ${(!selectedRepo || !selectedBranch || this._loadingDiff) ? 'disabled' : ''}>
+              <i class="material-icons">refresh</i>
             </button>
           </div>
 
@@ -1713,6 +1959,9 @@ class GasGithubPanel extends HTMLElement {
       this._refreshRepos_(true);
     });
     body.querySelector('#ghCreateRepo')?.addEventListener('click', () => this._showCreateRepoPrompt_());
+    body.querySelector('#ghRefreshDiff')?.addEventListener('click', () => {
+      this._manualRefreshDiff_();
+    });
     body.querySelector('#ghRepoSelector')?.addEventListener('click', (e) => {
       e.stopPropagation();
       this._toggleDropdown_('repo');
@@ -1742,7 +1991,6 @@ class GasGithubPanel extends HTMLElement {
     this._wireDropdownEvents_();
   }
 
-  // ── Dropdowns custom ────────────────────────────────────────────────
 
   /**
    * Abre/cierra un dropdown (`'repo'` o `'branch'`) y limpia el filtro asociado.
@@ -1951,7 +2199,6 @@ class GasGithubPanel extends HTMLElement {
     return r?.default_branch === this._project.branch;
   }
 
-  // ── Tab body (Changes / Diff) ───────────────────────────────────────
 
   /** Pinta el body de la tab activa (Changes o Diff). @private */
   _renderTabBody_() {
@@ -2151,6 +2398,9 @@ class GasGithubPanel extends HTMLElement {
 
   /**
    * Renderiza el HTML de una card colapsable de archivo en la pestaña Diff.
+   * Incluye un badge de origen ("GitHub → GAS", "GAS only", "GitHub only")
+   * a la derecha del path para que el usuario sepa de un vistazo qué lado
+   * del diff es local y cuál remoto.
    * @param {{path:string,status:string,plus:number,minus:number}} item
    * @returns {string}
    * @private
@@ -2163,6 +2413,7 @@ class GasGithubPanel extends HTMLElement {
            <span class="add">+${item.plus}</span> <span class="del">-${item.minus}</span>
          </span>`
       : '';
+    const origin = this._renderDiffOriginBadge_(item.status);
     return `
       <div class="qc__gh-diffCard ${isOpen ? 'qc__gh-diffCardOpen' : ''}"
            data-path="${this._escape_(item.path)}">
@@ -2170,6 +2421,7 @@ class GasGithubPanel extends HTMLElement {
           <i class="material-icons qc__gh-diffCardChevron">chevron_right</i>
           <span class="qc__gh-changeStatus ${item.status}">${statusChar}</span>
           <span class="qc__gh-diffCardPath">${this._escape_(item.path)}</span>
+          ${origin}
           ${delta}
         </button>
         <div class="qc__gh-diffCardBody"></div>
@@ -2178,10 +2430,52 @@ class GasGithubPanel extends HTMLElement {
   }
 
   /**
+   * Devuelve el badge compacto que indica de qué lado proviene el cambio.
+   * Convención: rojo = GitHub (remoto), verde = GAS (local).
+   *   - 'add': solo existe local.
+   *   - 'del': solo existe remoto.
+   *   - 'mod': comparación bilateral, leyenda dirigida (GitHub → GAS).
+   * @param {string} status
+   * @returns {string}
+   * @private
+   */
+  _renderDiffOriginBadge_(status) {
+    if (status === 'add') {
+      return `
+        <span class="qc__gh-diffOrigin add"
+              title="Only exists locally in GAS. Push will create it on GitHub.">
+          <i class="material-icons">add</i>GAS only
+        </span>
+      `;
+    }
+    if (status === 'del') {
+      return `
+        <span class="qc__gh-diffOrigin del"
+              title="Only exists on GitHub. Push will delete it from the repo.">
+          <i class="material-icons">remove</i>GitHub only
+        </span>
+      `;
+    }
+    return `
+      <span class="qc__gh-diffOrigin mod"
+            title="Red lines (−) are on GitHub, green lines (+) are local in GAS.">
+        GitHub <i class="material-icons">arrow_forward</i> GAS
+      </span>
+    `;
+  }
+
+  /**
    * Pinta el diff de un archivo dentro del elemento dado. Usa Diff2HtmlUI
    * cuando está disponible y cae a un fallback HTML LCS si falta la lib.
+   *
+   * El diff se construye con `oldText = remote` y `newText = local`, así
+   * que las líneas en rojo (-) son lo que está en GitHub y las verdes (+)
+   * son lo que está en Monaco. El header de la card (ver
+   * `_renderDiffCard_`) muestra un badge "GitHub → GAS" para reforzar
+   * esta convención sin agregar ruido al body.
+   *
    * @param {HTMLElement} mount
-   * @param {{path:string,local:string,remote:string}} item
+   * @param {{path:string,status:string,local:string,remote:string}} item
    * @private
    */
   _renderDiffInto_(mount, item) {
@@ -2226,7 +2520,6 @@ class GasGithubPanel extends HTMLElement {
       : `<div class="qc__gh-diffEmpty">No differences in this file.</div>`);
   }
 
-  // ── Footer ──────────────────────────────────────────────────────────
 
   /** Pinta el footer (Pull/Push) según el estado actual. @private */
   _renderFooter_(footer) {
@@ -2294,10 +2587,23 @@ class GasGithubPanel extends HTMLElement {
     return count;
   }
 
-  // ── Diff computation (local vs. remote) ──────────────────────────────
 
   /**
-   * Fetch repo files and compare against Monaco models
+   * Acción del botón "refresh" de la columna de tabs: el usuario fuerza
+   * una nueva validación contra el repositorio sin cerrar ni reabrir el
+   * panel. Refresca la lista de branches por si aparecieron nuevas en
+   * remoto y recomputa el diff. El guardado de Monaco lo dispara
+   * `_fetchProjectFromApi_` cuando hace falta.
+   * @private
+   */
+  async _manualRefreshDiff_() {
+    if (this._loadingDiff) return;
+    if (!this._project?.repo || !this._project?.branch) return;
+
+    this._loadBranches_(this._project.repo);
+    await this._recomputeDiff_();
+  }
+
   /**
    * Compara los archivos del proyecto GAS con el repo remoto y produce
    * `_diffItems`. Normaliza saltos de línea y newline final para evitar
@@ -2368,7 +2674,7 @@ class GasGithubPanel extends HTMLElement {
       this._postPushSnapshot = null;
     }
     const local  = new Map(
-      this._collectProjectFiles_().map((f) => [f.path, norm(f.content)])
+      (await this._collectLocalFiles_()).map((f) => [f.path, norm(f.content)])
     );
 
     const allPaths = new Set([...remote.keys(), ...local.keys()]);
@@ -2432,7 +2738,6 @@ class GasGithubPanel extends HTMLElement {
    * Quita los párrafos JSDoc previos al método (eran ingleses) y
    * reemplaza por una versión española corta.
    */
-  // ── Diff helpers ─────────────────────────────────────────────────────
 
   /**
    * Cuenta líneas añadidas/quitadas usando LCS. Para archivos muy grandes
@@ -2488,51 +2793,134 @@ class GasGithubPanel extends HTMLElement {
   }
 
   /**
-   * Recorre los modelos de Monaco y devuelve los archivos del proyecto GAS
-   * con la extensión correcta según el tipo del modelo:
-   *   - Lenguaje 'html'    → .html
-   *   - Nombre 'appsscript'→ appsscript.json
-   *   - Resto              → .gs
+   * Devuelve los archivos del proyecto GAS leídos desde la Apps Script
+   * API (fuente de verdad). El panel solo entra a la vista 'connected'
+   * cuando hay sesión Google activa, así que la API siempre debería
+   * estar disponible aquí. Si falla devuelve `[]` y el caller decide
+   * cómo seguir (toast/error ya se mostró en `_fetchProjectFromApi_`).
    *
-   * Filtra modelos que no son archivos del proyecto (workers, peek views,
-   * etc.) y descarta cualquier ruta cuya extensión no sea soportada por
-   * `_isSyncablePath_`. Coincide con cómo `gas-github` (referencia) y la
-   * propia GAS exportan los archivos del proyecto.
-   *
-   * @returns {Array<{path:string, content:string, uri:string}>}
+   * @returns {Promise<Array<{path:string, content:string, name:string, type:string}>>}
    * @private
    */
-  _collectProjectFiles_() {
-    const map = window.gasFileMap;
-    if (!map) return [];
-    const models = window.monaco?.editor?.getModels?.() || [];
-    const out = [];
-    for (const m of models) {
-      const uri = String(m.uri || '');
-      const name = map.get(uri);
-      if (!name) continue;
-      const content = m.getValue?.() ?? '';
-
-      // Si el nombre ya trae extensión la respetamos; si no, decidimos
-      // por idioma / nombre especial.
-      let path = name;
-      if (!/\./.test(name)) {
-        const lang = (m.getLanguageId?.() || '').toLowerCase();
-        if (name === 'appsscript')      path = 'appsscript.json';
-        else if (lang === 'html')       path = `${name}.html`;
-        else                            path = `${name}.gs`;
-      }
-
-      // Última red: descartar cualquier archivo con extensión no soportada
-      // (p. ej. .css, .md, .ts) que pudiera entrar al modelo por error.
-      if (!this._isSyncablePath_(path)) continue;
-
-      out.push({ path, content, uri });
-    }
-    return out;
+  async _collectLocalFiles_() {
+    const apiFiles = await this._fetchProjectFromApi_();
+    if (!apiFiles) return [];
+    return apiFiles
+      .filter((f) => this._isSyncablePath_(f.path))
+      .map((f) => ({
+        path:    f.path,
+        content: f.source || '',
+        name:    f.name,
+        type:    f.type,
+      }));
   }
 
-  // ── Diff helpers ─────────────────────────────────────────────────────
+  /**
+   * Lee el contenido completo del proyecto GAS usando la Apps Script API
+   * (GET /v1/projects/{scriptId}/content). Es la fuente de verdad para
+   * push/pull porque ve TODOS los archivos del proyecto, no solo los que
+   * el usuario tiene abiertos en Monaco.
+   *
+   * Antes de pedir el GET dispara Ctrl+S para que GAS persista los
+   * cambios sin guardar y la API devuelva el snapshot al día. El delay
+   * es necesario porque el guardado es asíncrono y la API lee del
+   * storage interno de GAS, no de Monaco.
+   *
+   * @returns {Promise<Array<{path:string,content:string,name:string,type:string}>|null>}
+   *   `null` si no hay sesión Google activa o falla la llamada (el
+   *   caller decide si caer al fallback de Monaco).
+   * @private
+   */
+  async _fetchProjectFromApi_() {
+    if (!this._googleUser || !this._scriptId) return null;
+
+    // Forzamos save antes de leer; le damos tiempo a GAS para persistir
+    // (300 ms suele ser suficiente; nunca menos porque GAS deduplica
+    // saves seguidos).
+    this._triggerGasSave_();
+    await new Promise((r) => setTimeout(r, 350));
+
+    const res = await this._bridgeCall_('GAS_GG_API_CALL', {
+      action: 'GET_CONTENT',
+      payload: { scriptId: this._scriptId },
+    });
+    if (!res?.ok || !res.data) {
+      const msg = String(res?.error || '');
+      // 401/403: la sesión Google se invalidó. Limpiamos el estado para
+      // que el panel pida re-conectar.
+      if (/\b(401|403)\b/.test(msg)) {
+        this._googleUser = null;
+        this._view = 'unauth';
+        this._renderHeader_();
+        this._renderBody_();
+        this._toast_('Google session expired. Please sign in again.', 'error', 5000);
+      } else if (msg) {
+        this._log_(msg, 'error');
+      }
+      return null;
+    }
+    return res.data.files || [];
+  }
+
+  /**
+   * Escribe el contenido completo del proyecto GAS usando la Apps Script
+   * API (PUT /v1/projects/{scriptId}/content). Reemplaza el set de
+   * archivos: lo que NO va en `files` se borra, lo que va se crea o se
+   * actualiza, todo en una sola operación atómica.
+   *
+   * @param {Array<{name:string, type:string, source:string}>} files
+   * @returns {Promise<boolean>} true si la escritura fue exitosa.
+   * @private
+   */
+  async _pushProjectToApi_(files) {
+    if (!this._googleUser) return false;
+    if (!this._scriptId)   return false;
+    if (!Array.isArray(files)) return false;
+
+    const res = await this._bridgeCall_('GAS_GG_API_CALL', {
+      action:  'PUT_CONTENT',
+      payload: { scriptId: this._scriptId, files },
+    });
+    if (!res?.ok) {
+      const msg = String(res?.error || 'Could not write project content');
+      if (/\b(401|403)\b/.test(msg)) {
+        this._googleUser = null;
+        this._toast_('Google session expired. Please sign in again.', 'error', 5000);
+      } else {
+        this._toast_(msg, 'error', 6000);
+      }
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Mapea una extensión de archivo a un type aceptado por la Apps
+   * Script API. El JSON solo se reserva para `appsscript.json` para
+   * evitar enviar tipos no soportados.
+   * @param {string} path
+   * @returns {('SERVER_JS'|'HTML'|'JSON'|null)}
+   * @private
+   */
+  _pathToScriptType_(path) {
+    const lower = String(path || '').toLowerCase();
+    if (lower.endsWith('.gs') || lower.endsWith('.js')) return 'SERVER_JS';
+    if (lower.endsWith('.html')) return 'HTML';
+    if (lower.endsWith('.json')) return 'JSON';
+    return null;
+  }
+
+  /**
+   * Convierte un path tipo "Code.gs" / "appsscript.json" / "Sidebar.html"
+   * en el `name` que la API espera (sin extensión).
+   * @param {string} path
+   * @returns {string}
+   * @private
+   */
+  _pathToScriptName_(path) {
+    return String(path || '').replace(/\.(gs|js|html|json)$/i, '');
+  }
+
 
   /**
    * Inyecta el CSS de diff2html dentro del shadow root una sola vez,
@@ -2615,7 +3003,6 @@ class GasGithubPanel extends HTMLElement {
     return ops;
   }
 
-  // ── Acciones de auth (Device Flow) ──────────────────────────────────
 
   /**
    * Inicia el Device Flow vía background:
@@ -2684,23 +3071,113 @@ class GasGithubPanel extends HTMLElement {
     if (this._waitingAuth) this._renderBody_();
   }
 
-  /** Cierra la sesión tras confirmación del usuario. @private */
-  async _logout_() {
+  /**
+   * Cierra ambas sesiones (Google + GitHub) tras una sola confirmación.
+   * Razón: la API de Apps Script y la de GitHub funcionan en tándem en
+   * este panel; mantener una sola conexión activa lleva a estados raros
+   * (por ejemplo "puedo leer GAS pero no comparar contra el repo"). El
+   * usuario puede volver a conectar cualquiera de las dos desde la
+   * pantalla unauth.
+   * @private
+   */
+  async _logoutAll_() {
+    const hasGoogle = !!this._googleUser;
+    const hasGithub = !!this._user;
+
     const confirmed = await this._showConfirm_({
-      title:        'Sign out of GitHub?',
-      message:      'The token will be removed from this browser.',
+      title:        'Sign out?',
+      message:      hasGoogle && hasGithub
+        ? 'Disconnect both your GitHub and Google accounts from this browser. ' +
+          'You can reconnect either from the panel.'
+        : (hasGithub
+            ? 'The GitHub token will be removed from this browser.'
+            : 'The Google account will be disconnected from this browser.'),
       confirmLabel: 'Sign out',
       tone:         'danger',
     });
     if (!confirmed) return;
-    await this._bridgeCall_('GAS_GH_LOGOUT');
+
+    // Lanzamos ambos logouts en paralelo: son idempotentes y no dependen
+    // entre sí.
+    const tasks = [];
+    if (hasGithub) tasks.push(this._bridgeCall_('GAS_GH_LOGOUT'));
+    if (hasGoogle) tasks.push(this._bridgeCall_('GAS_GG_LOGOUT'));
+    await Promise.all(tasks);
+
     this._user = null;
+    this._googleUser = null;
     this._view = 'unauth';
     this._repos = [];
     this._reposLoaded = false;
     this._branches = [];
     this._diffItems = [];
     this._selectedFiles.clear();
+    this._renderHeader_();
+    this._renderBody_();
+    this._updateAnchorBadge_();
+    this._positionPanel_();
+  }
+
+  /**
+   * Lanza el flujo interactivo de Google OAuth (chrome.identity.getAuthToken
+   * con `interactive: true`). El primer login muestra el consent screen
+   * de Google con los scopes solicitados; los siguientes son transparentes
+   * mientras el consent siga vigente.
+   * @private
+   */
+  async _authenticateGoogle_() {
+    if (this._googleAuthInFlight) return;
+    this._googleAuthInFlight = true;
+    this._renderBody_();
+    this._toast_('Opening Google sign-in…', 'info', 1800);
+
+    const res = await this._bridgeCall_('GAS_GG_AUTHENTICATE');
+    this._googleAuthInFlight = false;
+
+    if (res?.ok && res.user) {
+      this._googleUser = res.user;
+      this._toast_(`Connected as ${res.user.email || res.user.name || 'Google account'}`, 'ok');
+      // Si el usuario vino aquí desde Step 1, dejamos visible Step 2 con
+      // el botón de GitHub habilitado; si ya tenía GitHub conectado, el
+      // refresh asciende a 'connected'.
+      this._refreshAuth_();
+    } else {
+      this._renderBody_();
+      const msg = res?.error || 'Could not connect to Google.';
+      // Mensaje específico cuando la extensión no fue empaquetada con un
+      // OAuth client_id válido (manifest.oauth2.client_id placeholder).
+      if (/OAuth2 not granted|client_id|invalid_client/i.test(msg)) {
+        this._toast_(
+          'Google sign-in not configured. Set manifest.oauth2.client_id ' +
+          'and reload the extension.',
+          'error', 7000,
+        );
+      } else {
+        this._toast_(msg, 'error', 5000);
+      }
+    }
+  }
+
+  /**
+   * Cierra la sesión de Google: pide confirmación, llama al background
+   * para limpiar el token cacheado, e invalida la vista (vuelve a Step 1
+   * porque GitHub depende de Google para tener una fuente de verdad).
+   * @private
+   */
+  async _logoutGoogle_() {
+    const confirmed = await this._showConfirm_({
+      title:        'Disconnect Google?',
+      message:      'GitHub sync will be paused until you reconnect a Google ' +
+                    'account. Your GitHub session is not affected.',
+      confirmLabel: 'Disconnect',
+      tone:         'danger',
+    });
+    if (!confirmed) return;
+
+    await this._bridgeCall_('GAS_GG_LOGOUT');
+    this._googleUser = null;
+    // Sin Google no podemos quedarnos en 'connected': forzamos unauth.
+    this._view = 'unauth';
     this._renderHeader_();
     this._renderBody_();
     this._updateAnchorBadge_();
@@ -2741,7 +3218,6 @@ class GasGithubPanel extends HTMLElement {
     this._updateAnchorBadge_();
   }
 
-  // ── Selección de repo / branch / sub-folder ─────────────────────────
 
   /**
    * Maneja el cambio de repo en el dropdown. Persiste la selección,
@@ -3128,28 +3604,190 @@ class GasGithubPanel extends HTMLElement {
     });
   }
 
-  // ── Push / Pull ──────────────────────────────────────────────────────
+  /**
+   * Modal especializado del pull: muestra solo los archivos que se van
+   * a traer (status 'mod' y 'del'), con un badge `add`/`mod` y el delta
+   * `+x -y` cuando aplica. El usuario puede optar por no recargar la
+   * pestaña tras aplicar (por defecto sí, porque GAS solo refleja los
+   * cambios tras un reload).
+   *
+   * @param {{
+   *   files: Array<{path:string,status:'add'|'del'|'mod',plus?:number,minus?:number}>,
+   *   reloadAvailable: boolean,
+   *   localOnlyCount: number,
+   * }} opts
+   * @returns {Promise<{confirmed:boolean, reload:boolean}>}
+   * @private
+   */
+  _showPullConfirm_(opts) {
+    return new Promise((resolve) => {
+      let overlay = this.shadowRoot.querySelector('.qc__gh-modalOverlay');
+      if (overlay) overlay.remove();
+      overlay = document.createElement('div');
+      overlay.className = 'qc__gh-modalOverlay';
+
+      // Solo dibujamos los archivos que efectivamente entran (mod/del).
+      // Los 'add' (locales) se mencionan en el footer como aclaración
+      // pero no contaminan la lista visual.
+      const incoming = opts.files.filter((f) => f.status === 'mod' || f.status === 'del');
+      const incomingByKind = {
+        add: incoming.filter((f) => f.status === 'del').length,  // 'del'=remoto-only=nuevo en GAS
+        mod: incoming.filter((f) => f.status === 'mod').length,
+      };
+
+      const summaryParts = [];
+      if (incomingByKind.add) summaryParts.push(`<span class="qc__gh-pullSummaryCount">${incomingByKind.add} new</span>`);
+      if (incomingByKind.mod) summaryParts.push(`<span class="qc__gh-pullSummaryCount">${incomingByKind.mod} modified</span>`);
+      const summaryText = summaryParts.length
+        ? summaryParts.join(' · ')
+        : '<span class="qc__gh-pullSummaryCount">Nothing to apply</span>';
+
+      const itemsHtml = incoming.length
+        ? incoming.map((f) => {
+            const kindClass = f.status === 'del' ? 'add' : 'mod';
+            const kindChar  = f.status === 'del' ? '+' : '~';
+            const delta = f.status === 'mod'
+              ? `<span class="qc__gh-pullDelta">
+                   <span class="add">+${f.plus || 0}</span>
+                   <span class="del">-${f.minus || 0}</span>
+                 </span>`
+              : '';
+            return `
+              <div class="qc__gh-pullItem">
+                <span class="qc__gh-pullStatus ${kindClass}">${kindChar}</span>
+                <span class="qc__gh-pullPath">${this._escape_(f.path)}</span>
+                ${delta}
+              </div>
+            `;
+          }).join('')
+        : `<div class="qc__gh-pullItem"><span class="qc__gh-pullPath" style="color:#8b949e">No incoming changes.</span></div>`;
+
+      const localOnlyHint = opts.localOnlyCount
+        ? `
+          <div class="qc__gh-pullNote" style="margin-top:0">
+            <strong>${opts.localOnlyCount} local-only file(s)</strong> will be
+            ignored — they are not in the repo, push them separately if needed.
+          </div>
+        `
+        : '';
+
+      const reloadCheck = opts.reloadAvailable
+        ? `
+          <label class="qc__gh-pullCheckRow">
+            <input id="ghPullReload" type="checkbox" checked>
+            Reload this GAS tab after applying so the editor shows the new content.
+          </label>
+        `
+        : '';
+
+      DomUtils.setHTML(overlay, `
+        <div class="qc__gh-modal" role="dialog" aria-label="Pull from repository"
+             style="max-width: 460px">
+          <div class="qc__gh-modalTitle">Pull from repository</div>
+
+          <div class="qc__gh-modalTextWrap">
+            <div class="qc__gh-pullSummary">
+              <i class="material-icons">cloud_download</i>
+              <span>${summaryText} from <strong>${this._escape_((this._project?.repo || '') + '@' + (this._project?.branch || ''))}</strong></span>
+            </div>
+
+            <div class="qc__gh-pullList">${itemsHtml}</div>
+
+            ${localOnlyHint}
+            ${reloadCheck}
+          </div>
+
+          <div class="qc__gh-modalFooter">
+            <button class="qc__gh-btn qc__gh-ghost" id="ghConfirmCancel">Cancel</button>
+            <button class="qc__gh-btn qc__gh-primary" id="ghConfirmOk"
+                    ${incoming.length ? '' : 'disabled'}>
+              Apply changes
+            </button>
+          </div>
+        </div>
+      `);
+      this.shadowRoot.querySelector('.qc__gh-shell').appendChild(overlay);
+
+      const ok     = overlay.querySelector('#ghConfirmOk');
+      const cancel = overlay.querySelector('#ghConfirmCancel');
+      const reload = overlay.querySelector('#ghPullReload');
+
+      const finish = (confirmed) => {
+        const result = {
+          confirmed,
+          reload: confirmed && opts.reloadAvailable && (reload?.checked ?? false),
+        };
+        overlay.remove();
+        resolve(result);
+      };
+
+      ok.addEventListener('click', () => finish(true));
+      cancel.addEventListener('click', () => finish(false));
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) finish(false);
+      });
+      const onKey = (e) => {
+        if (e.key === 'Enter')  { e.preventDefault(); if (!ok.disabled) finish(true); }
+        if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      };
+      overlay.addEventListener('keydown', onKey);
+      setTimeout(() => ok.focus(), 30);
+    });
+  }
+
 
   /**
-   * Sube los archivos seleccionados al repo activo. Bloquea la UI
-   * mientras la petición está en vuelo y, al terminar OK, limpia
-   * selección + commit + diff (todo queda sincronizado).
+   * Sube los archivos seleccionados al repo activo. Antes de leer el
+   * snapshot del proyecto vía Apps Script API, fuerza Ctrl+S sobre el
+   * editor de GAS para que cualquier cambio sin guardar quede
+   * persistido (la API lee del storage interno de GAS, no de Monaco).
+   * Al terminar OK limpia selección + commit + diff.
    * @private
    */
   async _push_() {
     if (!this._project || this._pushing || this._pulling) return;
-    const allFiles = this._collectProjectFiles_();
-    const selectedFiles = allFiles.filter((f) => this._selectedFiles.has(f.path));
-    if (!selectedFiles.length) return this._toast_('No files selected', 'error');
 
     const message = (this._commitMessage || '').trim();
     if (!message) return this._toast_('Write a commit message', 'error');
+    if (!this._selectedFiles.size) return this._toast_('No files selected', 'error');
 
-    // Bloquear la UI: animar el botón Push y deshabilitar interacciones.
     this._pushing = true;
     this._refreshFooterButtons_();
     this._setBodyBusy_(true);
-    this._toast_(`Pushing ${selectedFiles.length} file(s) to ${this._project.repo}@${this._project.branch}…`, 'info', 2400);
+    this._toast_('Saving GAS and preparing push…', 'info', 1800);
+
+    // 1. Forzamos save en GAS y esperamos a que persista. Esto es
+    //    crítico porque la API lee del storage de GAS, no de Monaco:
+    //    sin este paso un push podría subir el contenido viejo de un
+    //    archivo que el usuario acaba de editar pero todavía no guardó.
+    //    `_fetchProjectFromApi_` también dispara Ctrl+S internamente,
+    //    pero lo hacemos aquí explícito (con más tiempo de espera) para
+    //    cubrir saves más lentos en archivos grandes.
+    this._triggerGasSave_();
+    await new Promise((r) => setTimeout(r, 600));
+
+    // 2. Leemos el snapshot real del proyecto.
+    const apiFiles = await this._fetchProjectFromApi_();
+    if (!apiFiles) {
+      this._pushing = false;
+      this._setBodyBusy_(false);
+      this._refreshFooterButtons_();
+      // El error ya se mostró en _fetchProjectFromApi_.
+      return;
+    }
+
+    const selectedFiles = apiFiles.filter((f) => this._selectedFiles.has(f.path));
+    if (!selectedFiles.length) {
+      this._pushing = false;
+      this._setBodyBusy_(false);
+      this._refreshFooterButtons_();
+      return this._toast_('No files selected', 'error');
+    }
+
+    this._toast_(
+      `Pushing ${selectedFiles.length} file(s) to ${this._project.repo}@${this._project.branch}…`,
+      'info', 2400,
+    );
 
     let res;
     try {
@@ -3163,7 +3801,7 @@ class GasGithubPanel extends HTMLElement {
             path:    f.path,
             // Normalize line endings + trailing newline to match the
             // diff comparison so a fresh push leaves everything 'eq'.
-            content: String(f.content ?? '').replace(/\r\n?/g, '\n').replace(/\n?$/, '\n'),
+            content: String(f.source ?? '').replace(/\r\n?/g, '\n').replace(/\n?$/, '\n'),
           })),
           message,
         },
@@ -3175,18 +3813,18 @@ class GasGithubPanel extends HTMLElement {
     if (res?.ok) {
       const sha = (res.data?.commitSha || '').slice(0, 7);
 
-      // Optimistic update + snapshot:
-      // GitHub propaga el commit al CDN con 1-3 s de latencia. Si el
-      // usuario cierra y reabre el panel en ese intervalo, FETCH_FILES
-      // devuelve el árbol viejo y la UI vuelve a mostrar archivos
-      // pendientes. Para evitarlo guardamos un snapshot con TTL: durante
-      // los primeros 15 s post-push, `_recomputeDiff_` superpone el
-      // contenido pusheado sobre la respuesta remota (sea fresca o stale).
+      // Optimistic update + snapshot: GitHub propaga el commit al CDN
+      // con 1-3 s de latencia. Si el usuario cierra y reabre el panel
+      // en ese intervalo, FETCH_FILES devuelve el árbol viejo y la UI
+      // vuelve a mostrar archivos pendientes. Para evitarlo guardamos
+      // un snapshot con TTL: durante los primeros 15 s post-push,
+      // `_recomputeDiff_` superpone el contenido pusheado sobre la
+      // respuesta remota.
       const norm = (s) => String(s ?? '')
         .replace(/\r\n?/g, '\n')
         .replace(/\n$/, '');
       const pushedByPath = new Map(
-        selectedFiles.map((f) => [f.path, norm(f.content)])
+        selectedFiles.map((f) => [f.path, norm(f.source)])
       );
 
       this._postPushSnapshot = {
@@ -3210,14 +3848,11 @@ class GasGithubPanel extends HTMLElement {
         };
       });
 
-      // Resetear UI: el proyecto está sincronizado con el remoto.
       this._commitMessage = '';
       this._selectedFiles.clear();
       this._expandedDiffPaths = null;
       this._activeTab = 'changes';
 
-      // Re-render para que el contador de cambios y la lista reflejen
-      // el nuevo estado sin hacer ningún fetch.
       const body = this.shadowRoot.getElementById('ghBody');
       const footer = this.shadowRoot.getElementById('ghFooter');
       if (body && footer) this._renderConnectedView_(body, footer);
@@ -3251,6 +3886,15 @@ class GasGithubPanel extends HTMLElement {
    * para guardar desde aquí).
    * @private
    */
+  /**
+   * Aplica los cambios del repo remoto sobre el proyecto GAS usando la
+   * Apps Script API. Crea los archivos nuevos, sobrescribe los
+   * modificados y conserva intactos los locales que no estén en el repo.
+   * Por defecto recarga la pestaña al terminar para que el editor de GAS
+   * muestre el contenido nuevo (la API edita el storage, Monaco solo lo
+   * relee tras un reload).
+   * @private
+   */
   async _pull_() {
     if (!this._project || this._pushing || this._pulling) return;
 
@@ -3261,88 +3905,64 @@ class GasGithubPanel extends HTMLElement {
     const items = this._diffItems.filter((i) => i.status !== 'eq');
     if (!items.length) return this._toast_('Everything is up to date', 'ok');
 
-    // Validamos si hay archivo en github y no en apps script:
-    const toOverwrite = items.filter((i) => i.status !== 'add');
+    // Clasificación: 'mod' se sobrescribe, 'del' se crea, 'add' se ignora
+    // (los locales que no están en el repo no los tocamos en pull).
+    const remoteOnly  = items.filter((i) => i.status === 'del');
+    const toOverwrite = items.filter((i) => i.status === 'mod');
     const localOnly   = items.filter((i) => i.status === 'add');
 
-    const fileList = [
-      toOverwrite.length ? `Files to apply from remote:\n${toOverwrite.map((i) => `  ~  ${i.path}`).join('\n')}` : '',
-      localOnly.length   ? `Local only (push these, not pull):\n${localOnly.map((i) => `  +  ${i.path}`).join('\n')}` : '',
-    ].filter(Boolean).join('\n\n');
-
-    // Si TODOS los cambios son locales, no tiene sentido hacer pull.
-    if (!toOverwrite.length) {
+    if (!toOverwrite.length && !remoteOnly.length) {
       this._toast_('All changes are local only. Use Push instead.', 'info', 4000);
       return;
     }
 
-    const confirmed = await this._showConfirm_({
-      title:        'Pull from repository',
-      message:      `${fileList}\n\nLocal-only files will be skipped (push them separately). Files from remote will overwrite your local version.\n\nUse Ctrl+S in GAS after pulling.`,
-      confirmLabel: 'Apply changes',
-      tone:         'primary',
+    const pullResult = await this._showPullConfirm_({
+      files:           items,
+      reloadAvailable: true,
+      localOnlyCount:  localOnly.length,
     });
-    if (!confirmed) return;
+    if (!pullResult.confirmed) return;
 
-    // Bloquear UI mientras aplicamos cambios a Monaco.
     this._pulling = true;
     this._refreshFooterButtons_();
     this._setBodyBusy_(true);
     this._toast_('Applying remote changes…', 'info', 1800);
 
     try {
-      const localFiles = this._collectProjectFiles_();
-      const models = window.monaco?.editor?.getModels?.() || [];
+      const { applied, skipped } = await this._pullWithApi_(items);
 
-      // Construir un mapa uri → model para lookup rápido
-      const modelByUri = new Map(models.map((m) => [String(m.uri || ''), m]));
-
-      // path → model usando exactamente los mismos paths que usa el diff
-      const byPath = new Map(
-        localFiles
-          .map((f) => [f.path, modelByUri.get(f.uri)])
-          .filter(([, m]) => !!m)
-      );
-
-      let applied = 0;
-      const skipped = [];
-      for (const it of items) {
-        if (it.status === 'add') {
-          // Exists locally but not in repo → pull should not delete local.
-          skipped.push(`${it.path} (local only)`);
-          continue;
-        }
-        const model = byPath.get(it.path);
-        if (!model) {
-          skipped.push(`${it.path} (create the file in GAS first)`);
-          continue;
-        }
-        try { model.setValue(it.remote || ''); applied++; }
-        catch (err) { console.warn('[gas-github-panel] setValue failed', err); }
-      }
-
-      // Limpiar selección / commit ya que acabamos de sincronizar desde remoto.
       this._selectedFiles.clear();
       this._commitMessage = '';
       this._expandedDiffPaths = null;
 
-      // Recalcular diff por si quedó algo sin poder aplicar.
-      await this._recomputeDiff_();
-
-      // explícitamente por si el diff queda vacío y no entra al loop.
+      // Si vamos a recargar la pestaña, no recomputamos diff (la página
+      // se va a tirar abajo en un instante).
+      if (!pullResult.reload) {
+        await this._recomputeDiff_();
+      }
       this._remoteHasChanges = false;
 
       if (applied) {
-        // Esperar a que Monaco termine de aplicar todos los setValue
-        // antes de disparar el guardado de GAS.
-        setTimeout(() => this._triggerGasSave_(), 400);
-        this._toast_(`${applied} file(s) applied and saved.`, 'ok', 4500);
-      }
-      if (skipped.length) {
+        if (pullResult.reload) {
+          this._toast_(
+            `${applied} file(s) applied. Reloading GAS…`,
+            'ok', 1500,
+          );
+          setTimeout(() => {
+            try { window.top.location.reload(); }
+            catch (_) { window.location.reload(); }
+          }, 800);
+          return;
+        }
+        this._toast_(
+          `${applied} file(s) applied via Apps Script API. ` +
+          `Reload GAS to see them in the editor.`,
+          'ok', 6000,
+        );
+      } else if (skipped.length) {
         this._toast_(
           `${skipped.length} file(s) skipped (local only — use Push for these).`,
-          'info',
-          5000
+          'info', 5000,
         );
       }
     } finally {
@@ -3352,26 +3972,127 @@ class GasGithubPanel extends HTMLElement {
     }
   }
 
-  // ── Bridge MAIN ↔ background ────────────────────────────────────────
+  /**
+   * Aplica el pull sobre el proyecto GAS usando la Apps Script API.
+   * Construye el set final de archivos (snapshot del proyecto + cambios
+   * remotos a aplicar) y lo envía con un solo PUT atómico que crea,
+   * actualiza y conserva en una sola operación.
+   *
+   * Garantías:
+   *   1. Solo se modifican los archivos del diff. Los demás se incluyen
+   *      en el PUT con su contenido actual leído desde la API, así que
+   *      GAS los conserva exactos.
+   *   2. Los archivos `add` (locales que no están en el repo) se
+   *      preservan y NO se borran. Pull no decide eso, push sí.
+   *   3. Si la lectura previa del proyecto falla, abortamos para no
+   *      escribir un set incompleto.
+   *
+   * @param {Array} items  Items del diff (sin 'eq').
+   * @returns {Promise<{applied:number, skipped:string[]}>}
+   * @private
+   */
+  async _pullWithApi_(items) {
+    const localFiles = await this._fetchProjectFromApi_();
+    if (!localFiles) {
+      return { applied: 0, skipped: items.map((i) => i.path) };
+    }
+
+    // Mapa con TODO lo que hoy está en el proyecto. Los cambios del
+    // pull se aplican sobre esta copia.
+    const byPath = new Map(localFiles.map((f) => [f.path, { ...f }]));
+    const skipped = [];
+    let applied = 0;
+
+    for (const it of items) {
+      if (it.status === 'add') {
+        // Archivo solo local: pull no lo toca.
+        skipped.push(it.path);
+        continue;
+      }
+
+      const type = this._pathToScriptType_(it.path);
+      const name = this._pathToScriptName_(it.path);
+      if (!type || !name) {
+        skipped.push(it.path);
+        continue;
+      }
+
+      // 'mod' → reemplazamos el contenido por el remoto.
+      // 'del' → archivo solo en remoto: lo creamos en el set final.
+      byPath.set(it.path, {
+        path:    it.path,
+        name,
+        type,
+        source:  it.remote || '',
+      });
+      applied++;
+    }
+
+    if (!applied) {
+      return { applied: 0, skipped };
+    }
+
+    const finalFiles = [...byPath.values()].map((f) => ({
+      name:   f.name || this._pathToScriptName_(f.path),
+      type:   f.type || this._pathToScriptType_(f.path),
+      source: f.source ?? '',
+    }));
+
+    // Sanity check: si por algún bug el array final tiene menos archivos
+    // que los que había antes, abortamos para no perder código.
+    if (finalFiles.length < localFiles.length) {
+      this._toast_(
+        'Aborted: internal mismatch while building the file set. ' +
+        'Nothing was written.',
+        'error', 6000,
+      );
+      console.warn('[gas-github-panel] _pullWithApi_ abort: finalFiles<localFiles',
+        { final: finalFiles.length, local: localFiles.length });
+      return { applied: 0, skipped: items.map((i) => i.path) };
+    }
+
+    const ok = await this._pushProjectToApi_(finalFiles);
+    if (!ok) {
+      return { applied: 0, skipped: items.map((i) => i.path) };
+    }
+    return { applied, skipped };
+  }
+
 
   /**
    * Despacha un CustomEvent al bridge y resuelve cuando llega el
-   * resultado correspondiente. Timeout de 30 s para llamadas largas.
+   * resultado correspondiente. Timeout configurable: la mayoría de
+   * llamadas usa 30 s, pero las de autenticación interactiva (Device
+   * Flow de GitHub, consent de Google) pueden tardar varios minutos
+   * mientras el usuario completa la autorización en otra ventana.
+   *
    * @param {string} eventName
    * @param {object} [payload]
+   * @param {{timeoutMs?:number}} [opts]
    * @returns {Promise<*>}
    * @private
    */
-  _bridgeCall_(eventName, payload = {}) {
+  _bridgeCall_(eventName, payload = {}, opts = {}) {
     return new Promise((resolve) => {
       const requestId = `gh_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       this._pendingBridgeCalls.set(requestId, resolve);
+
+      // Llamadas de autenticación interactiva quedan a la espera del
+      // usuario (puede tardar varios minutos). Para no abandonarlas con
+      // un timeout corto, les damos 16 min — un poco más que la ventana
+      // de 15 min que GitHub deja al Device Flow.
+      const interactive = (
+        eventName === 'GAS_GH_AUTHENTICATE' ||
+        eventName === 'GAS_GG_AUTHENTICATE'
+      );
+      const ms = opts.timeoutMs ?? (interactive ? 16 * 60 * 1000 : 30000);
+
       setTimeout(() => {
         if (this._pendingBridgeCalls.has(requestId)) {
           this._pendingBridgeCalls.delete(requestId);
           resolve({ ok: false, error: 'Timeout' });
         }
-      }, 30000);
+      }, ms);
       document.dispatchEvent(new CustomEvent(eventName, {
         detail: JSON.stringify({ requestId, ...payload }),
       }));
@@ -3402,7 +4123,6 @@ class GasGithubPanel extends HTMLElement {
     }
   }
 
-  // ── Indicador en el botón de la toolbar ─────────────────────────────
 
   /**
    * Sincroniza el indicador visual de TODOS los botones GitHub de la
@@ -3445,7 +4165,6 @@ class GasGithubPanel extends HTMLElement {
     });
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────
 
   /**
    * Extrae el `scriptId` del proyecto GAS desde la URL actual.
@@ -3546,7 +4265,6 @@ class GasGithubPanel extends HTMLElement {
       .replace(/'/g, '&#39;');
   }
 
-  // ── Posicionamiento + listeners globales ────────────────────────────
 
   /**
    * Posiciona el panel anclado al botón y calcula el offset de la flecha

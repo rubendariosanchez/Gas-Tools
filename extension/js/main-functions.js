@@ -34,6 +34,14 @@ const GAS_EVENTS = {
   GH_SAVE_DONE:       'GAS_GH_SAVE_DONE',
   GH_API_CALL:        'GAS_GH_API_CALL',
   GH_API_RESULT:      'GAS_GH_API_RESULT',
+  GG_GET_AUTH:        'GAS_GG_GET_AUTH',
+  GG_AUTH_RESULT:     'GAS_GG_AUTH_RESULT',
+  GG_AUTHENTICATE:    'GAS_GG_AUTHENTICATE',
+  GG_AUTH_DONE:       'GAS_GG_AUTH_DONE',
+  GG_LOGOUT:          'GAS_GG_LOGOUT',
+  GG_LOGOUT_DONE:     'GAS_GG_LOGOUT_DONE',
+  GG_API_CALL:        'GAS_GG_API_CALL',
+  GG_API_RESULT:      'GAS_GG_API_RESULT',
 };
 
 /**
@@ -565,6 +573,43 @@ const G_LLM_BRIDGE = [
     responseEvent: GAS_EVENTS.GH_API_RESULT,
     buildMessage:  ({ action, payload }) => ({
       type:    'GITHUB_API_CALL',
+      payload: { action, payload },
+    }),
+    buildDetail:   (response, requestId) => ({
+      requestId,
+      ok:    response?.ok ?? false,
+      data:  response?.ok ? (response.data || null) : null,
+      error: response?.ok ? null : (response?.error || 'Unknown error'),
+    }),
+  },
+  {
+    listenEvent:   GAS_EVENTS.GG_GET_AUTH,
+    responseEvent: GAS_EVENTS.GG_AUTH_RESULT,
+    buildMessage:  () => ({ type: 'GOOGLE_GET_AUTH' }),
+    buildDetail:   (data, requestId) => ({ requestId, data: data || null }),
+  },
+  {
+    listenEvent:   GAS_EVENTS.GG_AUTHENTICATE,
+    responseEvent: GAS_EVENTS.GG_AUTH_DONE,
+    buildMessage:  () => ({ type: 'GOOGLE_AUTHENTICATE' }),
+    buildDetail:   (response, requestId) => ({
+      requestId,
+      ok:    response?.ok ?? false,
+      user:  response?.ok ? (response.user || null) : null,
+      error: response?.ok ? null : (response?.error || 'Unknown error'),
+    }),
+  },
+  {
+    listenEvent:   GAS_EVENTS.GG_LOGOUT,
+    responseEvent: GAS_EVENTS.GG_LOGOUT_DONE,
+    buildMessage:  () => ({ type: 'GOOGLE_LOGOUT' }),
+    buildDetail:   (response, requestId) => ({ requestId, ok: response?.ok ?? false }),
+  },
+  {
+    listenEvent:   GAS_EVENTS.GG_API_CALL,
+    responseEvent: GAS_EVENTS.GG_API_RESULT,
+    buildMessage:  ({ action, payload }) => ({
+      type:    'GOOGLE_API_CALL',
       payload: { action, payload },
     }),
     buildDetail:   (response, requestId) => ({

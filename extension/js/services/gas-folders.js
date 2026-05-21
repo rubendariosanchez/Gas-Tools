@@ -420,13 +420,38 @@ class GasFolders {
       }
       /* Ocultamos el texto de GAS para no pelear con el DOM Virtual y evitar el loop.
          El nombre visible se muestra exclusivamente a través del pseudo-elemento ::before
-         alimentado por data-name, sin tocar el textContent que GAS gestiona. */
-      .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title] {
+         alimentado por data-name, sin tocar el textContent que GAS gestiona.
+         IMPORTANTE: solo aplicamos color transparent cuando data-name
+         está presente y no vacío. Durante el guardado GAS puede reemplazar
+         el li y nuestro data-name desaparece momentáneamente; en ese
+         caso preferimos mostrar el texto original de GAS antes que un
+         hueco vacío. Cuando el rebuild vuelva a poblar data-name, el
+         texto original se oculta otra vez y el pseudo-elemento toma el
+         relevo. Sin tocar textContent: GAS lo reconcilia y dispararía
+         mutaciones (loop). */
+      .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""]) {
         color: transparent !important;
+        -webkit-text-fill-color: transparent !important;
+        text-decoration: none !important;
+        text-decoration-color: transparent !important;
+        text-shadow: none !important;
+      }
+      .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""]) > *:not(input):not(.${GasFolders.FILE_ICON_CLASS}) {
+        color: transparent !important;
+        -webkit-text-fill-color: transparent !important;
+        text-decoration: none !important;
+        text-decoration-color: transparent !important;
+        text-shadow: none !important;
+        border-bottom-color: transparent !important;
+      }
+      /* Posicionamiento del contenedor para anclar el pseudo-elemento.
+         Aplicado siempre, no solo cuando hay data-name. */
+      .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title] {
         position: relative;
       }
-      /* Mostramos el nombre corto mediante un pseudo-elemento */
-      .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title]::before {
+      /* Mostramos el nombre corto mediante un pseudo-elemento, solo si
+         realmente hay un data-name no vacío para mostrar. */
+      .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""])::before {
         content: attr(data-name);
         position: absolute;
         left: 0;
@@ -434,6 +459,7 @@ class GasFolders {
         right: 0;
         bottom: 0;
         color: var(--gm3-sys-color-on-surface, ${dark ? '#e8eaed' : '#202124'});
+        -webkit-text-fill-color: var(--gm3-sys-color-on-surface, ${dark ? '#e8eaed' : '#202124'});
         pointer-events: none;
         white-space: nowrap;
         overflow: hidden;
@@ -498,6 +524,14 @@ class GasFolders {
     this._observer = new MutationObserver((mutations) => {
       // Guard: no actuar si el componente fue deshabilitado
       if (!this._enabled) return;
+
+      // Pasada rápida: detectar entrada/salida de inputs de renombrado
+      // ANTES de cualquier debounce. Sin esto, mientras el usuario edita
+      // el texto el pseudo-elemento ::before sigue tapando el input
+      // hasta el próximo rebuild (~100 ms), produciendo "texto que
+      // desaparece" o que "se solapa con lo que escribo".
+      this._syncRenamingState_(mutations);
+
       // Cambio de clase en body → posible cambio de tema claro/oscuro
       const themeChanged = mutations.some(
         m => m.target === document.body && m.attributeName === 'class'
@@ -747,19 +781,70 @@ class GasFolders {
   _updateItemLabel(item, shortName) {
     const titleDiv = item.querySelector('div[title]');
     if (titleDiv) {
-      // Actualizar solo data-name (alimenta el pseudo-elemento CSS ::before).
-      // NO tocar textContent: GAS lo reconcilia y dispararía mutaciones → loop.
-      if (titleDiv.getAttribute('data-name') !== shortName) {
-        titleDiv.setAttribute('data-name', shortName);
+      // Si GAS está renombrando o creando el archivo, el title puede
+      // quedar vacío o stale por algunos ms. En ese caso conservamos el
+      // data-name anterior, y si tampoco hay anterior usamos el texto
+      // interno como último recurso para que el ítem no quede en blanco.
+      const isRenaming = !!item.querySelector('input');
+      const previous = titleDiv.getAttribute('data-name') || '';
+      let nextName = shortName;
+      if (!nextName) {
+        nextName = previous || (titleDiv.textContent || '').trim();
+      }
+      if (nextName && previous !== nextName) {
+        titleDiv.setAttribute('data-name', nextName);
       }
       // Gestionar la clase qc-renaming para ocultar el pseudo-elemento durante
       // una operación de renombrado activa (cuando GAS inyecta un <input>)
-      item.classList.toggle('qc-renaming', !!item.querySelector('input'));
+      item.classList.toggle('qc-renaming', isRenaming);
     }
     // Actualizar aria-label para consistencia de accesibilidad
     const ariaLabel = item.getAttribute('aria-label');
-    if (ariaLabel && ariaLabel !== shortName) {
+    if (ariaLabel && shortName && ariaLabel !== shortName) {
       item.setAttribute('aria-label', shortName);
+    }
+  }
+
+  /**
+   * Actualiza la clase `qc-renaming` en tiempo real cuando GAS añade/quita
+   * un `<input>` de edición de nombre. Sin esto, el pseudo-elemento
+   * `::before` con `data-name` queda tapando el input hasta el próximo
+   * rebuild (debounced ~100 ms), lo que se ve como "el texto que escribo
+   * desaparece" o "se solapa con el nombre viejo". También detecta el
+   * caso del guardado: el input se elimina y volvemos a mostrar el
+   * `data-name` correctamente.
+   *
+   * @param {MutationRecord[]} mutations
+   * @private
+   */
+  _syncRenamingState_(mutations) {
+    const seen = new Set();
+    for (const m of mutations) {
+      // Solo nos interesan childList (input añadido/quitado) y attributes
+      // sobre elementos cercanos a un li[role="option"].
+      const target = /** @type {Element} */ (m.target);
+      const li = target?.closest?.('li[role="option"]');
+      if (!li || seen.has(li)) continue;
+      seen.add(li);
+      // Estado de renombrado.
+      const renaming = !!li.querySelector('input');
+      if (li.classList.contains('qc-renaming') !== renaming) {
+        li.classList.toggle('qc-renaming', renaming);
+      }
+      // Reseed del data-name si GAS reemplazó el subárbol y se perdió.
+      // Sin esto, durante el guardado el ::before se queda sin contenido
+      // y el ítem se ve en blanco hasta el próximo rebuild (~100 ms).
+      const titleDiv = li.querySelector('div[title]');
+      if (titleDiv) {
+        const current = titleDiv.getAttribute('data-name') || '';
+        if (!current) {
+          const fullPath = titleDiv.getAttribute('title') || '';
+          const fallback = fullPath
+            ? (fullPath.includes('/') ? fullPath.split('/').pop() : fullPath)
+            : (titleDiv.textContent || '').trim();
+          if (fallback) titleDiv.setAttribute('data-name', fallback);
+        }
+      }
     }
   }
   /**
