@@ -3262,16 +3262,23 @@ class GasGithubPanel extends HTMLElement {
     if (!items.length) return this._toast_('Everything is up to date', 'ok');
 
     // Validamos si hay archivo en github y no en apps script:
-    const fileList = items
-      .map((i) => {
-        const icon = { add: '+', del: '−', mod: '~' }[i.status] ?? '•';
-        return `  ${icon}  ${i.path}`;
-      })
-      .join('\n');
+    const toOverwrite = items.filter((i) => i.status !== 'add');
+    const localOnly   = items.filter((i) => i.status === 'add');
+
+    const fileList = [
+      toOverwrite.length ? `Files to apply from remote:\n${toOverwrite.map((i) => `  ~  ${i.path}`).join('\n')}` : '',
+      localOnly.length   ? `Local only (push these, not pull):\n${localOnly.map((i) => `  +  ${i.path}`).join('\n')}` : '',
+    ].filter(Boolean).join('\n\n');
+
+    // Si TODOS los cambios son locales, no tiene sentido hacer pull.
+    if (!toOverwrite.length) {
+      this._toast_('All changes are local only. Use Push instead.', 'info', 4000);
+      return;
+    }
 
     const confirmed = await this._showConfirm_({
       title:        'Pull from repository',
-      message:      `The following ${items.length} file(s) will be overwritten with the remote version:\n\n${fileList}\n\nMake sure you don't have unsaved local work. Use Ctrl+S in GAS after pulling.`,
+      message:      `${fileList}\n\nLocal-only files will be skipped (push them separately). Files from remote will overwrite your local version.\n\nUse Ctrl+S in GAS after pulling.`,
       confirmLabel: 'Apply changes',
       tone:         'primary',
     });
@@ -3284,24 +3291,18 @@ class GasGithubPanel extends HTMLElement {
     this._toast_('Applying remote changes…', 'info', 1800);
 
     try {
-      const map = window.gasFileMap;
+      const localFiles = this._collectProjectFiles_();
       const models = window.monaco?.editor?.getModels?.() || [];
-      const byPath = new Map();
-      if (map) {
-        for (const m of models) {
-          const uri = String(m.uri || '');
-          const name = map.get(uri);
-          if (!name) continue;
-          let path = name;
-          if (!/\./.test(name)) {
-            const lang = (m.getLanguageId?.() || '').toLowerCase();
-            if (name === 'appsscript')      path = 'appsscript.json';
-            else if (lang === 'html')       path = `${name}.html`;
-            else                            path = `${name}.gs`;
-          }
-          byPath.set(path, m);
-        }
-      }
+
+      // Construir un mapa uri → model para lookup rápido
+      const modelByUri = new Map(models.map((m) => [String(m.uri || ''), m]));
+
+      // path → model usando exactamente los mismos paths que usa el diff
+      const byPath = new Map(
+        localFiles
+          .map((f) => [f.path, modelByUri.get(f.uri)])
+          .filter(([, m]) => !!m)
+      );
 
       let applied = 0;
       const skipped = [];
@@ -3337,7 +3338,13 @@ class GasGithubPanel extends HTMLElement {
         setTimeout(() => this._triggerGasSave_(), 400);
         this._toast_(`${applied} file(s) applied and saved.`, 'ok', 4500);
       }
-      if (skipped.length) this._toast_(`Skipped:\n• ${skipped.join('\n• ')}`, 'error', 5500);
+      if (skipped.length) {
+        this._toast_(
+          `${skipped.length} file(s) skipped (local only — use Push for these).`,
+          'info',
+          5000
+        );
+      }
     } finally {
       this._pulling = false;
       this._setBodyBusy_(false);
