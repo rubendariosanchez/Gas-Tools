@@ -1,5 +1,28 @@
 "use strict";
 
+/**
+ * @fileoverview Content script de Gas-Tools que vive en el contexto
+ * "isolated" del navegador. Su único trabajo es servir de **bridge**
+ * entre dos mundos que no se ven entre sí:
+ *
+ *   - Background (service worker): habla `chrome.runtime` y tiene
+ *     permisos para llamar a API externas.
+ *   - Editor en MAIN world (`gas-tools.js` + Web Components): solo puede
+ *     comunicarse vía CustomEvents en el DOM.
+ *
+ * Aquí se hace la traducción:
+ *   `chrome.runtime.sendMessage` ↔ `dispatchEvent(new CustomEvent(...))`
+ *
+ * Además inyecta los scripts de MAIN world (services, components,
+ * `gas-tools.js`, `gas-tools-main.js`) en orden, monitorea la navegación
+ * SPA de Apps Script para reinicializar al cambiar de proyecto, y
+ * propaga los `SETTINGS_UPDATED` / `DATA_UPDATED` recibidos del popup.
+ *
+ * Las constantes `GAS_EVENTS` se replican a propósito en
+ * `gas-tools-main.js` porque ese archivo se ejecuta en MAIN world y no
+ * puede importar este módulo.
+ */
+
 // ─────────────────────────────────────────────
 // CONSTANTES DE EVENTOS (compartidas con gas-tools.js vía CustomEvent)
 // Los valores string deben coincidir exactamente con los usados en el mundo MAIN.
@@ -205,7 +228,6 @@ async function injectScripts() {
     const isLast = i === scriptPaths.length - 1;
     await new Promise((resolve, reject) => {
       const el = document.createElement('script');
-      console.log(chrome.runtime.getURL(path))
       el.src = chrome.runtime.getURL(path);
       el.addEventListener('load',  () => {
         if (isLast) {
@@ -352,7 +374,6 @@ function watchForEditors(payload) {
     const present = editors.length > 0;
 
     if (present && !_editorsWerePresent) {
-      console.log('[GASTools] Editores reaparecieron, re-inicializando');
       clearAllReferences();
     }
 
@@ -375,7 +396,6 @@ async function init() {
     ]);
 
     if (settings['global-enable'] === false) {
-      console.log('[GASTools] Extensión desactivada globalmente.');
       dispatchGAS(GAS_EVENTS.GLOBAL_DISABLE);
       return;
     }

@@ -1,7 +1,20 @@
 /**
- * QUALITY CODE - Entry Point
- * Orquestación de módulos independientes.
+ * @fileoverview Entry point del popup de la extensión Gas-Tools.
+ *
+ * Bootstrap del popup HTML (`src/html/index.html`):
+ *  - Registra los Web Components usados en el popup (toggles, selects,
+ *    cards de snippets/temas, modales).
+ *  - Inicializa cada pestaña ("Settings", "Snippets", "Themes",
+ *    "AI Context", "About") delegando en módulos independientes
+ *    bajo `src/js/modules/`.
+ *  - Detecta si el popup se abre fuera del editor de GAS y notifica al
+ *    usuario (algunas opciones solo tienen sentido dentro del editor).
+ *
+ * Este archivo no contiene lógica de negocio: todo el comportamiento
+ * vive en sus respectivos módulos y se comunica con el background vía
+ * `chrome.runtime.sendMessage`.
  */
+
 // Importación de componentes Web y constantes globales
 import { OptionToggle } from '../components/OptionToggle.js';
 import { OptionSelect } from '../components/OptionSelect.js';

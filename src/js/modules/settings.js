@@ -1,3 +1,15 @@
+/**
+ * @fileoverview Módulo "Settings" del popup.
+ *
+ * Pinta y persiste los toggles, selects y colores de la pestaña
+ * "Settings" del popup. Lee/escribe a IndexedDB (singleton `DB`) y
+ * notifica a los editores activos vía `notifyEditors()` para que
+ * propaguen los cambios sin recargar.
+ *
+ * También aloja el sub-módulo "AI Context" que gestiona los prompts
+ * de sistema personalizados.
+ */
+
 import { G_PROPERTY_NAME, DEFAULT_SETTINGS_OPTIONS } from '../utils/Variables.js';
 import { Toast } from '../utils/Toast.js';
 import { ConfirmDialog } from '../utils/ConfirmDialog.js';

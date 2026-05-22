@@ -1,3 +1,13 @@
+/**
+ * @fileoverview Módulo "Themes" del popup.
+ *
+ * Lista, filtra (default vs custom), duplica, edita y elimina temas.
+ * Los temas predefinidos viven en `THEME_LIST` (catálogo importado de
+ * `JeanRemiDelteil/appsScriptColor`); los personalizados se guardan en
+ * IndexedDB. Tras cualquier cambio notifica al editor activo para que
+ * aplique el tema sin reload.
+ */
+
 import { G_PROPERTY_NAME } from '../utils/Variables.js';
 import { THEME_LIST } from '../utils/Themes.js';
 import { Toast } from '../utils/Toast.js';

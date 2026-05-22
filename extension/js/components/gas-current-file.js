@@ -44,6 +44,7 @@ class GasCurrentFile extends HTMLElement {
   }
 
   connectedCallback() {
+    DomUtils.syncHostTheme(this);
     this._render_();
     document.addEventListener('mousedown', this._onDocumentMouseDown, true);
     window.addEventListener('keydown',     this._onWindowKeyDown);
@@ -102,10 +103,7 @@ class GasCurrentFile extends HTMLElement {
   open(anchorEl) {
     if (anchorEl) this._anchorEl = anchorEl;
     // Cerramos paneles que ocuparían el mismo espacio visual.
-    document.querySelector('gas-search-panel')?.close?.();
-    document.querySelector('gas-chat-panel')?.close?.();
-    document.querySelector('gas-actions-panel')?.close?.();
-    document.querySelector('gas-github-panel')?.close?.();
+    DomUtils.closeOtherFloatingPanels('gas-current-file');
     this._popoverOpen = true;
     this._renderPopover_(this._collectInfo_());
     this._positionPopover_();
@@ -141,6 +139,9 @@ class GasCurrentFile extends HTMLElement {
   _render_() {
     DomUtils.setHTML(this.shadowRoot, `
       <style>
+        /* Design tokens compartidos: ver DomUtils.themeTokensCss(). */
+        ${DomUtils.themeTokensCss()}
+
         :host {
           position: fixed;
           top: 0;
@@ -152,13 +153,13 @@ class GasCurrentFile extends HTMLElement {
 
         .qc__popover {
           position: fixed;
-          background: #ffffff;
-          border: 1px solid rgba(0,0,0,0.08);
+          background: var(--gc-bg-elevated);
+          border: 1px solid var(--gc-border);
           border-radius: 12px;
-          box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+          box-shadow: var(--gc-shadow-menu);
           padding: 0;
           font-size: 12px;
-          color: #3c4043;
+          color: var(--gc-text);
           width: 280px;
           overflow: visible;
           display: none;
@@ -179,19 +180,19 @@ class GasCurrentFile extends HTMLElement {
           border-left: 7px solid transparent;
           border-right: 7px solid transparent;
         }
-        .qc__popover::before { border-bottom: 7px solid #d2e3fc; }
-        .qc__popover::after  { top: -6px; border-bottom: 7px solid #e8f0fe; }
+        .qc__popover::before { border-bottom: 7px solid var(--gc-border); }
+        .qc__popover::after  { top: -6px; border-bottom: 7px solid var(--gc-accent-dim); }
 
         .qc__popover.qc__above::before,
         .qc__popover.qc__above::after {
           top: auto;
           bottom: -7px;
           border-bottom: none;
-          border-top: 7px solid #d2e3fc;
+          border-top: 7px solid var(--gc-border);
         }
         .qc__popover.qc__above::after {
           bottom: -6px;
-          border-top-color: #ffffff;
+          border-top-color: var(--gc-bg-elevated);
         }
 
         /* Cabecera con icono + nombre destacado (color sólido). */
@@ -200,8 +201,8 @@ class GasCurrentFile extends HTMLElement {
           align-items: center;
           gap: 10px;
           padding: 12px 14px;
-          background: #e8f0fe;
-          border-bottom: 1px solid #d2e3fc;
+          background: var(--gc-accent-dim);
+          border-bottom: 1px solid var(--gc-border);
           border-top-left-radius: 12px;
           border-top-right-radius: 12px;
         }
@@ -212,7 +213,7 @@ class GasCurrentFile extends HTMLElement {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: #ffffff;
+          background: var(--gc-bg-elevated);
           border-radius: 8px;
           box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         }
@@ -221,7 +222,7 @@ class GasCurrentFile extends HTMLElement {
           flex: 1 1 auto;
           font-size: 13px;
           font-weight: 600;
-          color: #174ea6;
+          color: var(--gc-accent);
           word-break: break-all;
           line-height: 1.3;
         }
@@ -236,8 +237,8 @@ class GasCurrentFile extends HTMLElement {
           margin-bottom: 12px;
         }
         .qc__stat {
-          background: #f1f3f4;
-          border: 1px solid #e8eaed;
+          background: var(--gc-bg-raised);
+          border: 1px solid var(--gc-border);
           border-radius: 8px;
           padding: 8px 6px;
           text-align: center;
@@ -245,20 +246,20 @@ class GasCurrentFile extends HTMLElement {
         .qc__stat-value {
           font-size: 14px;
           font-weight: 700;
-          color: #202124;
+          color: var(--gc-text);
           line-height: 1.2;
         }
         .qc__stat-label {
           font-size: 10px;
           text-transform: uppercase;
           letter-spacing: 0.4px;
-          color: #5f6368;
+          color: var(--gc-text-muted);
           margin-top: 2px;
         }
 
         .qc__section-title {
           font-weight: 600;
-          color: #202124;
+          color: var(--gc-text);
           font-size: 11px;
           text-transform: uppercase;
           letter-spacing: 0.5px;
@@ -283,19 +284,19 @@ class GasCurrentFile extends HTMLElement {
           padding: 8px 10px;
           border-radius: 6px;
           font-size: 12px;
-          background: #ffffff;
-          border: 1px solid #e8eaed;
+          background: var(--gc-bg-elevated);
+          border: 1px solid var(--gc-border);
           border-left-width: 3px;
         }
         .qc__marker.qc__zero {
-          background: #fafafa;
-          border-color: #ececec;
-          border-left-color: #dadce0;
-          color: #80868b;
+          background: var(--gc-bg-raised);
+          border-color: var(--gc-border);
+          border-left-color: var(--gc-border);
+          color: var(--gc-text-muted);
         }
-        .qc__marker.qc__has.qc__error   { border-left-color: #d93025; background: #fce8e6; border-color: #f5c8c2; }
-        .qc__marker.qc__has.qc__warning { border-left-color: #f9ab00; background: #fef7e0; border-color: #f5dca0; }
-        .qc__marker.qc__has.qc__info    { border-left-color: #1a73e8; background: #e8f0fe; border-color: #c6dafc; }
+        .qc__marker.qc__has.qc__error   { border-left-color: var(--gc-red);   background: var(--gc-red-dim);   border-color: var(--gc-red-soft); }
+        .qc__marker.qc__has.qc__warning { border-left-color: var(--gc-amber); background: var(--gc-amber-soft); border-color: var(--gc-amber-soft); }
+        .qc__marker.qc__has.qc__info    { border-left-color: var(--gc-accent); background: var(--gc-info-soft); border-color: var(--gc-accent-glow); }
 
         .qc__circle {
           width: 10px;
@@ -303,19 +304,19 @@ class GasCurrentFile extends HTMLElement {
           border-radius: 50%;
           flex: 0 0 auto;
         }
-        .qc__circle.qc__error   { background: #d93025; }
-        .qc__circle.qc__warning { background: #f9ab00; }
-        .qc__circle.qc__info    { background: #1a73e8; }
+        .qc__circle.qc__error   { background: var(--gc-red); }
+        .qc__circle.qc__warning { background: var(--gc-amber); }
+        .qc__circle.qc__info    { background: var(--gc-accent); }
 
-        .qc__marker .qc__label { flex: 1 1 auto; color: #3c4043; font-weight: 500; }
-        .qc__marker.qc__zero .qc__label { color: #80868b; font-weight: 500; }
+        .qc__marker .qc__label { flex: 1 1 auto; color: var(--gc-text); font-weight: 500; }
+        .qc__marker.qc__zero .qc__label { color: var(--gc-text-muted); font-weight: 500; }
         .qc__marker .qc__count {
           font-weight: 700;
-          color: #202124;
+          color: var(--gc-text);
           min-width: 18px;
           text-align: right;
         }
-        .qc__marker.qc__zero .qc__count { color: #9aa0a6; font-weight: 600; }
+        .qc__marker.qc__zero .qc__count { color: var(--gc-text-faint); font-weight: 600; }
       </style>
 
       <div class="qc__popover" id="qcPopover" role="dialog" aria-label="File info"></div>

@@ -1,3 +1,16 @@
+/**
+ * @fileoverview <gas-search-panel> - Búsqueda multi-archivo en el IDE de GAS.
+ *
+ * Componente Web Component que indexa todos los modelos Monaco abiertos y
+ * permite buscar coincidencias por archivo. Soporta navegación con teclado
+ * (ArrowUp / ArrowDown / Enter) y atajo global `Alt+Shift+F`.
+ *
+ * API pública mínima: `open(anchor)`, `close()`, `toggle(anchor)`,
+ * `setEditor(editor)`, `setAnchor(el)`.
+ *
+ * Sigue la convención de componentes flotantes (ver
+ * `DomUtils.FLOATING_PANEL_TAGS`): solo un panel visible a la vez.
+ */
 class GasSearchPanel extends HTMLElement {
   constructor() {
     super();
@@ -77,6 +90,7 @@ class GasSearchPanel extends HTMLElement {
     this._onSplitterEnd       = this._onSplitterEnd.bind(this);
   }
   connectedCallback() {
+    DomUtils.syncHostTheme(this);
     this.render();
     this.setupListeners();
   }
@@ -115,10 +129,7 @@ class GasSearchPanel extends HTMLElement {
   open(anchorEl = null) {
     if (anchorEl) this.setAnchor(anchorEl);
     // Cerrar otros paneles flotantes: solo uno visible a la vez.
-    document.querySelector('gas-chat-panel')?.close?.();
-    document.querySelector('gas-actions-panel')?.close?.();
-    document.querySelector('gas-current-file')?.close?.();
-    document.querySelector('gas-github-panel')?.close?.();
+    DomUtils.closeOtherFloatingPanels('gas-search-panel');
     this.style.display       = 'block';
     this.style.pointerEvents = 'auto';
     this._repositionPanel(true);
@@ -193,6 +204,9 @@ class GasSearchPanel extends HTMLElement {
   render() {
     DomUtils.setHTML(this.shadowRoot, `
       <style>
+        /* Design tokens compartidos: ver DomUtils.themeTokensCss(). */
+        ${DomUtils.themeTokensCss()}
+
         :host {
           display: none;
           pointer-events: none;
@@ -208,23 +222,18 @@ class GasSearchPanel extends HTMLElement {
           min-height: 280px;
           max-width: 700px;
           max-height: calc(100vh - 84px);
-          background: #ffffff;
-          color: #202124;
-          border: 1px solid #dadce0;
-          border-radius: 10px;
-          box-shadow: 0 10px 38px rgba(60,64,67,.24), 0 2px 8px rgba(60,64,67,.18);
-          font-family: "Google Sans", Roboto, Arial, sans-serif;
+          background: var(--gc-bg);
+          color: var(--gc-text);
+          border: 1px solid var(--gc-border);
+          border-radius: var(--gc-r-md);
+          box-shadow: var(--gc-shadow-panel);
+          font-family: var(--gc-font);
           overflow: hidden;
           animation: gc__panelIn .16s ease-out;
         }
         @keyframes gc__panelIn {
           from { transform: translateX(8px); opacity: 0; }
           to   { transform: translateX(0);   opacity: 1; }
-        }
-        :host([theme="dark"]) {
-          background: #202124;
-          color: #e8eaed;
-          border-color: #3c4043;
         }
         .gc__shell {
           display: flex;
@@ -239,12 +248,8 @@ class GasSearchPanel extends HTMLElement {
           padding: 7px 8px;
           cursor: move;
           user-select: none;
-          border-bottom: 1px solid #eceff1;
-          background: linear-gradient(to bottom, rgba(248,249,250,.9), rgba(248,249,250,.6));
-        }
-        :host([theme="dark"]) .gc__header {
-          border-bottom-color: #3c4043;
-          background: linear-gradient(to bottom, rgba(32,33,36,.95), rgba(32,33,36,.75));
+          border-bottom: 1px solid var(--gc-border);
+          background: var(--gc-bg-raised);
         }
         .gc__icon {
           width: 20px;
@@ -254,7 +259,7 @@ class GasSearchPanel extends HTMLElement {
           place-items: center;
           font-size: 11px;
           background: rgba(26,115,232,.12);
-          color: #1a73e8;
+          color: var(--gc-accent);
           flex: 0 0 auto;
         }
         .gc__input {
@@ -264,7 +269,7 @@ class GasSearchPanel extends HTMLElement {
           border-radius: 8px;
           outline: none;
           font-size: 12px;
-          background: #ffffff;
+          background: var(--gc-bg-elevated);
           color: inherit;
           user-select: text;
           padding: 0 9px;
@@ -274,15 +279,10 @@ class GasSearchPanel extends HTMLElement {
           border-color: #a8c7fa;
           box-shadow: 0 0 0 2px rgba(26,115,232,.12);
         }
-        :host([theme="dark"]) .gc__input {
-          background: #202124;
-          border-color: #3c4043;
-          color: #e8eaed;
-        }
         .gc__close {
           border: none;
           background: transparent;
-          color: #5f6368;
+          color: var(--gc-text-muted);
           width: 30px;
           height: 30px;
           border-radius: 8px;
@@ -292,7 +292,6 @@ class GasSearchPanel extends HTMLElement {
           flex: 0 0 auto;
         }
         .gc__close:hover { background: rgba(95,99,104,.14); }
-        :host([theme="dark"]) .gc__close { color: #bdc1c6; }
         /* ── Barra de metadata (totales + hint de teclado) ── */
         .gc__meta {
           display: flex;
@@ -301,16 +300,11 @@ class GasSearchPanel extends HTMLElement {
           gap: 6px;
           padding: 4px 8px;
           font-size: 10px;
-          color: #5f6368;
-          border-bottom: 1px solid #eceff1;
-          background: #fff;
+          color: var(--gc-text-muted);
+          border-bottom: 1px solid var(--gc-border);
+          background: var(--gc-bg-elevated);
           white-space: nowrap;
           overflow: hidden;
-        }
-        :host([theme="dark"]) .gc__meta {
-          color: #9aa0a6;
-          border-bottom-color: #3c4043;
-          background: #202124;
         }
         #gc__summary {
           overflow: hidden;
@@ -320,7 +314,7 @@ class GasSearchPanel extends HTMLElement {
         }
         #gc__hint {
           flex: 0 0 auto;
-          color: #80868b;
+          color: var(--gc-text-muted);
         }
         /* ── Layout de dos columnas: archivos | resultados ── */
         .gc__content {
@@ -332,15 +326,12 @@ class GasSearchPanel extends HTMLElement {
         .gc__splitter {
           width: 4px;
           flex: 0 0 4px;
-          background: #eceff1;
+          background: var(--gc-border);
           cursor: col-resize;
           transition: background .15s;
         }
         .gc__splitter:hover,
-        .gc__splitter.gc__splitterActive { background: #a8c7fa; }
-        :host([theme="dark"]) .gc__splitter { background: #3c4043; }
-        :host([theme="dark"]) .gc__splitter:hover,
-        :host([theme="dark"]) .gc__splitter.gc__splitterActive { background: #4b6286; }
+        .gc__splitter.gc__splitterActive { background: var(--gc-accent); }
         /* ── Panel izquierdo: lista de archivos con contador ── */
         .gc__models {
           flex: 0 0 140px;
@@ -348,12 +339,8 @@ class GasSearchPanel extends HTMLElement {
           max-width: 60%;
           border-right: none; /* el splitter hace de separador */
           overflow: auto;
-          background: #fff;
+          background: var(--gc-bg-elevated);
           padding: 5px;
-        }
-        :host([theme="dark"]) .gc__models {
-          border-right-color: #3c4043;
-          background: #202124;
         }
         .gc__modelItem {
           width: 100%;
@@ -373,18 +360,12 @@ class GasSearchPanel extends HTMLElement {
           align-items: center;
           gap: 4px;
         }
-        .gc__modelItem:hover { background: #f1f3f4; }
+        .gc__modelItem:hover { background: var(--gc-bg-raised); }
         .gc__modelItem.gc__active {
-          background: #e8f0fe;
-          border-color: #d2e3fc;
-          color: #174ea6;
+          background: var(--gc-accent-dim);
+          border-color: var(--gc-accent-glow);
+          color: var(--gc-accent);
           font-weight: 600;
-        }
-        :host([theme="dark"]) .gc__modelItem:hover { background: #303134; }
-        :host([theme="dark"]) .gc__modelItem.gc__active {
-          background: #344864;
-          border-color: #4b6286;
-          color: #d2e3fc;
         }
         /* Contador de coincidencias que precede al nombre del archivo */
         .gc__modelCount {
@@ -398,21 +379,13 @@ class GasSearchPanel extends HTMLElement {
           font-size: 9px;
           font-weight: 700;
           background: rgba(26,115,232,.13);
-          color: #1a73e8;
+          color: var(--gc-accent);
           flex: 0 0 auto;
           line-height: 14px;
         }
         .gc__modelItem.gc__active .gc__modelCount {
-          background: rgba(23,78,166,.18);
-          color: #174ea6;
-        }
-        :host([theme="dark"]) .gc__modelCount {
-          background: rgba(138,180,248,.15);
-          color: #8ab4f8;
-        }
-        :host([theme="dark"]) .gc__modelItem.gc__active .gc__modelCount {
-          background: rgba(210,227,252,.15);
-          color: #d2e3fc;
+          background: var(--gc-accent-glow);
+          color: var(--gc-accent);
         }
         .gc__modelLabel {
           overflow: hidden;
@@ -426,55 +399,42 @@ class GasSearchPanel extends HTMLElement {
           flex: 1;
           min-width: 0;
           overflow: auto;
-          background: #f8f9fa;
+          background: var(--gc-bg-raised);
           padding: 6px;
         }
-        :host([theme="dark"]) .gc__results { background: #202124; }
         .gc__empty {
           padding: 12px;
-          color: #70757a;
+          color: var(--gc-text-faint);
           font-size: 11px;
         }
         .gc__group {
-          border: 1px solid #e6e9ec;
+          border: 1px solid var(--gc-border);
           border-radius: 8px;
-          background: #fff;
+          background: var(--gc-bg-elevated);
           overflow: hidden;
-        }
-        :host([theme="dark"]) .gc__group {
-          border-color: #3c4043;
-          background: #2a2b2f;
         }
         .gc__groupTitle {
           font-size: 10px;
           font-weight: 600;
-          color: #3c4043;
+          color: var(--gc-text);
           padding: 6px 8px;
-          background: #f1f3f4;
-          border-bottom: 1px solid #eceff1;
+          background: var(--gc-bg-raised);
+          border-bottom: 1px solid var(--gc-border);
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-        }
-        :host([theme="dark"]) .gc__groupTitle {
-          color: #e8eaed;
-          background: #303134;
-          border-bottom-color: #3c4043;
         }
         .gc__item {
           display: flex;
           align-items: center;
           gap: 6px;
           padding: 6px 8px;
-          border-bottom: 1px solid #f1f3f4;
+          border-bottom: 1px solid var(--gc-border);
           cursor: pointer;
         }
         .gc__item:last-child { border-bottom: none; }
-        .gc__item:hover { background: #eef3fd; }
-        .gc__item.gc__active { background: #d2e3fc; }
-        :host([theme="dark"]) .gc__item { border-bottom-color: #3c4043; }
-        :host([theme="dark"]) .gc__item:hover { background: #2d3a52; }
-        :host([theme="dark"]) .gc__item.gc__active { background: #344864; }
+        .gc__item:hover { background: var(--gc-accent-dim); }
+        .gc__item.gc__active { background: var(--gc-accent-glow); }
         .gc__lineBadge {
           flex: 0 0 auto;
           min-width: 48px;
@@ -484,7 +444,7 @@ class GasSearchPanel extends HTMLElement {
           font-weight: 600;
           display: grid;
           place-items: center;
-          color: #1a73e8;
+          color: var(--gc-accent);
           background: rgba(26,115,232,.12);
         }
         .gc__code {

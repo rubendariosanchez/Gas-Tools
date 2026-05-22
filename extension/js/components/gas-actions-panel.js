@@ -36,6 +36,7 @@ class GasActionsPanel extends HTMLElement {
   }
 
   connectedCallback() {
+    DomUtils.syncHostTheme(this);
     this._render_();
     this._watchSidebar_();
     document.addEventListener('mousedown', this._onDocumentMouseDown, true);
@@ -62,10 +63,7 @@ class GasActionsPanel extends HTMLElement {
    */
   open(anchorEl) {
     if (anchorEl) this._anchorEl = anchorEl;
-    document.querySelector('gas-search-panel')?.close?.();
-    document.querySelector('gas-chat-panel')?.close?.();
-    document.querySelector('gas-current-file')?.close?.();
-    document.querySelector('gas-github-panel')?.close?.();
+    DomUtils.closeOtherFloatingPanels('gas-actions-panel');
     this._open = true;
     this._renderPopover_();
     this._positionPopover_();
@@ -97,6 +95,9 @@ class GasActionsPanel extends HTMLElement {
   _render_() {
     DomUtils.setHTML(this.shadowRoot, `
       <style>
+        /* Design tokens compartidos: ver DomUtils.themeTokensCss(). */
+        ${DomUtils.themeTokensCss()}
+
         :host {
           position: fixed;
           top: 0;
@@ -126,13 +127,13 @@ class GasActionsPanel extends HTMLElement {
 
         .qc__popover {
           position: fixed;
-          background: #ffffff;
-          border: 1px solid rgba(0,0,0,0.08);
+          background: var(--gc-bg-elevated);
+          border: 1px solid var(--gc-border);
           border-radius: 12px;
-          box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+          box-shadow: var(--gc-shadow-menu);
           padding: 0;
           font-size: 12px;
-          color: #3c4043;
+          color: var(--gc-text);
           width: 280px;
           overflow: visible;
           display: none;
@@ -152,19 +153,19 @@ class GasActionsPanel extends HTMLElement {
           border-left: 7px solid transparent;
           border-right: 7px solid transparent;
         }
-        .qc__popover::before { border-bottom: 7px solid #d2e3fc; }
-        .qc__popover::after  { top: -6px; border-bottom: 7px solid #e8f0fe; }
+        .qc__popover::before { border-bottom: 7px solid var(--gc-border); }
+        .qc__popover::after  { top: -6px; border-bottom: 7px solid var(--gc-accent-dim); }
 
         .qc__popover.qc__above::before,
         .qc__popover.qc__above::after {
           top: auto;
           bottom: -7px;
           border-bottom: none;
-          border-top: 7px solid #d2e3fc;
+          border-top: 7px solid var(--gc-border);
         }
         .qc__popover.qc__above::after {
           bottom: -6px;
-          border-top-color: #ffffff;
+          border-top-color: var(--gc-bg-elevated);
         }
 
         .qc__pop-header {
@@ -172,8 +173,8 @@ class GasActionsPanel extends HTMLElement {
           align-items: center;
           gap: 10px;
           padding: 10px 14px;
-          background: #e8f0fe;
-          border-bottom: 1px solid #d2e3fc;
+          background: var(--gc-accent-dim);
+          border-bottom: 1px solid var(--gc-border);
           border-top-left-radius: 12px;
           border-top-right-radius: 12px;
         }
@@ -184,16 +185,16 @@ class GasActionsPanel extends HTMLElement {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: #ffffff;
+          background: var(--gc-bg-elevated);
           border-radius: 8px;
           box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-          color: #1a73e8;
+          color: var(--gc-accent);
         }
         .qc__pop-icon .material-icons { font-size: 18px; }
         .qc__pop-title {
           font-size: 13px;
           font-weight: 600;
-          color: #174ea6;
+          color: var(--gc-accent);
         }
 
         .qc__pop-body { padding: 6px; }
@@ -203,7 +204,7 @@ class GasActionsPanel extends HTMLElement {
           font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 0.5px;
-          color: #5f6368;
+          color: var(--gc-text-muted);
           padding: 6px 8px 4px;
         }
 
@@ -218,18 +219,18 @@ class GasActionsPanel extends HTMLElement {
           border-radius: 6px;
           font: inherit;
           font-size: 12px;
-          color: #202124;
+          color: var(--gc-text);
           text-align: left;
           cursor: pointer;
         }
-        .qc__action:hover { background: #f1f3f4; }
+        .qc__action:hover { background: var(--gc-bg-raised); }
         .qc__action:focus-visible {
-          outline: 2px solid #1a73e8;
+          outline: 2px solid var(--gc-accent);
           outline-offset: -2px;
         }
         .qc__action-icon {
           flex: 0 0 auto;
-          color: #5f6368;
+          color: var(--gc-text-muted);
           display: inline-flex;
           align-items: center;
           justify-content: center;
@@ -239,7 +240,7 @@ class GasActionsPanel extends HTMLElement {
         .qc__action-meta {
           flex: 0 0 auto;
           font-size: 11px;
-          color: #5f6368;
+          color: var(--gc-text-muted);
         }
 
         /* Toggle pill al final de la fila. */
@@ -252,12 +253,12 @@ class GasActionsPanel extends HTMLElement {
           letter-spacing: 0.4px;
           text-transform: uppercase;
         }
-        .qc__pill.qc__on  { background: #e6f4ea; color: #137333; }
-        .qc__pill.qc__off { background: #f1f3f4; color: #5f6368; }
+        .qc__pill.qc__on  { background: var(--gc-green-soft); color: var(--gc-green-text); }
+        .qc__pill.qc__off { background: var(--gc-bg-raised); color: var(--gc-text-muted); }
 
-        .qc__action.qc__danger { color: #d93025; }
-        .qc__action.qc__danger .qc__action-icon { color: #d93025; }
-        .qc__action.qc__danger:hover { background: #fce8e6; }
+        .qc__action.qc__danger { color: var(--gc-red-text); }
+        .qc__action.qc__danger .qc__action-icon { color: var(--gc-red-text); }
+        .qc__action.qc__danger:hover { background: var(--gc-red-dim); }
 
         /* Fila estática (no clicable) con label + botón ícono al final.
            Usada para "Script ID" donde el ID se mantiene oculto y el
@@ -268,11 +269,11 @@ class GasActionsPanel extends HTMLElement {
           gap: 10px;
           padding: 8px 10px;
           font-size: 12px;
-          color: #202124;
+          color: var(--gc-text);
         }
         .qc__row .qc__action-icon {
           flex: 0 0 auto;
-          color: #5f6368;
+          color: var(--gc-text-muted);
           display: inline-flex;
         }
         .qc__row .qc__action-icon .material-icons { font-size: 18px; }
@@ -290,18 +291,18 @@ class GasActionsPanel extends HTMLElement {
           margin: 0;
           box-sizing: border-box;
           cursor: pointer;
-          color: #1a73e8;
+          color: var(--gc-accent);
           display: inline-flex;
           align-items: center;
           justify-content: center;
           line-height: 1;
         }
         .qc__icon-btn:hover {
-          background: #e8f0fe;
-          border-color: #c6dafc;
+          background: var(--gc-accent-dim);
+          border-color: var(--gc-accent-glow);
         }
         .qc__icon-btn:disabled {
-          color: #9aa0a6;
+          color: var(--gc-text-faint);
           cursor: default;
         }
         .qc__icon-btn:disabled:hover { background: transparent; border-color: transparent; }
@@ -310,11 +311,15 @@ class GasActionsPanel extends HTMLElement {
           line-height: 1;
           display: block;
         }
-        .qc__icon-btn.qc__copied { color: #137333; background: #e6f4ea; border-color: #ceead6; }
+        .qc__icon-btn.qc__copied {
+          color: var(--gc-green-text);
+          background: var(--gc-green-soft);
+          border-color: var(--gc-green-dim);
+        }
 
         .qc__divider {
           height: 1px;
-          background: #e8eaed;
+          background: var(--gc-border);
           margin: 4px 6px;
         }
       </style>
@@ -755,7 +760,7 @@ class GasActionsPanel extends HTMLElement {
         'left:50%',
         'bottom:8px',
         'transform:translateX(-50%)',
-        'background:#202124',
+        'background: var(--gc-bg)',
         'color:#fff',
         'padding:6px 10px',
         'border-radius:6px',

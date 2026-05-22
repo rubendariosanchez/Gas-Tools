@@ -6,6 +6,8 @@ import { G_PROPERTY_NAME } from '../../../src/js/utils/Variables.js';
 import { THEME_LIST } from '../../../src/js/utils/Themes.js';
 // Importa el helper de IndexedDB para temas personalizados
 import { DB } from '../../../src/js/utils/Storage.js';
+// Helper compartido para construir errores HTTP legibles
+import { readHttpError } from './_http-utils.js';
 
 /**
  * Resuelve el tema activo desde chrome.storage y, si es necesario, desde IndexedDB.
@@ -76,7 +78,7 @@ async function fetchThemeJson(themeText) {
  * @param {string}   cfg.apiKey           - Clave de API del proveedor.
  * @param {string}   cfg.model            - Modelo a utilizar.
  * @param {Array}    cfg.messages         - Arreglo de mensajes en formato chat.
- * @param {number}  [cfg.temperature=0.3] - Temperatura de muestreo (0–1).
+ * @param {number}  [cfg.temperature=0.3] - Temperatura de muestreo (0�1).
  * @returns {Promise<string>} Texto de respuesta generado por el modelo.
  * @throws {Error} Si falta apiKey, provider o messages, o si el provider es desconocido.
  */
@@ -88,16 +90,38 @@ export async function callLlmProvider(cfg) {
   if (provider !== 'custom' && !apiKey) throw new Error('API key vacía.');
   if (!Array.isArray(messages) || !messages.length) throw new Error('No hay mensajes.');
 
-  // Mapa de proveedores: cada entrada es una función lazy que ejecuta la llamada correspondiente
+  // Configuración de proveedores compatibles con el formato OpenAI:
+  // todos comparten payload `{ model, messages, temperature }` y leen
+  // `choices[0].message.content`. Solo cambia URL y headers extra.
+  const compatible = OPENAI_COMPATIBLE_PROVIDERS[provider];
+  if (compatible) {
+    return _callOpenAICompatible({
+      ...compatible,
+      apiKey,
+      model,
+      messages,
+      temperature,
+    });
+  }
+
+  // Custom usa la URL provista por el usuario (LM Studio, Ollama, etc.).
+  if (provider === 'custom') {
+    if (!endpointUrl) throw new Error('Falta el Endpoint URL para el proveedor Custom.');
+    return _callOpenAICompatible({
+      url: endpointUrl,
+      apiKey,
+      model,
+      messages,
+      temperature,
+      // Permitimos apiKey vacía: algunos servidores locales fallan con Authorization vacío.
+      allowMissingApiKey: true,
+    });
+  }
+
+  // Proveedores con contrato propio (no OpenAI-compatible).
   const PROVIDERS = {
-    openai: () => _callOpenAI(apiKey, model, messages, temperature),
     anthropic: () => _callAnthropic(apiKey, model, messages, temperature),
     gemini: () => _callGemini(apiKey, model, messages, temperature),
-    deepseek: () => _callDeepSeek(apiKey, model, messages, temperature),
-    chatllm: () => _callChatLLM(apiKey, model, messages, temperature),
-    nvidia: () => _callNvidia(apiKey, model, messages, temperature),
-    openrouter: () => _callOpenRouter(apiKey, model, messages, temperature),
-    custom: () => _callCustom(apiKey, model, messages, temperature, endpointUrl),
   };
 
   // Busca el handler del proveedor solicitado
@@ -115,67 +139,104 @@ export async function callLlmProvider(cfg) {
  * @returns {Promise<Error>} Error con el status HTTP y los primeros 240 caracteres del cuerpo.
  */
 async function _readErr(res) {
-  let body = '';
-  // Intenta leer el cuerpo del error; lo ignora si la respuesta no tiene body
-  try { body = await res.text(); } catch (_) { /* sin cuerpo */ }
-  // Trunca el mensaje a 240 caracteres para evitar errores demasiado verbosos
-  return new Error(`HTTP ${res.status} ${res.statusText}: ${body.slice(0, 240)}`);
+  return readHttpError(res);
 }
 
 /**
- * Realiza una solicitud genérica a un endpoint compatible con la API de OpenAI (ej. LM Studio, Ollama).
- * 
+ * Tabla de proveedores que respetan el contrato OpenAI (`POST /chat/completions`
+ * con `{ model, messages, temperature }` y `choices[0].message.content` en la
+ * respuesta). Se procesan todos por `_callOpenAICompatible`.
+ *
+ * @type {Object<string, {
+ *   url: string,
+ *   extraHeaders?: Object<string, string>,
+ *   modelMap?: Object<string, string>,
+ *   requireContent?: boolean
+ * }>}
+ */
+const OPENAI_COMPATIBLE_PROVIDERS = {
+  openai: {
+    url: 'https://api.openai.com/v1/chat/completions',
+  },
+  deepseek: {
+    url: 'https://api.deepseek.com/v1/chat/completions',
+  },
+  chatllm: {
+    url: 'https://apps.abacus.ai/v1/chat/completions',
+  },
+  openrouter: {
+    url: 'https://openrouter.ai/api/v1/chat/completions',
+    // Headers opcionales que OpenRouter usa para identificación de la app
+    extraHeaders: {
+      'HTTP-Referer': 'https://github.com/rubendariosanchez/Gas-Tools',
+      'X-Title': 'Gas-Tools Extension',
+    },
+  },
+  nvidia: {
+    url: 'https://integrate.api.nvidia.com/v1/chat/completions',
+    // NVIDIA expone alias cortos pero requiere el ID completo en la request
+    modelMap: {
+      'deepseek-v4-pro':   'deepseek-ai/deepseek-v4-pro',
+      'deepseek-v4-flash': 'deepseek-ai/deepseek-v4',
+      'deepseek-chat':     'deepseek-ai/deepseek-r1-0528',
+      'deepseek-reasoner': 'deepseek-ai/deepseek-r1',
+    },
+    // NVIDIA a veces responde 200 OK con choices vacío; se trata como error
+    requireContent: true,
+  },
+};
+
+/**
+ * Realiza una solicitud a cualquier endpoint compatible con la API de OpenAI.
+ * Maneja URL, headers extra, traducción de alias de modelo y validación de
+ * contenido para los proveedores listados en `OPENAI_COMPATIBLE_PROVIDERS`.
+ *
  * @async
- * @param {string} apiKey      - Clave de API (puede ser vacía o ignorada por servidores locales).
- * @param {string} model       - Identificador del modelo local.
- * @param {Array}  messages    - Historial de mensajes.
- * @param {number} temperature - Temperatura de muestreo.
- * @param {string} endpointUrl - URL completa del endpoint (ej. http://localhost:11434/v1/chat/completions).
+ * @param {Object} cfg
+ * @param {string} cfg.url                  - URL completa del endpoint chat/completions.
+ * @param {string} cfg.apiKey               - API key (Bearer); puede ser vacía si `allowMissingApiKey`.
+ * @param {string} cfg.model                - Identificador del modelo.
+ * @param {Array}  cfg.messages             - Historial de mensajes en formato chat.
+ * @param {number} cfg.temperature          - Temperatura de muestreo.
+ * @param {Object} [cfg.extraHeaders]       - Headers adicionales (ej. HTTP-Referer).
+ * @param {Object} [cfg.modelMap]           - Diccionario alias� modelId real.
+ * @param {boolean}[cfg.requireContent]     - Si true, lanza error cuando no haya `content`.
+ * @param {boolean}[cfg.allowMissingApiKey] - Permite Authorization vacío (Custom local).
  * @returns {Promise<string>} Texto de la respuesta del modelo.
  */
-async function _callCustom(apiKey, model, messages, temperature, endpointUrl) {
-  if (!endpointUrl) throw new Error('Falta el Endpoint URL para el proveedor Custom.');
+async function _callOpenAICompatible(cfg) {
+  const {
+    url, apiKey, model, messages, temperature,
+    extraHeaders, modelMap, requireContent, allowMissingApiKey,
+  } = cfg;
 
-  const headers = { 'Content-Type': 'application/json' };
-  // Algunos servidores locales fallan si enviamos un header de Auth vacío,
-  // así que solo lo incluimos si el usuario proporcionó una API Key explícita.
-  if (apiKey) {
+  const headers = { 'Content-Type': 'application/json', ...(extraHeaders || {}) };
+  // Solo añadimos Authorization si hay apiKey o si no se permite vacía
+  if (apiKey || !allowMissingApiKey) {
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
 
-  const res = await fetch(endpointUrl, {
+  const res = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ model, messages, temperature }),
+    body: JSON.stringify({
+      model: modelMap?.[model] ?? model,
+      messages,
+      // Garantiza un número siempre; 0.3 como fallback seguro
+      temperature: typeof temperature === 'number' ? temperature : 0.3,
+      stream: false,
+    }),
   });
 
   if (!res.ok) throw await _readErr(res);
-  return (await res.json())?.choices?.[0]?.message?.content ?? '';
-}
 
-/**
- * Realiza una solicitud de completación de chat a la API de OpenAI.
- *
- * @async
- * @param {string} apiKey      - Clave de API de OpenAI.
- * @param {string} model       - Identificador del modelo.
- * @param {Array}  messages    - Historial de mensajes.
- * @param {number} temperature - Temperatura de muestreo.
- * @returns {Promise<string>} Texto de la respuesta del modelo.
- */
-async function _callOpenAI(apiKey, model, messages, temperature) {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      // Token de autenticación Bearer requerido por la API de OpenAI
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ model, messages, temperature }),
-  });
-  if (!res.ok) throw await _readErr(res);
-  // Retorna el contenido del primer mensaje generado; cadena vacía si no hay respuesta
-  return (await res.json())?.choices?.[0]?.message?.content ?? '';
+  const data = await res.json().catch(() => null);
+  const content = data?.choices?.[0]?.message?.content;
+
+  if (requireContent && !content) {
+    throw new Error('El proveedor respondió sin contenido.');
+  }
+  return content ?? '';
 }
 
 /**
@@ -270,131 +331,3 @@ async function _callGemini(apiKey, model, messages, temperature) {
     .join('');
 }
 
-/**
- * Realiza una solicitud a la API de DeepSeek, compatible con el formato de OpenAI.
- *
- * @async
- * @param {string} apiKey      - Clave de API de DeepSeek.
- * @param {string} model       - Identificador del modelo.
- * @param {Array}  messages    - Historial de mensajes.
- * @param {number} temperature - Temperatura de muestreo.
- * @returns {Promise<string>} Texto de la respuesta del modelo.
- */
-async function _callDeepSeek(apiKey, model, messages, temperature) {
-  // DeepSeek expone un endpoint compatible con OpenAI; el payload es idéntico
-  const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ model, messages, temperature }),
-  });
-  if (!res.ok) throw await _readErr(res);
-  return (await res.json())?.choices?.[0]?.message?.content ?? '';
-}
-
-/**
- * Realiza una solicitud a la API de ChatLLM (Abacus AI), compatible con el formato de OpenAI.
- *
- * @async
- * @param {string} apiKey      - Clave de API de Abacus AI.
- * @param {string} model       - Identificador del modelo.
- * @param {Array}  messages    - Historial de mensajes.
- * @param {number} temperature - Temperatura de muestreo.
- * @returns {Promise<string>} Texto de la respuesta del modelo.
- */
-async function _callChatLLM(apiKey, model, messages, temperature) {
-  // Abacus AI también replica el contrato de OpenAI; solo cambia el base URL
-  const res = await fetch('https://apps.abacus.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ model, messages, temperature }),
-  });
-  if (!res.ok) throw await _readErr(res);
-  return (await res.json())?.choices?.[0]?.message?.content ?? '';
-}
-
-/**
- * Realiza una solicitud a NVIDIA Build, traduciendo alias de modelos al ID completo.
- *
- * @async
- * @param {string} apiKey      - Clave de API de NVIDIA.
- * @param {string} model       - Alias o ID completo del modelo.
- * @param {Array}  messages    - Historial de mensajes.
- * @param {number} temperature - Temperatura de muestreo.
- * @returns {Promise<string>} Texto de la respuesta del modelo.
- * @throws {Error} Si la respuesta no contiene contenido o el request falla.
- */
-async function _callNvidia(apiKey, model, messages, temperature) {
-  // Tabla de alias cortos hacia los IDs completos que espera la API de NVIDIA
-  const MODEL_MAP = {
-    'deepseek-v4-pro': 'deepseek-ai/deepseek-v4-pro',
-    'deepseek-v4-flash': 'deepseek-ai/deepseek-v4',
-    'deepseek-chat': 'deepseek-ai/deepseek-r1-0528',
-    'deepseek-reasoner': 'deepseek-ai/deepseek-r1',
-  };
-
-  const resp = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      // Traduce el alias al ID completo; si no hay alias, usa el valor tal cual
-      model: MODEL_MAP[model] ?? model,
-      messages,
-      // Garantiza que temperature sea siempre un número; 0.3 como fallback seguro
-      temperature: typeof temperature === 'number' ? temperature : 0.3,
-      // Deshabilita el streaming; se espera la respuesta completa de una vez
-      stream: false,
-    }),
-  });
-  
-  // Intenta parsear el JSON aunque la respuesta sea un error HTTP
-  const data = await resp.json().catch(() => null);
-
-  if (!resp.ok) {
-    // Prioriza el mensaje de error del body sobre el status genérico
-    throw new Error(
-      data?.error?.message ??
-      data?.message ??
-      `Error HTTP ${resp.status} al llamar NVIDIA Build`
-    );
-  }
-
-  const content = data?.choices?.[0]?.message?.content;
-  // NVIDIA a veces responde 200 OK pero sin contenido; se trata como error
-  if (!content) throw new Error('NVIDIA Build respondió sin contenido.');
-  return content;
-}
-
-/**
- * Realiza una solicitud a la API de OpenRouter, compatible con el formato de OpenAI.
- *
- * @async
- * @param {string} apiKey      - Clave de API de OpenRouter.
- * @param {string} model       - Identificador del modelo (ej: 'anthropic/claude-3-opus').
- * @param {Array}  messages    - Historial de mensajes.
- * @param {number} temperature - Temperatura de muestreo.
- * @returns {Promise<string>} Texto de la respuesta del modelo.
- */
-async function _callOpenRouter(apiKey, model, messages, temperature) {
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      // Requerido por OpenRouter para identificación opcional
-      'HTTP-Referer': 'https://github.com/rubendariosanchez/Gas-Tools',
-      'X-Title': 'Gas-Tools Extension',
-    },
-    body: JSON.stringify({ model, messages, temperature }),
-  });
-  if (!res.ok) throw await _readErr(res);
-  return (await res.json())?.choices?.[0]?.message?.content ?? '';
-}

@@ -1,3 +1,15 @@
+/**
+ * @fileoverview Módulo "Snippets" del popup.
+ *
+ * CRUD de snippets de código. Soporta dos catálogos:
+ *  - `default`: snippets de fábrica (`DEFAULT_SNIPPETS`), no editables.
+ *  - `custom`: snippets del usuario, persistidos en IndexedDB.
+ *
+ * Los cambios disparan `notifyEditors()` para que el provider de
+ * autocompletado de Monaco (registrado por `gas-tools.js`) recoja la
+ * nueva lista en caliente.
+ */
+
 import { G_PROPERTY_NAME } from '../utils/Variables.js';
 import { DEFAULT_SNIPPETS } from '../utils/Variables.js';
 import { DB } from '../utils/Storage.js';

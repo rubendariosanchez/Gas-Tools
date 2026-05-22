@@ -1,4 +1,23 @@
 "use strict";
+
+/**
+ * @fileoverview Service Worker (background) de la extensión Gas-Tools.
+ *
+ * Tres responsabilidades:
+ *  1. Persistencia: lee y escribe IndexedDB (settings, snippets, themes)
+ *     y `chrome.storage.sync` (tema activo, toggle global, API keys de
+ *     LLMs, tokens GitHub, mapping repo↔scriptId).
+ *  2. Proxy de APIs externas: enruta peticiones del editor (que vive en
+ *     MAIN world) hacia OpenAI, Anthropic, Gemini, GitHub, Apps Script API.
+ *     Centralizar las llamadas aquí mantiene los tokens fuera del MAIN.
+ *  3. Device Flow OAuth: gestiona el flujo de autenticación de GitHub
+ *     desde una pestaña popup.
+ *
+ * No mantiene estado vivo: como service worker MV3 puede dormirse en
+ * cualquier momento. Toda la información debe persistirse antes de
+ * responder.
+ */
+
 import { DB } from '../src/js/utils/Storage.js';
 import { G_PROPERTY_NAME, DEFAULT_SNIPPETS } from '../src/js/utils/Variables.js';
 import { getActiveTheme, callLlmProvider } from './js/services/llm-providers.js';
@@ -273,7 +292,11 @@ function _sendToTabs(payload) {
         type: 'SETTINGS_UPDATED',
         payload,
       }).catch(err => {
-        console.error('[Background] No se pudo enviar al tab:', tab.id, err.message);
+        // "Receiving end does not exist" es esperado cuando el content script
+        // todavía no está listo o ya fue descargado. Lo ignoramos silenciosamente.
+        if (!err?.message?.includes('Receiving end does not exist')) {
+          console.error('[Background] No se pudo enviar al tab:', tab.id, err.message);
+        }
       });
     });
   });

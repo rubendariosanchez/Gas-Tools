@@ -225,22 +225,20 @@ class GasFolders {
     this._rootLists = [];
   }
   /**
-   * Detecta si el editor de GAS está usando un tema oscuro.
-   * Primero comprueba la clase CSS oficial del IDE; si no existe, analiza
-   * el color de fondo del `<body>` calculando su luminancia percibida
-   * (fórmula estándar ITU-R BT.601).
+   * Detecta si el editor está en modo oscuro.
+   *
+   * Fuente de verdad: la clase `gc__is-dark-mode` que pone `gas-tools.js`
+   * sobre el `<body>` cuando el toggle "IDE Dark Mode" está activo. Como
+   * fallback (cuando otro consumidor active el modo dark sin pasar por
+   * nuestra opción), también se respeta la clase oficial `ide-dark-mode`
+   * que añade GAS al cambiar su propio tema.
    *
    * @private
    * @returns {boolean} `true` si el tema es oscuro, `false` si es claro.
    */
   _isEditorDark_() {
-    if (document.body.classList.contains('ide-dark-mode')) return true;
-    const bg  = window.getComputedStyle(document.body).backgroundColor;
-    const rgb = bg.match(/\d+/g);
-    if (!rgb || rgb.length < 3) return false;
-    const [r, g, b] = rgb.map(Number);
-    // Luminancia percibida: < 0.5 → color oscuro
-    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5;
+    const cl = document.body.classList;
+    return cl.contains('gc__is-dark-mode') || cl.contains('ide-dark-mode');
   }
   /**
    * Punto de entrada para la primera inyección de estilos.
@@ -408,7 +406,7 @@ class GasFolders {
       .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] {
         padding-left : 4px          !important;
         margin       : 0            !important;
-        background   : transparent  !important;
+        background   : transparent ;
         border       : none         !important;
         display      : flex         !important;
         align-items  : center       !important;
@@ -416,7 +414,7 @@ class GasFolders {
         min-height   : 36px         !important;
       }
       .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"]:hover {
-        background: var(--gm3-sys-color-surface-container-high, rgba(60,64,67,.08)) !important;
+        background: var(--gm3-sys-color-surface-container-high, rgba(60,64,67,.08));
       }
       /* Ocultamos el texto de GAS para no pelear con el DOM Virtual y evitar el loop.
          El nombre visible se muestra exclusivamente a través del pseudo-elemento ::before
@@ -450,7 +448,19 @@ class GasFolders {
         position: relative;
       }
       /* Mostramos el nombre corto mediante un pseudo-elemento, solo si
-         realmente hay un data-name no vacío para mostrar. */
+         realmente hay un data-name no vacío para mostrar.
+
+         IMPORTANTE — antes el color del ::before se decidía con un
+         template literal "dark ? '#e8eaed' : '#202124'", que se
+         evaluaba una sola vez al inyectar el <style>. Si el tema del
+         IDE cambiaba después, el color quedaba congelado.
+
+         Ahora la decisión la toma el navegador en cascada:
+         1. --gm3-sys-color-on-surface (Material 3, definida por GAS y
+            ya reactiva al cambio de tema del IDE).
+         2. Si por algún motivo la variable no está, las reglas
+            siguientes (prefers-color-scheme y body.ide-dark-mode) hacen
+            de fallback estable. */
       .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""])::before {
         content: attr(data-name);
         position: absolute;
@@ -458,12 +468,27 @@ class GasFolders {
         top: 0;
         right: 0;
         bottom: 0;
-        color: var(--gm3-sys-color-on-surface, ${dark ? '#e8eaed' : '#202124'});
-        -webkit-text-fill-color: var(--gm3-sys-color-on-surface, ${dark ? '#e8eaed' : '#202124'});
+        color: var(--gm3-sys-color-on-surface, #202124);
+        -webkit-text-fill-color: var(--gm3-sys-color-on-surface, #202124);
         pointer-events: none;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+      /* Fallback por modo del SO cuando la variable Material no está. 
+      @media (prefers-color-scheme: dark) {
+        .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""])::before {
+          color: var(--gm3-sys-color-on-surface, #e8eaed);
+          -webkit-text-fill-color: var(--gm3-sys-color-on-surface, #e8eaed);
+        }
+      }*/
+      /* Fallback por clase del IDE: gana sobre prefers-color-scheme cuando
+         GAS aplica explícitamente un modo oscuro distinto al del sistema, o
+         cuando nuestra opción "IDE Dark Mode" está activa. */
+      body.gc__is-dark-mode .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""])::before,
+      body.ide-dark-mode .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""])::before {
+        color: var(--gm3-sys-color-on-surface, #e8eaed);
+        -webkit-text-fill-color: var(--gm3-sys-color-on-surface, #e8eaed);
       }
       /* Cuando se renombra un archivo, ocultamos el pseudo-elemento */
       .${GasFolders.FOLDER_CHILDREN_CLASS} li.qc-renaming div[title]::before {

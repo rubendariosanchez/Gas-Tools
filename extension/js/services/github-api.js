@@ -15,6 +15,8 @@
  *  - Pull del árbol y descarga del contenido por archivo.
  */
 
+import { readHttpError } from './_http-utils.js';
+
 const GH_BASE     = 'https://api.github.com';
 const GH_API_VER  = '2022-11-28';
 const UA          = 'gas-tools-extension';
@@ -101,12 +103,7 @@ function _headers(token, extra = {}) {
  * @returns {Promise<Error>}
  */
 async function _readError(res) {
-  let body = '';
-  try { body = await res.text(); } catch (_) { /* sin body */ }
-  let parsed = null;
-  try { parsed = JSON.parse(body); } catch (_) { /* no JSON */ }
-  const msg = parsed?.message || body.slice(0, 240) || res.statusText;
-  return new Error(`GitHub ${res.status}: ${msg}`);
+  return readHttpError(res, 'GitHub');
 }
 
 /**

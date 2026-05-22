@@ -53,6 +53,13 @@ class GasErrorLens {
 
   // ── Constructor ────────────────────────────────────────────────────────
 
+  /**
+   * Crea la instancia en estado deshabilitado. `enable()` debe llamarse
+   * explícitamente cuando Monaco esté disponible.
+   *
+   * No registra listeners ni decoraciones aquí: el constructor es seguro
+   * para ejecutarse antes de que `window.monaco` exista.
+   */
   constructor() {
     this._enabled = false;
 
@@ -80,7 +87,11 @@ class GasErrorLens {
 
   // ── Ciclo de vida ──────────────────────────────────────────────────────
 
-  /** Activa linter, decoraciones y overlay. Idempotente. */
+  /**
+   * Activa el linter, las decoraciones y el overlay. Si Monaco aún no
+   * está cargado, reintenta en 500 ms. Es idempotente: llamadas
+   * sucesivas no duplican listeners ni decoraciones.
+   */
   enable() {
     if (this._enabled) return;
     if (!window.monaco?.editor) {
@@ -109,7 +120,11 @@ class GasErrorLens {
     this._refreshAllOverlays_();
   }
 
-  /** Desactiva todo y limpia el DOM. */
+  /**
+   * Desactiva el linter, libera todas las decoraciones, widgets y
+   * listeners. Limpia el `<style>` inyectado solo si nadie más lo está
+   * usando. Es idempotente.
+   */
   disable() {
     if (!this._enabled) return;
     this._enabled = false;

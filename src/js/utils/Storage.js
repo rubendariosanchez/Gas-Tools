@@ -1,5 +1,15 @@
 /**
- * API para gestionar IndexedDB de forma simplificada.
+ * @fileoverview Wrapper minimalista de IndexedDB para uso compartido.
+ *
+ * Expone un singleton `DB` con la API `open / get / getAll / put / delete /
+ * clear` que cualquier capa (popup, background, content script) puede
+ * importar. La base de datos es `QualityCodeDB` con tres stores:
+ *  - `settings`: opciones del usuario.
+ *  - `snippets`: snippets personalizados.
+ *  - `themes`: temas personalizados (los protegidos viven en `THEME_LIST`).
+ *
+ * Maneja reaperturas tras cierre por inactividad de Chrome (la base
+ * puede invalidarse cuando el service worker duerme).
  */
 export class StorageAPI {
     constructor(dbName = 'QualityCodeDB', version = 2) {

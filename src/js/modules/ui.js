@@ -1,3 +1,11 @@
+/**
+ * @fileoverview Helpers de UI compartidos del popup.
+ *
+ * Aquí viven las utilidades transversales que no encajan en un módulo
+ * concreto: navegación entre pestañas y refresco de las estadísticas
+ * mostradas en la pestaña "About".
+ */
+
 import { G_PROPERTY_NAME } from '../utils/Variables.js';
 import { DB } from '../utils/Storage.js';
 

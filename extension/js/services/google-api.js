@@ -19,6 +19,8 @@
  *   JSON       → .json   (reservado para appsscript.json)
  */
 
+import { readHttpError } from './_http-utils.js';
+
 const SCRIPT_BASE = 'https://script.googleapis.com/v1/projects';
 const USERINFO    = 'https://www.googleapis.com/oauth2/v3/userinfo';
 
@@ -158,14 +160,5 @@ export async function callGoogleApi(action, token, payload = {}) {
 
 /** Construye un Error legible a partir de una respuesta HTTP fallida. */
 async function _readError(res) {
-  let body = '';
-  try { body = await res.text(); } catch (_) {}
-  let parsed = null;
-  try { parsed = JSON.parse(body); } catch (_) {}
-  const msg = parsed?.error?.message
-           || parsed?.error_description
-           || parsed?.error
-           || body.slice(0, 240)
-           || res.statusText;
-  return new Error(`Google ${res.status}: ${msg}`);
+  return readHttpError(res, 'Google');
 }

@@ -130,6 +130,7 @@ class GasGithubPanel extends HTMLElement {
    * para que el indicador del botón refleje la sesión existente.
    */
   connectedCallback() {
+    DomUtils.syncHostTheme(this);
     this._renderShell_();
     document.addEventListener('mousedown', this._onDocumentMouseDown, true);
     window.addEventListener('keydown',     this._onWindowKeyDown);
@@ -216,10 +217,7 @@ class GasGithubPanel extends HTMLElement {
    */
   open(anchorEl) {
     if (anchorEl) this._anchorEl = anchorEl;
-    document.querySelector('gas-search-panel')?.close?.();
-    document.querySelector('gas-chat-panel')?.close?.();
-    document.querySelector('gas-current-file')?.close?.();
-    document.querySelector('gas-actions-panel')?.close?.();
+    DomUtils.closeOtherFloatingPanels('gas-github-panel');
 
     this._scriptId = this._extractScriptId_();
     this.style.display = 'block';
@@ -285,6 +283,8 @@ class GasGithubPanel extends HTMLElement {
   _renderShell_() {
     DomUtils.setHTML(this.shadowRoot, `
       <style>
+        /* Design tokens compartidos: ver DomUtils.themeTokensCss(). */
+        ${DomUtils.themeTokensCss()}
 
         :host {
           display: none;
@@ -294,15 +294,14 @@ class GasGithubPanel extends HTMLElement {
           z-index: 2147483640;
           width: 760px;
           max-height: min(720px, calc(100vh - 110px));
-          background: #ffffff;
-          color: #1f2328;
-          border: 1px solid rgba(0,0,0,.08);
+          background: var(--gc-bg-elevated);
+          color: var(--gc-text);
+          border: 1px solid var(--gc-border);
           border-radius: 14px;
-          box-shadow: 0 16px 48px rgba(0,0,0,.14), 0 4px 12px rgba(0,0,0,.06);
-          font-family: "Google Sans", Roboto, Arial, sans-serif;
+          box-shadow: var(--gc-shadow-panel);
+          font-family: var(--gc-font);
           overflow: visible;             /* arrow extends beyond the box */
           animation: qc__gh-in .16s ease-out;
-          font-family: 'Google Sans', 'Roboto', sans-serif;
         }
         /* Modos compactos para login y verificación. */
         :host([data-view="unauth"]),
@@ -345,7 +344,7 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-shell {
           display: flex; flex-direction: column;
           height: 100%; max-height: inherit;
-          background: #ffffff;
+          background: var(--gc-bg-elevated);
           border-radius: inherit;
           overflow: hidden;
         }
@@ -353,14 +352,14 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-header {
           display: flex; align-items: center; gap: 12px;
           padding: 14px 16px 12px;
-          border-bottom: 1px solid rgba(0,0,0,.06);
+          border-bottom: 1px solid var(--gc-border);
           flex: 0 0 auto;
         }
         .qc__gh-avatar {
           width: 36px; height: 36px; border-radius: 999px; flex: 0 0 auto;
           background: rgba(26,115,232,.10);
           display: grid; place-items: center;
-          color: #1a73e8; overflow: hidden;
+          color: var(--gc-accent); overflow: hidden;
           position: relative;
         }
         .qc__gh-avatar img {
@@ -376,23 +375,23 @@ class GasGithubPanel extends HTMLElement {
         }
         .qc__gh-hdrText { flex: 1; min-width: 0; }
         .qc__gh-hdrTitle {
-          font-size: 14px; font-weight: 600; color: #1f2328;
+          font-size: 14px; font-weight: 600; color: var(--gc-text);
           line-height: 1.25;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .qc__gh-hdrSub {
-          font-size: 12px; color: #656d76;
+          font-size: 12px; color: var(--gc-text-muted);
           line-height: 1.25; margin-top: 1px;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .qc__gh-hdrAction {
-          border: none; background: transparent; color: #656d76;
+          border: none; background: transparent; color: var(--gc-text-muted);
           width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
           display: inline-flex; align-items: center; justify-content: center;
           flex: 0 0 auto;
           transition: background .15s, color .15s;
         }
-        .qc__gh-hdrAction:hover { background: rgba(0,0,0,.06); color: #1f2328; }
+        .qc__gh-hdrAction:hover { background: var(--gc-hover-strong); color: var(--gc-text); }
         .qc__gh-hdrAction .material-icons { font-size: 18px; }
 
         .qc__gh-body {
@@ -451,7 +450,7 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-sectionTitle {
           font-size: 11px; font-weight: 600;
           letter-spacing: 0.6px; text-transform: uppercase;
-          color: #656d76; margin: 0;
+          color: var(--gc-text-muted); margin: 0;
         }
         .qc__gh-sectionHead { display: flex; align-items: center; gap: 6px; }
         .qc__gh-sectionHead .qc__gh-sectionTitle { flex: 1; }
@@ -459,9 +458,9 @@ class GasGithubPanel extends HTMLElement {
 
         .qc__gh-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
         .qc__gh-fieldLabel {
-          font-size: 12px; font-weight: 500; color: #1f2328;
+          font-size: 12px; font-weight: 500; color: var(--gc-text);
         }
-        .qc__gh-optional { color: #8b949e; font-weight: 400; font-size: 11px; }
+        .qc__gh-optional { color: var(--gc-text-faint); font-weight: 400; font-size: 11px; }
 
         .qc__gh-row { display: flex; gap: 8px; align-items: stretch; }
         .qc__gh-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -470,33 +469,33 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-selector {
           display: flex; align-items: center; gap: 8px;
           height: 38px; padding: 0 12px;
-          background: #ffffff;
-          border: 1px solid #d0d7de;
+          background: var(--gc-bg-elevated);
+          border: 1px solid var(--gc-border);
           border-radius: 8px;
           cursor: pointer;
-          font-size: 13px; color: #1f2328;
+          font-size: 13px; color: var(--gc-text);
           width: 100%; min-width: 0; text-align: left;
           font-family: inherit;
           transition: border-color .15s, box-shadow .15s;
         }
-        .qc__gh-selector:hover { border-color: #1a73e8; }
+        .qc__gh-selector:hover { border-color: var(--gc-accent); }
         .qc__gh-selector[aria-expanded="true"] {
-          border-color: #1a73e8;
+          border-color: var(--gc-accent);
           box-shadow: 0 0 0 3px rgba(26,115,232,.12);
         }
         .qc__gh-selector[disabled] { opacity: .55; cursor: not-allowed; }
         .qc__gh-selector .material-icons.qc__gh-selectorIcon {
-          font-size: 16px; color: #656d76; flex: 0 0 auto;
+          font-size: 16px; color: var(--gc-text-muted); flex: 0 0 auto;
         }
         .qc__gh-selectorLabel {
           flex: 1; min-width: 0;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           font-weight: 500;
         }
-        .qc__gh-selectorChevron { font-size: 18px !important; color: #8b949e; flex: 0 0 auto; }
+        .qc__gh-selectorChevron { font-size: 18px !important; color: var(--gc-text-faint); flex: 0 0 auto; }
         .qc__gh-selectorBadge {
           padding: 2px 6px;
-          background: rgba(0,0,0,.05); color: #656d76;
+          background: var(--gc-hover-soft); color: var(--gc-text-muted);
           border-radius: 4px;
           font-size: 10.5px; font-weight: 500;
           flex: 0 0 auto;
@@ -505,8 +504,8 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-dropdown {
           position: absolute;
           top: calc(100% + 4px); left: 0; right: 0;
-          background: #ffffff;
-          border: 1px solid rgba(0,0,0,.10);
+          background: var(--gc-bg-elevated);
+          border: 1px solid var(--gc-border);
           border-radius: 10px;
           box-shadow: 0 12px 32px rgba(0,0,0,.14);
           z-index: 5;
@@ -520,9 +519,9 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-ddSearch {
           display: flex; align-items: center; gap: 8px;
           padding: 8px 10px;
-          border-bottom: 1px solid rgba(0,0,0,.06);
+          border-bottom: 1px solid var(--gc-border);
         }
-        .qc__gh-ddSearch .material-icons { font-size: 16px; color: #8b949e; }
+        .qc__gh-ddSearch .material-icons { font-size: 16px; color: var(--gc-text-faint); }
         .qc__gh-ddSearch input {
           flex: 1; border: none; outline: none; background: transparent;
           font-family: inherit; font-size: 13px; color: inherit;
@@ -531,24 +530,24 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-ddItem {
           display: flex; align-items: center; gap: 8px;
           padding: 8px 10px; border-radius: 6px;
-          cursor: pointer; font-size: 13px; color: #1f2328; line-height: 1.2;
+          cursor: pointer; font-size: 13px; color: var(--gc-text); line-height: 1.2;
         }
         .qc__gh-ddItem:hover { background: rgba(26,115,232,.08); }
         .qc__gh-ddItem.qc__gh-active { background: rgba(26,115,232,.10); }
-        .qc__gh-ddItem .material-icons { font-size: 16px; color: #656d76; flex: 0 0 auto; }
+        .qc__gh-ddItem .material-icons { font-size: 16px; color: var(--gc-text-muted); flex: 0 0 auto; }
         .qc__gh-ddItemLabel {
           flex: 1; min-width: 0;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        .qc__gh-ddCheck { color: #1a73e8 !important; }
+        .qc__gh-ddCheck { color: var(--gc-accent) !important; }
         .qc__gh-ddEmpty {
           padding: 14px; text-align: center;
-          font-size: 12px; color: #8b949e;
+          font-size: 12px; color: var(--gc-text-faint);
         }
         .qc__gh-ddFooter {
           padding: 4px;
-          border-top: 1px solid rgba(0,0,0,.06);
-          background: #f6f8fa;
+          border-top: 1px solid var(--gc-border);
+          background: var(--gc-surface-soft);
         }
         .qc__gh-ddFooterBtn {
           display: flex; align-items: center; gap: 8px;
@@ -557,7 +556,7 @@ class GasGithubPanel extends HTMLElement {
           background: transparent;
           border: none;
           border-radius: 6px;
-          color: #1a73e8;
+          color: var(--gc-accent);
           font-size: 12.5px;
           font-weight: 500;
           font-family: inherit;
@@ -570,18 +569,18 @@ class GasGithubPanel extends HTMLElement {
 
         .qc__gh-input {
           height: 38px; padding: 0 12px;
-          border: 1px solid #d0d7de; border-radius: 8px;
-          background: #ffffff; color: #1f2328;
+          border: 1px solid var(--gc-border); border-radius: 8px;
+          background: var(--gc-bg-elevated); color: var(--gc-text);
           font-size: 13px; outline: none;
           width: 100%; min-width: 0; box-sizing: border-box;
           font-family: inherit;
           transition: border-color .15s, box-shadow .15s;
         }
         .qc__gh-input:focus {
-          border-color: #1a73e8;
+          border-color: var(--gc-accent);
           box-shadow: 0 0 0 3px rgba(26,115,232,.14);
         }
-        .qc__gh-input::placeholder { color: #8b949e; }
+        .qc__gh-input::placeholder { color: var(--gc-text-faint); }
         textarea.qc__gh-input {
           height: auto; min-height: 60px;
           padding: 10px 12px; resize: vertical; line-height: 1.4;
@@ -592,18 +591,18 @@ class GasGithubPanel extends HTMLElement {
           background: transparent; border: 1px solid transparent;
           border-radius: 8px;
           width: 30px; height: 30px; padding: 0;
-          cursor: pointer; color: #656d76;
+          cursor: pointer; color: var(--gc-text-muted);
           display: inline-flex; align-items: center; justify-content: center;
           flex: 0 0 auto;
           transition: background .15s, color .15s;
         }
-        .qc__gh-iconBtn:hover { background: rgba(0,0,0,.06); color: #1f2328; }
+        .qc__gh-iconBtn:hover { background: var(--gc-hover-strong); color: var(--gc-text); }
         .qc__gh-iconBtn .material-icons { font-size: 16px; }
         .qc__gh-openExternal {
           width: 38px; height: 38px; border-radius: 8px;
-          background: rgba(0,0,0,.04); color: #656d76;
+          background: var(--gc-hover-soft); color: var(--gc-text-muted);
         }
-        .qc__gh-openExternal:hover { background: rgba(0,0,0,.07); color: #1f2328; }
+        .qc__gh-openExternal:hover { background: var(--gc-hover-strong); color: var(--gc-text); }
         .qc__gh-openExternal .material-icons { font-size: 16px; }
 
         /* Fila que contiene los tabs y el botón de refrescar diff. */
@@ -614,15 +613,15 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-tabsRow .qc__gh-tabs { flex: 1; min-width: 0; }
         .qc__gh-tabsRow .qc__gh-iconBtn {
           width: 38px; height: 38px; border-radius: 10px;
-          background: rgba(0,0,0,.04);
+          background: var(--gc-hover-soft);
         }
-        .qc__gh-tabsRow .qc__gh-iconBtn:hover { background: rgba(0,0,0,.08); }
+        .qc__gh-tabsRow .qc__gh-iconBtn:hover { background: var(--gc-hover-strong); }
         .qc__gh-tabsRow .qc__gh-iconBtn[disabled] {
           opacity: .55; cursor: not-allowed;
         }
         .qc__gh-tabs {
           display: grid; grid-template-columns: 1fr 1fr;
-          background: rgba(0,0,0,.04);
+          background: var(--gc-hover-soft);
           border-radius: 10px; padding: 4px;
         }
         .qc__gh-tab {
@@ -630,33 +629,33 @@ class GasGithubPanel extends HTMLElement {
           gap: 6px; height: 32px;
           background: transparent; border: none;
           border-radius: 7px;
-          color: #656d76; font-size: 12.5px; font-weight: 500;
+          color: var(--gc-text-muted); font-size: 12.5px; font-weight: 500;
           cursor: pointer; font-family: inherit;
           transition: background .15s, color .15s, box-shadow .15s;
         }
         .qc__gh-tab .material-icons { font-size: 15px; }
-        .qc__gh-tab:hover { color: #1f2328; }
+        .qc__gh-tab:hover { color: var(--gc-text); }
         .qc__gh-tab.qc__gh-activeTab {
-          background: #ffffff; color: #1f2328;
+          background: var(--gc-bg-elevated); color: var(--gc-text);
           box-shadow: 0 1px 3px rgba(0,0,0,.08);
         }
 
         .qc__gh-changesCard {
-          border: 1px solid rgba(0,0,0,.08);
+          border: 1px solid var(--gc-border);
           border-radius: 10px;
-          background: #ffffff;
+          background: var(--gc-bg-elevated);
           overflow: hidden;
         }
         .qc__gh-changesHead {
           display: flex; align-items: center; justify-content: space-between;
           padding: 8px 10px;
-          background: rgba(0,0,0,.03);
-          border-bottom: 1px solid rgba(0,0,0,.06);
-          font-size: 12px; color: #656d76;
+          background: var(--gc-surface-soft);
+          border-bottom: 1px solid var(--gc-border);
+          font-size: 12px; color: var(--gc-text-muted);
         }
         .qc__gh-selectAll {
           display: inline-flex; align-items: center; gap: 8px;
-          color: #1f2328; cursor: pointer; font-size: 12px;
+          color: var(--gc-text); cursor: pointer; font-size: 12px;
           background: transparent; border: none;
           padding: 0; font-family: inherit;
         }
@@ -670,22 +669,22 @@ class GasGithubPanel extends HTMLElement {
           padding: 6px 8px;
           border-radius: 6px;
           cursor: pointer;
-          font-size: 12.5px; color: #1f2328;
+          font-size: 12.5px; color: var(--gc-text);
           transition: background .12s;
         }
-        .qc__gh-changeItem:hover { background: rgba(0,0,0,.04); }
+        .qc__gh-changeItem:hover { background: var(--gc-hover-soft); }
         .qc__gh-check {
           width: 14px; height: 14px;
           border: 1.5px solid #d0d7de;
           border-radius: 3px;
           display: grid; place-items: center;
           flex: 0 0 auto;
-          background: #ffffff;
+          background: var(--gc-bg-elevated);
           transition: background .15s, border-color .15s;
         }
         .qc__gh-changeItem.qc__gh-selected .qc__gh-check,
         .qc__gh-selectAll.qc__gh-selected .qc__gh-check {
-          background: #2da44e; border-color: #2da44e; color: #fff;
+          background: var(--gc-green-strong); border-color: var(--gc-green-strong); color: var(--gc-text-on-accent);
         }
         .qc__gh-check .material-icons {
           font-size: 11px; color: inherit; opacity: 0;
@@ -701,58 +700,58 @@ class GasGithubPanel extends HTMLElement {
           flex: 0 0 auto;
           font-size: 11px; font-weight: 700; line-height: 1;
         }
-        .qc__gh-changeStatus.add { background: rgba(45,164,78,.16); color: #2da44e; }
-        .qc__gh-changeStatus.del { background: rgba(207,34,46,.16); color: #cf222e; }
-        .qc__gh-changeStatus.mod { background: rgba(154,103,0,.16); color: #9a6700; }
+        .qc__gh-changeStatus.add { background: var(--gc-green-soft); color: var(--gc-green-text); }
+        .qc__gh-changeStatus.del { background: var(--gc-red-soft); color: var(--gc-red-text); }
+        .qc__gh-changeStatus.mod { background: var(--gc-amber-soft); color: var(--gc-amber-text); }
         .qc__gh-changePath {
           flex: 1; min-width: 0;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           font-size: 12.5px;
         }
-        .qc__gh-changePathDir { color: #656d76; }
-        .qc__gh-changePathFile { color: #1f2328; font-weight: 600; }
+        .qc__gh-changePathDir { color: var(--gc-text-muted); }
+        .qc__gh-changePathFile { color: var(--gc-text); font-weight: 600; }
         .qc__gh-changedelta {
           flex: 0 0 auto;
           font-size: 11px;
           font-family: "Roboto Mono", Consolas, monospace;
           font-weight: 600;
         }
-        .qc__gh-changedelta .add { color: #2da44e; }
-        .qc__gh-changedelta .del { color: #cf222e; }
+        .qc__gh-changedelta .add { color: var(--gc-green-text); }
+        .qc__gh-changedelta .del { color: var(--gc-red-text); }
 
         .qc__gh-changesEmpty {
           text-align: center; padding: 24px 12px;
-          font-size: 12.5px; color: #8b949e;
+          font-size: 12.5px; color: var(--gc-text-faint);
         }
 
         .qc__gh-diffWrap { display: flex; flex-direction: column; gap: 8px; }
 
         .qc__gh-diffCard {
-          border: 1px solid rgba(0,0,0,.08);
+          border: 1px solid var(--gc-border);
           border-radius: 8px;
-          background: #ffffff;
+          background: var(--gc-bg-elevated);
           overflow: hidden;
         }
         .qc__gh-diffCardHead {
           display: flex; align-items: center; gap: 8px;
           width: 100%;
           padding: 8px 10px;
-          background: #f6f8fa;
+          background: var(--gc-surface-soft);
           border: none;
           border-bottom: 1px solid transparent;
           cursor: pointer;
           font-family: inherit;
           font-size: 12.5px;
-          color: #1f2328;
+          color: var(--gc-text);
           text-align: left;
           transition: background .12s;
         }
-        .qc__gh-diffCardHead:hover { background: #eaeef2; }
+        .qc__gh-diffCardHead:hover { background: var(--gc-surface-soft-hover); }
         .qc__gh-diffCard.qc__gh-diffCardOpen .qc__gh-diffCardHead {
-          border-bottom-color: rgba(0,0,0,.06);
+          border-bottom-color: var(--gc-border);
         }
         .qc__gh-diffCardChevron {
-          font-size: 18px !important; color: #656d76; flex: 0 0 auto;
+          font-size: 18px !important; color: var(--gc-text-muted); flex: 0 0 auto;
           transition: transform .15s;
         }
         .qc__gh-diffCard.qc__gh-diffCardOpen .qc__gh-diffCardChevron {
@@ -781,9 +780,9 @@ class GasGithubPanel extends HTMLElement {
           line-height: 1;
           white-space: nowrap;
         }
-        .qc__gh-diffOrigin.mod { background: rgba(0,0,0,.06); color: #57606a; }
-        .qc__gh-diffOrigin.add { background: #dafbe1; color: #1a7f37; }
-        .qc__gh-diffOrigin.del { background: #ffebe9; color: #cf222e; }
+        .qc__gh-diffOrigin.mod { background: var(--gc-hover-strong); color: var(--gc-text-faint); }
+        .qc__gh-diffOrigin.add { background: var(--gc-green-dim); color: var(--gc-green-text); }
+        .qc__gh-diffOrigin.del { background: var(--gc-red-dim); color: var(--gc-red-text); }
         .qc__gh-diffOrigin .material-icons {
           font-size: 11px !important; line-height: 1;
         }
@@ -791,23 +790,23 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-diff2html {
           max-height: 320px;
           overflow: auto;
-          background: #ffffff !important;
-          color: #1f2328 !important;
+          background: var(--gc-bg-elevated) !important;
+          color: var(--gc-text) !important;
           font-size: 11.5px;
         }
         .qc__gh-diff2html .d2h-wrapper,
         .qc__gh-diff2html .d2h-file-wrapper,
         .qc__gh-diff2html .d2h-files-diff,
         .qc__gh-diff2html .d2h-file-diff {
-          background: #ffffff !important;
-          color: #1f2328 !important;
+          background: var(--gc-bg-elevated) !important;
+          color: var(--gc-text) !important;
           border: none !important;
           margin: 0 !important;
         }
         .qc__gh-diff2html .d2h-file-header { display: none !important; }
         .qc__gh-diff2html .d2h-diff-table {
-          background: #ffffff !important;
-          color: #1f2328 !important;
+          background: var(--gc-bg-elevated) !important;
+          color: var(--gc-text) !important;
           font-family: "Roboto Mono", Consolas, monospace !important;
           font-size: 11.5px !important;
           /* Estirar la tabla al ancho del contenido más largo para que
@@ -820,46 +819,46 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-diff2html .d2h-code-line,
         .qc__gh-diff2html .d2h-code-side-line {
           padding: 0 8px !important;
-          color: #1f2328 !important;
+          color: var(--gc-text) !important;
         }
-        .qc__gh-diff2html .d2h-code-line-prefix { color: #57606a !important; }
+        .qc__gh-diff2html .d2h-code-line-prefix { color: var(--gc-text-faint) !important; }
         .qc__gh-diff2html .d2h-code-linenumber {
-          background: #f6f8fa !important;
-          color: #57606a !important;
+          background: var(--gc-surface-soft) !important;
+          color: var(--gc-text-faint) !important;
           border: none !important;
         }
         .qc__gh-diff2html .d2h-info {
-          background: #ddf4ff !important;
-          color: #0969da !important;
+          background: var(--gc-info-soft) !important;
+          color: var(--gc-info) !important;
           border-color: rgba(9,105,218,.12) !important;
         }
         .qc__gh-diff2html .d2h-ins,
         .qc__gh-diff2html .d2h-ins .d2h-code-line,
         .qc__gh-diff2html .d2h-ins .d2h-code-side-line {
-          background: #dafbe1 !important;
-          color: #1a7f37 !important;
+          background: var(--gc-green-dim) !important;
+          color: var(--gc-green-text) !important;
         }
         .qc__gh-diff2html .d2h-ins .d2h-code-linenumber {
-          background: #ccffd8 !important;
-          color: #1a7f37 !important;
+          background: var(--gc-green-soft) !important;
+          color: var(--gc-green-text) !important;
         }
         .qc__gh-diff2html .d2h-del,
         .qc__gh-diff2html .d2h-del .d2h-code-line,
         .qc__gh-diff2html .d2h-del .d2h-code-side-line {
-          background: #ffebe9 !important;
-          color: #cf222e !important;
+          background: var(--gc-red-dim) !important;
+          color: var(--gc-red-text) !important;
         }
         .qc__gh-diff2html .d2h-del .d2h-code-linenumber {
-          background: #ffd7d5 !important;
-          color: #cf222e !important;
+          background: var(--gc-red-soft) !important;
+          color: var(--gc-red-text) !important;
         }
         .qc__gh-diff2html .d2h-cntx,
         .qc__gh-diff2html .d2h-cntx .d2h-code-line,
         .qc__gh-diff2html .d2h-cntx .d2h-code-side-line {
-          background: #ffffff !important;
-          color: #1f2328 !important;
+          background: var(--gc-bg-elevated) !important;
+          color: var(--gc-text) !important;
         }
-        .qc__gh-diff2html .d2h-emptyplaceholder { background: #f6f8fa !important; }
+        .qc__gh-diff2html .d2h-emptyplaceholder { background: var(--gc-surface-soft) !important; }
         .qc__gh-diff2html .d2h-code-line-ctn,
         .qc__gh-diff2html .d2h-code-side-line-ctn { color: inherit !important; }
         /* Cada celda de código se estira para que el fondo coloreado de
@@ -877,15 +876,15 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-diff2html .hljs-keyword,
         .qc__gh-diff2html .hljs-selector-tag,
         .qc__gh-diff2html .hljs-section,
-        .qc__gh-diff2html .hljs-name { color: #cf222e !important; }
+        .qc__gh-diff2html .hljs-name { color: var(--gc-red-text) !important; }
         .qc__gh-diff2html .hljs-string,
         .qc__gh-diff2html .hljs-attr,
         .qc__gh-diff2html .hljs-symbol,
         .qc__gh-diff2html .hljs-link { color: #0a3069 !important; }
         .qc__gh-diff2html .hljs-comment,
-        .qc__gh-diff2html .hljs-quote { color: #6e7781 !important; font-style: italic; }
+        .qc__gh-diff2html .hljs-quote { color: var(--gc-text-faint) !important; font-style: italic; }
         .qc__gh-diff2html .hljs-number,
-        .qc__gh-diff2html .hljs-literal { color: #0550ae !important; }
+        .qc__gh-diff2html .hljs-literal { color: var(--gc-info) !important; }
         .qc__gh-diff2html .hljs-title,
         .qc__gh-diff2html .hljs-built_in { color: #8250df !important; }
         .qc__gh-diff2html .hljs-tag,
@@ -896,16 +895,16 @@ class GasGithubPanel extends HTMLElement {
           max-height: 320px;
           overflow: auto;
           padding: 8px;
-          background: #ffffff;
+          background: var(--gc-bg-elevated);
           font-family: "Roboto Mono", Consolas, monospace;
           font-size: 11.5px; line-height: 1.5;
         }
         .qc__gh-diffLine { white-space: pre; padding: 0 6px; border-radius: 2px; overflow: hidden; }
-        .qc__gh-diffLine.add { background: #dafbe1; color: #1a7f37; }
-        .qc__gh-diffLine.del { background: #ffebe9; color: #cf222e; }
+        .qc__gh-diffLine.add { background: var(--gc-green-dim); color: var(--gc-green-text); }
+        .qc__gh-diffLine.del { background: var(--gc-red-dim); color: var(--gc-red-text); }
         .qc__gh-diffEmpty {
           padding: 16px; text-align: center;
-          color: #8b949e; font-size: 12px;
+          color: var(--gc-text-faint); font-size: 12px;
         }
 
         .qc__gh-btn {
@@ -915,50 +914,51 @@ class GasGithubPanel extends HTMLElement {
           font-size: 13px; font-weight: 600;
           cursor: pointer;
           border: 1px solid transparent;
-          background: #f6f8fa; color: #1f2328;
+          background: var(--gc-surface-soft); color: var(--gc-text);
           font-family: inherit;
           transition: background .15s, border-color .15s, transform .05s;
         }
-        .qc__gh-btn:hover { background: #eaeef2; }
+        .qc__gh-btn:hover { background: var(--gc-surface-soft-hover); }
         .qc__gh-btn:active { transform: translateY(1px); }
         .qc__gh-btn .material-icons { font-size: 16px; }
-        .qc__gh-btn.qc__gh-primary { background: #2da44e; color: #ffffff; }
-        .qc__gh-btn.qc__gh-primary:hover { background: #2c974b; }
-        .qc__gh-btn.qc__gh-danger { background: #cf222e; color: #ffffff; }
-        .qc__gh-btn.qc__gh-danger:hover { background: #a40e26; }
+        .qc__gh-btn.qc__gh-primary { background: var(--gc-green-strong); color: var(--gc-text-on-accent); }
+        .qc__gh-btn.qc__gh-primary:hover { background: var(--gc-green-strong); }
+        .qc__gh-btn.qc__gh-danger { background: var(--gc-red-strong); color: var(--gc-text-on-accent); }
+        .qc__gh-btn.qc__gh-danger:hover { background: var(--gc-red-strong); }
         .qc__gh-btn.qc__gh-ghost {
-          background: #ffffff; border-color: #d0d7de; color: #1f2328;
+          background: var(--gc-bg-elevated); border-color: var(--gc-border); color: var(--gc-text);
         }
-        .qc__gh-btn.qc__gh-ghost:hover { background: #f6f8fa; }
+        .qc__gh-btn.qc__gh-ghost:hover { background: var(--gc-surface-soft); }
         .qc__gh-btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 
         .qc__gh-footer {
           padding: 10px 16px 14px;
-          border-top: 1px solid rgba(0,0,0,.06);
+          border-top: 1px solid var(--gc-border);
           flex: 0 0 auto;
         }
         .qc__gh-footerRow { display: grid; grid-template-columns: 1fr 1.3fr; gap: 10px; }
         .qc__gh-footerHint {
           margin-top: 6px; text-align: center;
-          font-size: 11px; color: #8b949e; min-height: 14px;
+          font-size: 11px; color: var(--gc-text-faint); min-height: 14px;
         }
 
         .qc__gh-connectCard {
           padding: 14px;
           border: 1px dashed rgba(26,115,232,.30);
           border-radius: 10px;
-          background: #f8faff;
+          background: var(--gc-accent-dim);
           text-align: center;
         }
         .qc__gh-connectIcon {
           width: 40px; height: 40px; border-radius: 999px;
-          background: #1a1e22; color: #fff;
+          background: var(--gc-bg);
+          color: var(--gc-text);
           display: grid; place-items: center; margin: 0 auto 8px;
         }
         .qc__gh-connectIcon .material-icons { font-size: 22px; }
         .qc__gh-connectTitle { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
-        .qc__gh-connectHint { font-size: 11.5px; color: #656d76; line-height: 1.45; }
-        .qc__gh-connectHint a { color: #1a73e8; text-decoration: none; }
+        .qc__gh-connectHint { font-size: 11.5px; color: var(--gc-text-muted); line-height: 1.45; }
+        .qc__gh-connectHint a { color: var(--gc-accent); text-decoration: none; }
         .qc__gh-connectHint a:hover { text-decoration: underline; }
 
         /* Layout en pasos para la pantalla unauth (Google + GitHub). */
@@ -972,28 +972,28 @@ class GasGithubPanel extends HTMLElement {
           width: 28px; height: 28px;
           border-radius: 999px;
           background: rgba(26,115,232,.10);
-          color: #1a73e8;
+          color: var(--gc-accent);
           display: grid; place-items: center;
           margin-top: 2px;
         }
         .qc__gh-connectStepIcon .material-icons { font-size: 18px; }
         .qc__gh-connectStepBody { flex: 1; min-width: 0; }
         .qc__gh-connectStepTitle {
-          font-size: 13px; font-weight: 600; color: #1f2328;
+          font-size: 13px; font-weight: 600; color: var(--gc-text);
         }
         .qc__gh-connectStepHint {
-          font-size: 11.5px; color: #656d76;
+          font-size: 11.5px; color: var(--gc-text-muted);
           line-height: 1.45; margin-top: 2px;
         }
         .qc__gh-connectStepActions {
           display: flex; gap: 6px; margin-top: 8px;
         }
         .qc__gh-connectStep.qc__gh-stepDisabled .qc__gh-connectStepIcon {
-          background: rgba(0,0,0,.05); color: #8b949e;
+          background: var(--gc-hover-soft); color: var(--gc-text-faint);
         }
-        .qc__gh-connectStep.qc__gh-stepDisabled .qc__gh-connectStepTitle { color: #8b949e; }
+        .qc__gh-connectStep.qc__gh-stepDisabled .qc__gh-connectStepTitle { color: var(--gc-text-faint); }
         .qc__gh-connectDivider {
-          height: 1px; background: rgba(0,0,0,.06);
+          height: 1px; background: var(--gc-hover-strong);
           margin: 8px 0;
         }
         /* Pequeño badge "G" para el botón de logout de Google en el header. */
@@ -1001,26 +1001,26 @@ class GasGithubPanel extends HTMLElement {
           font-family: "Google Sans", Roboto, Arial, sans-serif;
           font-weight: 700; font-size: 14px;
           line-height: 1;
-          color: #1a73e8;
+          color: var(--gc-accent);
         }
 
         .qc__gh-codeBox {
           display: flex; align-items: center; gap: 8px;
           margin-top: 10px; padding: 8px 10px;
-          background: #fff;
+          background: var(--gc-bg-elevated);
           border: 1px dashed rgba(26,115,232,.30); border-radius: 8px;
         }
         .qc__gh-Code {
           flex: 1;
           font-family: "Roboto Mono", Consolas, monospace;
           font-size: 18px; font-weight: 700; letter-spacing: 4px;
-          color: #1a73e8; text-align: center; user-select: all;
+          color: var(--gc-accent); text-align: center; user-select: all;
         }
 
         .qc__gh-spinner {
           display: inline-block; width: 12px; height: 12px;
           margin-right: 6px;
-          border: 2px solid rgba(26,115,232,.25); border-top-color: #1a73e8;
+          border: 2px solid var(--gc-accent-glow); border-top-color: var(--gc-accent);
           border-radius: 50%;
           vertical-align: -2px;
           animation: qc__gh-spin .9s linear infinite;
@@ -1028,7 +1028,7 @@ class GasGithubPanel extends HTMLElement {
         /* Variant for spinners over a colored button (e.g. green Push). */
         .qc__gh-spinner.qc__gh-spinnerOnDark {
           border-color: rgba(255,255,255,.45);
-          border-top-color: #ffffff;
+          border-top-color: var(--gc-text-on-accent);
         }
         @keyframes qc__gh-spin { to { transform: rotate(360deg); } }
         .qc__gh-spin .material-icons { animation: qc__gh-spin 1s linear infinite; }
@@ -1049,16 +1049,16 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-loaderRow {
           display: flex; align-items: center; gap: 12px;
           padding: 10px 12px;
-          border: 1px solid rgba(0,0,0,.06);
+          border: 1px solid var(--gc-border);
           border-radius: 10px;
-          background: linear-gradient(135deg, #f6f8fa, #ffffff 60%);
+          background: linear-gradient(135deg, var(--gc-surface-soft), var(--gc-bg-elevated) 60%);
         }
         .qc__gh-loaderTitle {
-          font-size: 13px; font-weight: 600; color: #1f2328;
+          font-size: 13px; font-weight: 600; color: var(--gc-text);
           line-height: 1.25;
         }
         .qc__gh-loaderSub {
-          font-size: 11.5px; color: #656d76;
+          font-size: 11.5px; color: var(--gc-text-muted);
           line-height: 1.3; margin-top: 2px;
         }
         .qc__gh-skel--rowGroup {
@@ -1087,15 +1087,15 @@ class GasGithubPanel extends HTMLElement {
           gap: 8px;
           padding: 8px 10px;
           margin-bottom: 8px;
-          background: #fff8c5;
-          border: 1px solid #d4a72c;
+          background: var(--gc-amber-soft);
+          border: 1px solid var(--gc-amber);
           border-radius: 8px;
           font-size: 12px;
-          color: #7d4e00;
+          color: var(--gc-amber-text);
         }
         .qc__gh-pullWarning .material-icons {
           font-size: 16px;
-          color: #d4a72c;
+          color: var(--gc-amber);
           flex: 0 0 auto;
         }
         .qc__gh-pullWarning strong {
@@ -1103,7 +1103,7 @@ class GasGithubPanel extends HTMLElement {
         }
 
         .qc__gh-skeleton {
-          background: linear-gradient(90deg, #eaeef2 0%, #f6f8fa 50%, #eaeef2 100%);
+          background: linear-gradient(90deg, var(--gc-surface-soft-hover) 0%, var(--gc-surface-soft) 50%, var(--gc-surface-soft-hover) 100%);
           background-size: 200% 100%;
           animation: qc__gh-shimmer 1.4s ease-in-out infinite;
           border-radius: 6px;
@@ -1114,19 +1114,19 @@ class GasGithubPanel extends HTMLElement {
           100% { background-position: -200% 0; }
         }
 
-        .qc__gh-hint { font-size: 11.5px; color: #656d76; margin: 0; }
+        .qc__gh-hint { font-size: 11.5px; color: var(--gc-text-muted); margin: 0; }
         .qc__gh-log {
           padding: 8px 10px;
-          border: 1px solid rgba(0,0,0,.06); border-radius: 8px;
-          background: #f6f8fa;
-          font-size: 11.5px; color: #1f2328;
+          border: 1px solid var(--gc-border); border-radius: 8px;
+          background: var(--gc-surface-soft);
+          font-size: 11.5px; color: var(--gc-text);
           max-height: 110px; overflow: auto;
           display: none;
           white-space: pre-wrap;
         }
         .qc__gh-log.qc__gh-visible { display: block; }
-        .qc__gh-log.qc__gh-error { background: #fde7eb; color: #cf222e; border-color: rgba(207,34,46,.20); }
-        .qc__gh-log.qc__gh-ok    { background: #dafbe1; color: #1a7f37; border-color: rgba(45,164,78,.25); }
+        .qc__gh-log.qc__gh-error { background: var(--gc-red-dim); color: var(--gc-red-text); border-color: var(--gc-red-soft); }
+        .qc__gh-log.qc__gh-ok    { background: var(--gc-green-dim); color: var(--gc-green-text); border-color: var(--gc-green-soft); }
 
         .qc__gh-toastStack {
           position: absolute;
@@ -1143,10 +1143,10 @@ class GasGithubPanel extends HTMLElement {
           padding: 8px 10px 8px 12px;
           border-radius: 10px;
           font-size: 12.5px;
-          color: #1f2328;
-          background: #ffffff;
-          border: 1px solid rgba(0,0,0,.10);
-          box-shadow: 0 8px 24px rgba(0,0,0,.12);
+          color: var(--gc-text);
+          background: var(--gc-bg-elevated);
+          border: 1px solid var(--gc-border);
+          box-shadow: var(--gc-shadow-menu);
           opacity: 0;
           transform: translateY(-6px);
           transition: opacity .18s ease-out, transform .18s ease-out;
@@ -1175,28 +1175,28 @@ class GasGithubPanel extends HTMLElement {
           cursor: pointer;
           display: inline-flex; align-items: center; justify-content: center;
         }
-        .qc__gh-toastClose:hover { opacity: 1; background: rgba(0,0,0,.06); }
+        .qc__gh-toastClose:hover { opacity: 1; background: var(--gc-hover-strong); }
         .qc__gh-toastClose .material-icons { font-size: 14px; }
 
         /* Variantes por tipo. */
         .qc__gh-toast--ok {
-          background: #dafbe1;
-          border-color: rgba(45,164,78,.30);
-          color: #1a7f37;
+          background: var(--gc-green-dim);
+          border-color: var(--gc-green-soft);
+          color: var(--gc-green-text);
         }
-        .qc__gh-toast--ok .qc__gh-toastIcon { color: #1a7f37; }
+        .qc__gh-toast--ok .qc__gh-toastIcon { color: var(--gc-green-text); }
         .qc__gh-toast--error {
-          background: #fde7eb;
-          border-color: rgba(207,34,46,.30);
-          color: #cf222e;
+          background: var(--gc-red-dim);
+          border-color: var(--gc-red-soft);
+          color: var(--gc-red-text);
         }
-        .qc__gh-toast--error .qc__gh-toastIcon { color: #cf222e; }
+        .qc__gh-toast--error .qc__gh-toastIcon { color: var(--gc-red-text); }
         .qc__gh-toast--info {
-          background: #ddf4ff;
-          border-color: rgba(9,105,218,.25);
-          color: #0969da;
+          background: var(--gc-info-soft);
+          border-color: var(--gc-info-border);
+          color: var(--gc-info);
         }
-        .qc__gh-toast--info .qc__gh-toastIcon { color: #0969da; }
+        .qc__gh-toast--info .qc__gh-toastIcon { color: var(--gc-info); }
 
         .qc__gh-modalOverlay {
           position: absolute; inset: 0;
@@ -1210,9 +1210,11 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-modal {
           width: calc(100% - 40px);
           max-width: 380px;
-          background: #ffffff;
+          background: var(--gc-bg-elevated);
+          color: var(--gc-text);
+          border: 1px solid var(--gc-border);
           border-radius: 12px;
-          box-shadow: 0 12px 32px rgba(0,0,0,.20);
+          box-shadow: var(--gc-shadow-menu);
           padding: 18px;
           display: flex; flex-direction: column; gap: 12px;
           animation: qc__gh-modalIn .18s cubic-bezier(.2,.8,.2,1);
@@ -1234,7 +1236,7 @@ class GasGithubPanel extends HTMLElement {
           background: transparent;
         }
         .qc__gh-modalTextWrap::-webkit-scrollbar-thumb {
-          background: #d0d7de;
+          background: var(--gc-border);
           border-radius: 999px;
         }
         @keyframes qc__gh-modalIn {
@@ -1242,12 +1244,12 @@ class GasGithubPanel extends HTMLElement {
           to   { transform: translateY(0) scale(1); opacity: 1; }
         }
         .qc__gh-modalTitle {
-          font-size: 15px; font-weight: 600; color: #1f2328;
+          font-size: 15px; font-weight: 600; color: var(--gc-text);
           margin: 0 0 2px;
         }
         .qc__gh-modalText {
           font-size: 12.5px;
-          color: #1f2328;
+          color: var(--gc-text);
           line-height: 1.5;
         }
         .qc__gh-radioRow {
@@ -1256,14 +1258,14 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-radio {
           display: flex; align-items: flex-start; gap: 8px;
           padding: 10px;
-          border: 1px solid #d0d7de;
+          border: 1px solid var(--gc-border);
           border-radius: 8px;
           cursor: pointer;
           font-size: 12px;
-          color: #1f2328;
+          color: var(--gc-text);
           transition: background .12s, border-color .12s;
         }
-        .qc__gh-radio:hover { background: rgba(0,0,0,.03); }
+        .qc__gh-radio:hover { background: var(--gc-hover-soft); }
         .qc__gh-radio input { display: none; }
         .qc__gh-radioCircle {
           width: 14px; height: 14px;
@@ -1274,7 +1276,7 @@ class GasGithubPanel extends HTMLElement {
           position: relative;
         }
         .qc__gh-radio input:checked + .qc__gh-radioCircle {
-          border-color: #1a73e8;
+          border-color: var(--gc-accent);
         }
         .qc__gh-radio input:checked + .qc__gh-radioCircle::after {
           content: ''; position: absolute;
@@ -1284,35 +1286,35 @@ class GasGithubPanel extends HTMLElement {
           background: #1a73e8;
         }
         .qc__gh-radio:has(input:checked) {
-          border-color: #1a73e8;
+          border-color: var(--gc-accent);
           background: rgba(26,115,232,.04);
         }
         .qc__gh-radio strong { font-weight: 600; display: block; line-height: 1.3; }
         .qc__gh-radioHint {
           display: block;
-          color: #656d76;
+          color: var(--gc-text-muted);
           font-size: 11px;
           margin-top: 2px;
         }
         .qc__gh-modalFooter {
           flex: 0 0 auto;
-          border-top: 1px solid rgba(0,0,0,.06);
+          border-top: 1px solid var(--gc-border);
           padding-top: 10px;
           margin-top: 4px;
         }
         .qc__gh-modalSelect {
           height: 36px;
           padding: 0 10px;
-          border: 1px solid #d0d7de;
+          border: 1px solid var(--gc-border);
           border-radius: 8px;
-          background: #ffffff; color: #1f2328;
+          background: var(--gc-bg-elevated); color: var(--gc-text);
           font-size: 13px;
           font-family: inherit;
           outline: none;
           transition: border-color .15s, box-shadow .15s;
         }
         .qc__gh-modalSelect:focus {
-          border-color: #1a73e8;
+          border-color: var(--gc-accent);
           box-shadow: 0 0 0 3px rgba(26,115,232,.14);
         }
 
@@ -1321,32 +1323,32 @@ class GasGithubPanel extends HTMLElement {
         .qc__gh-pullSummary {
           display: flex; align-items: center; gap: 8px;
           padding: 8px 10px;
-          background: #f6f8fa;
-          border: 1px solid rgba(0,0,0,.06);
+          background: var(--gc-surface-soft);
+          border: 1px solid var(--gc-border);
           border-radius: 8px;
           font-size: 12.5px;
-          color: #1f2328;
+          color: var(--gc-text);
         }
         .qc__gh-pullSummary .material-icons {
-          font-size: 18px; color: #0969da;
+          font-size: 18px; color: var(--gc-info);
         }
         .qc__gh-pullSummaryCount { font-weight: 600; }
         .qc__gh-pullList {
           margin-top: 8px;
           margin-bottom: 8px;
-          border: 1px solid rgba(0,0,0,.06);
+          border: 1px solid var(--gc-border);
           border-radius: 8px;
           overflow: hidden;
           max-height: 220px;
           overflow-y: auto;
-          background: #fff;
+          background: var(--gc-bg-elevated);
         }
         .qc__gh-pullItem {
           display: flex; align-items: center; gap: 8px;
           padding: 6px 10px;
           font-size: 12px;
           line-height: 1.3;
-          border-bottom: 1px solid rgba(0,0,0,.04);
+          border-bottom: 1px solid var(--gc-border);
         }
         .qc__gh-pullItem:last-child { border-bottom: none; }
         .qc__gh-pullStatus {
@@ -1356,23 +1358,23 @@ class GasGithubPanel extends HTMLElement {
           font-size: 11px; font-weight: 700;
           flex: 0 0 auto;
         }
-        .qc__gh-pullStatus.add { background: rgba(45,164,78,.16); color: #1a7f37; }
-        .qc__gh-pullStatus.mod { background: rgba(154,103,0,.16); color: #9a6700; }
+        .qc__gh-pullStatus.add { background: var(--gc-green-soft); color: var(--gc-green-text); }
+        .qc__gh-pullStatus.mod { background: var(--gc-amber-soft); color: var(--gc-amber-text); }
         .qc__gh-pullPath {
           flex: 1; min-width: 0;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           font-family: "Roboto Mono", Consolas, monospace;
           font-size: 11.5px;
-          color: #1f2328;
+          color: var(--gc-text);
         }
         .qc__gh-pullDelta {
           flex: 0 0 auto;
           font-family: "Roboto Mono", Consolas, monospace;
           font-size: 10.5px;
-          color: #656d76;
+          color: var(--gc-text-muted);
         }
-        .qc__gh-pullDelta .add { color: #1a7f37; }
-        .qc__gh-pullDelta .del { color: #cf222e; }
+        .qc__gh-pullDelta .add { color: var(--gc-green-text); }
+        .qc__gh-pullDelta .del { color: var(--gc-red-text); }
         .qc__gh-pullNote {
           margin-top: 10px;
           padding: 8px 10px;
@@ -1380,19 +1382,19 @@ class GasGithubPanel extends HTMLElement {
           border-left: 3px solid #1a73e8;
           border-radius: 4px;
           font-size: 11.5px;
-          color: #1f2328;
+          color: var(--gc-text);
           line-height: 1.45;
         }
         .qc__gh-pullNote.warn {
-          background: rgba(207,34,46,.06);
-          border-left-color: #cf222e;
+          background: var(--gc-red-dim);
+          border-left-color: var(--gc-red-text);
         }
         .qc__gh-pullNote strong { font-weight: 600; }
         .qc__gh-pullCheckRow {
           display: flex; align-items: center; gap: 8px;
           margin-top: 10px;
           font-size: 12px;
-          color: #1f2328;
+          color: var(--gc-text);
           cursor: pointer;
           user-select: none;
         }
@@ -1457,9 +1459,7 @@ class GasGithubPanel extends HTMLElement {
     }
 
     // Validar token de GitHub. Si fue revocado → logout silencioso.
-    const ping = await this._bridgeCall_('GAS_GH_API_CALL', {
-      action: 'GET_USER', payload: {},
-    });
+    const ping = await this._ghApi_('GET_USER', {});
 
     if (!ping?.ok) {
       const msg = String(ping?.error || '');
@@ -1526,9 +1526,7 @@ class GasGithubPanel extends HTMLElement {
     this._loadingRepos = true;
     this._lastReposError = null;
     this._renderBody_();
-    const result = await this._bridgeCall_('GAS_GH_API_CALL', {
-      action: 'LIST_REPOS', payload: {},
-    });
+    const result = await this._ghApi_('LIST_REPOS', {});
     this._loadingRepos = false;
     if (result?.ok) {
       this._repos = Array.isArray(result.data) ? result.data : [];
@@ -1549,9 +1547,7 @@ class GasGithubPanel extends HTMLElement {
    */
   async _loadBranches_(fullName) {
     this._loadingBranches = true;
-    const res = await this._bridgeCall_('GAS_GH_API_CALL', {
-      action: 'LIST_BRANCHES', payload: { repo: fullName },
-    });
+    const res = await this._ghApi_('LIST_BRANCHES', { repo: fullName });
     this._loadingBranches = false;
     if (res?.ok) {
       this._branches = Array.isArray(res.data) ? res.data : [];
@@ -1729,7 +1725,7 @@ class GasGithubPanel extends HTMLElement {
 
     const googleConnected = !!this._googleUser;
     const googleStepIcon  = googleConnected
-      ? `<i class="material-icons" style="color:#1a7f37">check_circle</i>`
+      ? `<i class="material-icons" style="color: var(--gc-green-text)">check_circle</i>`
       : `<i class="material-icons">looks_one</i>`;
     const githubStepIcon  = `<i class="material-icons">looks_two</i>`;
 
@@ -1738,7 +1734,7 @@ class GasGithubPanel extends HTMLElement {
       : 'Required to read and write files in your Apps Script project.';
 
     const googleBtnLabel = this._googleAuthInFlight
-      ? `<span class="qc__gh-spinner"></span> Connecting…`
+      ? `<span class="qc__gh-spinner ${googleConnected ? '' : 'qc__gh-spinnerOnDark'}"></span> Connecting…`
       : (googleConnected
           ? `<i class="material-icons">refresh</i> Switch account`
           : `<i class="material-icons">login</i> Sign in with Google`);
@@ -1833,14 +1829,14 @@ class GasGithubPanel extends HTMLElement {
       ? `<i class="material-icons qc__gh-selectorIcon">folder</i>
          <span class="qc__gh-selectorLabel">${this._escape_(selectedRepo)}</span>`
       : `<i class="material-icons qc__gh-selectorIcon">folder_open</i>
-         <span class="qc__gh-selectorLabel" style="color:#8b949e">Select repository…</span>`;
+         <span class="qc__gh-selectorLabel" style="color: var(--gc-text-faint)">Select repository…</span>`;
 
     const branchLabel = selectedBranch
       ? `<i class="material-icons qc__gh-selectorIcon">call_split</i>
          <span class="qc__gh-selectorLabel">${this._escape_(selectedBranch)}</span>
          ${this._isDefaultBranch_() ? `<span class="qc__gh-selectorBadge">default</span>` : ''}`
       : `<i class="material-icons qc__gh-selectorIcon">call_split</i>
-         <span class="qc__gh-selectorLabel" style="color:#8b949e">Select branch…</span>`;
+         <span class="qc__gh-selectorLabel" style="color: var(--gc-text-faint)">Select branch…</span>`;
 
     // URL "Open on GitHub" que apunta a la branch seleccionada cuando
     // está disponible (lleva al mismo código que se ve localmente).
@@ -2241,7 +2237,7 @@ class GasGithubPanel extends HTMLElement {
     if (!items.length) {
       DomUtils.setHTML(wrap, `
         <div class="qc__gh-changesEmpty">
-          <i class="material-icons" style="font-size:32px; color:#2da44e">check_circle</i>
+          <i class="material-icons" style="font-size:32px; color: var(--gc-green-text)">check_circle</i>
           <div style="margin-top:8px">No pending changes</div>
         </div>
       `);
@@ -2350,7 +2346,7 @@ class GasGithubPanel extends HTMLElement {
     if (!items.length) {
       DomUtils.setHTML(wrap, `
         <div class="qc__gh-changesEmpty">
-          <i class="material-icons" style="font-size:32px; color:#2da44e">check_circle</i>
+          <i class="material-icons" style="font-size:32px; color: var(--gc-green-text)">check_circle</i>
           <div style="margin-top:8px">No differences</div>
         </div>
       `);
@@ -2533,7 +2529,7 @@ class GasGithubPanel extends HTMLElement {
     const canPull = enabled && !busy;
 
     const pullLabel = this._pulling
-      ? `<span class="qc__gh-spinner"></span> Pulling…`
+      ? `<span class="qc__gh-spinner qc__gh-spinnerOnDark"></span> Pulling…`
       : `<i class="material-icons">cloud_download</i> Pull`;
 
     const pushLabel = this._pushing
@@ -2623,13 +2619,10 @@ class GasGithubPanel extends HTMLElement {
     this._renderTabBody_();
     this._refreshFooterButtons_();
 
-    const res = await this._bridgeCall_('GAS_GH_API_CALL', {
-      action: 'FETCH_FILES',
-      payload: {
-        repo:     this._project.repo,
-        branch:   this._project.branch,
-        basePath: this._project.basePath || '',
-      },
+    const res = await this._ghApi_('FETCH_FILES', {
+      repo:     this._project.repo,
+      branch:   this._project.branch,
+      basePath: this._project.basePath || '',
     });
 
     this._loadingDiff = false;
@@ -2840,10 +2833,7 @@ class GasGithubPanel extends HTMLElement {
     this._triggerGasSave_();
     await new Promise((r) => setTimeout(r, 350));
 
-    const res = await this._bridgeCall_('GAS_GG_API_CALL', {
-      action: 'GET_CONTENT',
-      payload: { scriptId: this._scriptId },
-    });
+    const res = await this._ggApi_('GET_CONTENT', { scriptId: this._scriptId });
     if (!res?.ok || !res.data) {
       const msg = String(res?.error || '');
       // 401/403: la sesión Google se invalidó. Limpiamos el estado para
@@ -2877,10 +2867,7 @@ class GasGithubPanel extends HTMLElement {
     if (!this._scriptId)   return false;
     if (!Array.isArray(files)) return false;
 
-    const res = await this._bridgeCall_('GAS_GG_API_CALL', {
-      action:  'PUT_CONTENT',
-      payload: { scriptId: this._scriptId, files },
-    });
+    const res = await this._ggApi_('PUT_CONTENT', { scriptId: this._scriptId, files });
     if (!res?.ok) {
       const msg = String(res?.error || 'Could not write project content');
       if (/\b(401|403)\b/.test(msg)) {
@@ -3199,9 +3186,7 @@ class GasGithubPanel extends HTMLElement {
       this._updateAnchorBadge_();
       return;
     }
-    const ping = await this._bridgeCall_('GAS_GH_API_CALL', {
-      action: 'GET_USER', payload: {},
-    });
+    const ping = await this._ghApi_('GET_USER', {});
     if (ping?.ok && ping.data) {
       this._user = ping.data;
       if (this._scriptId) {
@@ -3317,13 +3302,10 @@ class GasGithubPanel extends HTMLElement {
     if (!result) return;
 
     this._toast_(`Creating branch ${result.name}…`, 'info', 1800);
-    const res = await this._bridgeCall_('GAS_GH_API_CALL', {
-      action:  'CREATE_BRANCH',
-      payload: {
-        repo:       this._project.repo,
-        name:       result.name,
-        fromBranch: result.fromBranch,
-      },
+    const res = await this._ghApi_('CREATE_BRANCH', {
+      repo:       this._project.repo,
+      name:       result.name,
+      fromBranch: result.fromBranch,
     });
 
     if (res?.ok) {
@@ -3345,44 +3327,36 @@ class GasGithubPanel extends HTMLElement {
    * @private
    */
   _openCreateBranchModal_() {
-    return new Promise((resolve) => {
-      let overlay = this.shadowRoot.querySelector('.qc__gh-modalOverlay');
-      if (overlay) overlay.remove();
+    const branches = this._branches || [];
+    const currentBranch = this._project?.branch || branches[0]?.name || '';
 
-      overlay = document.createElement('div');
-      overlay.className = 'qc__gh-modalOverlay';
+    const branchOptions = branches.map((b) => `
+      <option value="${this._escape_(b.name)}" ${b.name === currentBranch ? 'selected' : ''}>
+        ${this._escape_(b.name)}
+      </option>
+    `).join('') || `<option value="${this._escape_(currentBranch)}" selected>${this._escape_(currentBranch)}</option>`;
 
-      const branches = this._branches || [];
-      const currentBranch = this._project?.branch || branches[0]?.name || '';
+    const html = `
+      <div class="qc__gh-modal" role="dialog" aria-label="New branch">
+        <div class="qc__gh-modalTitle">New branch</div>
 
-      const branchOptions = branches.map((b) => `
-        <option value="${this._escape_(b.name)}" ${b.name === currentBranch ? 'selected' : ''}>
-          ${this._escape_(b.name)}
-        </option>
-      `).join('') || `<option value="${this._escape_(currentBranch)}" selected>${this._escape_(currentBranch)}</option>`;
+        <label class="qc__gh-fieldLabel" for="ghNewBranchName">Branch name</label>
+        <input id="ghNewBranchName" class="qc__gh-input" type="text"
+               placeholder="feature/awesome" autocomplete="off">
 
-      DomUtils.setHTML(overlay, `
-        <div class="qc__gh-modal" role="dialog" aria-label="New branch">
-          <div class="qc__gh-modalTitle">New branch</div>
+        <label class="qc__gh-fieldLabel" for="ghNewBranchFrom" style="margin-top:6px">
+          Based on
+        </label>
+        <select id="ghNewBranchFrom" class="qc__gh-modalSelect">${branchOptions}</select>
 
-          <label class="qc__gh-fieldLabel" for="ghNewBranchName">Branch name</label>
-          <input id="ghNewBranchName" class="qc__gh-input" type="text"
-                 placeholder="feature/awesome" autocomplete="off">
-
-          <label class="qc__gh-fieldLabel" for="ghNewBranchFrom" style="margin-top:6px">
-            Based on
-          </label>
-          <select id="ghNewBranchFrom" class="qc__gh-modalSelect">${branchOptions}</select>
-
-          <div class="qc__gh-modalFooter">
-            <button class="qc__gh-btn qc__gh-ghost" id="ghNewBranchCancel">Cancel</button>
-            <button class="qc__gh-btn qc__gh-primary" id="ghNewBranchCreate" disabled>Create</button>
-          </div>
+        <div class="qc__gh-modalFooter">
+          <button class="qc__gh-btn qc__gh-ghost" id="ghNewBranchCancel">Cancel</button>
+          <button class="qc__gh-btn qc__gh-primary" id="ghNewBranchCreate" disabled>Create</button>
         </div>
-      `);
+      </div>
+    `;
 
-      this.shadowRoot.querySelector('.qc__gh-shell').appendChild(overlay);
-
+    return this._openModal_(html, (overlay, finish) => {
       const input  = overlay.querySelector('#ghNewBranchName');
       const from   = overlay.querySelector('#ghNewBranchFrom');
       const create = overlay.querySelector('#ghNewBranchCreate');
@@ -3399,8 +3373,6 @@ class GasGithubPanel extends HTMLElement {
           && !this._branches.some((b) => b.name === t);
       };
 
-      const finish = (value) => { overlay.remove(); resolve(value); };
-
       input.addEventListener('input', () => {
         create.disabled = !validName(input.value);
       });
@@ -3414,9 +3386,6 @@ class GasGithubPanel extends HTMLElement {
       cancel.addEventListener('click', () => finish(null));
       create.addEventListener('click', () => {
         finish({ name: input.value.trim(), fromBranch: from.value });
-      });
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) finish(null);
       });
 
       setTimeout(() => input.focus(), 30);
@@ -3436,9 +3405,7 @@ class GasGithubPanel extends HTMLElement {
 
     const { name, isPrivate } = result;
     this._toast_(`Creating ${name}…`, 'info', 1800);
-    const res = await this._bridgeCall_('GAS_GH_API_CALL', {
-      action: 'CREATE_REPO', payload: { name, isPrivate },
-    });
+    const res = await this._ghApi_('CREATE_REPO', { name, isPrivate });
     if (res?.ok) {
       this._toast_(`Repository created: ${res.data.full_name}`, 'ok');
       this._repos = [{ ...res.data, private: isPrivate }, ...this._repos];
@@ -3463,61 +3430,49 @@ class GasGithubPanel extends HTMLElement {
    * @private
    */
   _openCreateRepoModal_() {
-    return new Promise((resolve) => {
-      let overlay = this.shadowRoot.querySelector('.qc__gh-modalOverlay');
-      if (overlay) overlay.remove();
+    const html = `
+      <div class="qc__gh-modal" role="dialog" aria-label="New repository">
+        <div class="qc__gh-modalTitle">New repository</div>
 
-      overlay = document.createElement('div');
-      overlay.className = 'qc__gh-modalOverlay';
-      DomUtils.setHTML(overlay, `
-        <div class="qc__gh-modal" role="dialog" aria-label="New repository">
-          <div class="qc__gh-modalTitle">New repository</div>
+        <label class="qc__gh-fieldLabel" for="ghNewRepoName">Name</label>
+        <input id="ghNewRepoName" class="qc__gh-input" type="text"
+               placeholder="my-project" autocomplete="off">
 
-          <label class="qc__gh-fieldLabel" for="ghNewRepoName">Name</label>
-          <input id="ghNewRepoName" class="qc__gh-input" type="text"
-                 placeholder="my-project" autocomplete="off">
-
-          <div class="qc__gh-radioRow">
-            <label class="qc__gh-radio">
-              <input type="radio" name="ghVisibility" value="private" checked>
-              <span class="qc__gh-radioCircle"></span>
-              <span>
-                <strong>Private</strong>
-                <span class="qc__gh-radioHint">Only you can see it</span>
-              </span>
-            </label>
-            <label class="qc__gh-radio">
-              <input type="radio" name="ghVisibility" value="public">
-              <span class="qc__gh-radioCircle"></span>
-              <span>
-                <strong>Public</strong>
-                <span class="qc__gh-radioHint">Anyone can see it</span>
-              </span>
-            </label>
-          </div>
-
-          <div class="qc__gh-modalFooter">
-            <button class="qc__gh-btn qc__gh-ghost" id="ghNewRepoCancel">Cancel</button>
-            <button class="qc__gh-btn qc__gh-primary" id="ghNewRepoCreate" disabled>
-              Create
-            </button>
-          </div>
+        <div class="qc__gh-radioRow">
+          <label class="qc__gh-radio">
+            <input type="radio" name="ghVisibility" value="private" checked>
+            <span class="qc__gh-radioCircle"></span>
+            <span>
+              <strong>Private</strong>
+              <span class="qc__gh-radioHint">Only you can see it</span>
+            </span>
+          </label>
+          <label class="qc__gh-radio">
+            <input type="radio" name="ghVisibility" value="public">
+            <span class="qc__gh-radioCircle"></span>
+            <span>
+              <strong>Public</strong>
+              <span class="qc__gh-radioHint">Anyone can see it</span>
+            </span>
+          </label>
         </div>
-      `);
 
-      this.shadowRoot.querySelector('.qc__gh-shell').appendChild(overlay);
+        <div class="qc__gh-modalFooter">
+          <button class="qc__gh-btn qc__gh-ghost" id="ghNewRepoCancel">Cancel</button>
+          <button class="qc__gh-btn qc__gh-primary" id="ghNewRepoCreate" disabled>
+            Create
+          </button>
+        </div>
+      </div>
+    `;
 
+    return this._openModal_(html, (overlay, finish) => {
       const input  = overlay.querySelector('#ghNewRepoName');
       const create = overlay.querySelector('#ghNewRepoCreate');
       const cancel = overlay.querySelector('#ghNewRepoCancel');
 
       // Validación simple: GitHub permite letras, números, ., -, _.
       const validName = (v) => /^[A-Za-z0-9._-]+$/.test(v.trim()) && v.trim().length <= 100;
-
-      const finish = (value) => {
-        overlay.remove();
-        resolve(value);
-      };
 
       input.addEventListener('input', () => {
         create.disabled = !validName(input.value);
@@ -3533,9 +3488,6 @@ class GasGithubPanel extends HTMLElement {
       create.addEventListener('click', () => {
         const isPrivate = overlay.querySelector('input[name="ghVisibility"]:checked').value === 'private';
         finish({ name: input.value.trim(), isPrivate });
-      });
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) finish(null);
       });
 
       setTimeout(() => input.focus(), 30);
@@ -3558,42 +3510,29 @@ class GasGithubPanel extends HTMLElement {
    * @private
    */
   _showConfirm_(opts) {
-    return new Promise((resolve) => {
-      let overlay = this.shadowRoot.querySelector('.qc__gh-modalOverlay');
-      if (overlay) overlay.remove();
+    const tone = opts.tone === 'danger' ? 'qc__gh-danger' : 'qc__gh-primary';
+    const cLabel = opts.confirmLabel || 'Confirm';
+    const xLabel = opts.cancelLabel  || 'Cancel';
 
-      overlay = document.createElement('div');
-      overlay.className = 'qc__gh-modalOverlay';
-
-      const tone = opts.tone === 'danger' ? 'qc__gh-danger' : 'qc__gh-primary';
-      const cLabel = opts.confirmLabel || 'Confirm';
-      const xLabel = opts.cancelLabel  || 'Cancel';
-
-      DomUtils.setHTML(overlay, `
-        <div class="qc__gh-modal" role="dialog" aria-label="${this._escape_(opts.title)}">
-          <div class="qc__gh-modalTitle">${this._escape_(opts.title)}</div>
-          <div class="qc__gh-modalTextWrap">
-            <div class="qc__gh-modalText">${this._escape_(opts.message).replace(/\n/g, '<br>')}</div>
-          </div>
-          <div class="qc__gh-modalFooter">
-            <button class="qc__gh-btn qc__gh-ghost" id="ghConfirmCancel">${this._escape_(xLabel)}</button>
-            <button class="qc__gh-btn ${tone}" id="ghConfirmOk">${this._escape_(cLabel)}</button>
-          </div>
+    const html = `
+      <div class="qc__gh-modal" role="dialog" aria-label="${this._escape_(opts.title)}">
+        <div class="qc__gh-modalTitle">${this._escape_(opts.title)}</div>
+        <div class="qc__gh-modalTextWrap">
+          <div class="qc__gh-modalText">${this._escape_(opts.message).replace(/\n/g, '<br>')}</div>
         </div>
-      `);
+        <div class="qc__gh-modalFooter">
+          <button class="qc__gh-btn qc__gh-ghost" id="ghConfirmCancel">${this._escape_(xLabel)}</button>
+          <button class="qc__gh-btn ${tone}" id="ghConfirmOk">${this._escape_(cLabel)}</button>
+        </div>
+      </div>
+    `;
 
-      this.shadowRoot.querySelector('.qc__gh-shell').appendChild(overlay);
-
+    return this._openModal_(html, (overlay, finish) => {
       const ok     = overlay.querySelector('#ghConfirmOk');
       const cancel = overlay.querySelector('#ghConfirmCancel');
 
-      const finish = (value) => { overlay.remove(); resolve(value); };
-
       ok.addEventListener('click', () => finish(true));
       cancel.addEventListener('click', () => finish(false));
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) finish(false);
-      });
 
       const onKey = (e) => {
         if (e.key === 'Enter')   { e.preventDefault(); finish(true); }
@@ -3601,7 +3540,7 @@ class GasGithubPanel extends HTMLElement {
       };
       overlay.addEventListener('keydown', onKey);
       setTimeout(() => ok.focus(), 30);
-    });
+    }, false);
   }
 
   /**
@@ -3620,119 +3559,111 @@ class GasGithubPanel extends HTMLElement {
    * @private
    */
   _showPullConfirm_(opts) {
-    return new Promise((resolve) => {
-      let overlay = this.shadowRoot.querySelector('.qc__gh-modalOverlay');
-      if (overlay) overlay.remove();
-      overlay = document.createElement('div');
-      overlay.className = 'qc__gh-modalOverlay';
+    // Solo dibujamos los archivos que efectivamente entran (mod/del).
+    // Los 'add' (locales) se mencionan en el footer como aclaración
+    // pero no contaminan la lista visual.
+    const incoming = opts.files.filter((f) => f.status === 'mod' || f.status === 'del');
+    const incomingByKind = {
+      add: incoming.filter((f) => f.status === 'del').length,  // 'del'=remoto-only=nuevo en GAS
+      mod: incoming.filter((f) => f.status === 'mod').length,
+    };
 
-      // Solo dibujamos los archivos que efectivamente entran (mod/del).
-      // Los 'add' (locales) se mencionan en el footer como aclaración
-      // pero no contaminan la lista visual.
-      const incoming = opts.files.filter((f) => f.status === 'mod' || f.status === 'del');
-      const incomingByKind = {
-        add: incoming.filter((f) => f.status === 'del').length,  // 'del'=remoto-only=nuevo en GAS
-        mod: incoming.filter((f) => f.status === 'mod').length,
-      };
+    const summaryParts = [];
+    if (incomingByKind.add) summaryParts.push(`<span class="qc__gh-pullSummaryCount">${incomingByKind.add} new</span>`);
+    if (incomingByKind.mod) summaryParts.push(`<span class="qc__gh-pullSummaryCount">${incomingByKind.mod} modified</span>`);
+    const summaryText = summaryParts.length
+      ? summaryParts.join(' · ')
+      : '<span class="qc__gh-pullSummaryCount">Nothing to apply</span>';
 
-      const summaryParts = [];
-      if (incomingByKind.add) summaryParts.push(`<span class="qc__gh-pullSummaryCount">${incomingByKind.add} new</span>`);
-      if (incomingByKind.mod) summaryParts.push(`<span class="qc__gh-pullSummaryCount">${incomingByKind.mod} modified</span>`);
-      const summaryText = summaryParts.length
-        ? summaryParts.join(' · ')
-        : '<span class="qc__gh-pullSummaryCount">Nothing to apply</span>';
-
-      const itemsHtml = incoming.length
-        ? incoming.map((f) => {
-            const kindClass = f.status === 'del' ? 'add' : 'mod';
-            const kindChar  = f.status === 'del' ? '+' : '~';
-            const delta = f.status === 'mod'
-              ? `<span class="qc__gh-pullDelta">
-                   <span class="add">+${f.plus || 0}</span>
-                   <span class="del">-${f.minus || 0}</span>
-                 </span>`
-              : '';
-            return `
-              <div class="qc__gh-pullItem">
-                <span class="qc__gh-pullStatus ${kindClass}">${kindChar}</span>
-                <span class="qc__gh-pullPath">${this._escape_(f.path)}</span>
-                ${delta}
-              </div>
-            `;
-          }).join('')
-        : `<div class="qc__gh-pullItem"><span class="qc__gh-pullPath" style="color:#8b949e">No incoming changes.</span></div>`;
-
-      const localOnlyHint = opts.localOnlyCount
-        ? `
-          <div class="qc__gh-pullNote" style="margin-top:0">
-            <strong>${opts.localOnlyCount} local-only file(s)</strong> will be
-            ignored — they are not in the repo, push them separately if needed.
-          </div>
-        `
-        : '';
-
-      const reloadCheck = opts.reloadAvailable
-        ? `
-          <label class="qc__gh-pullCheckRow">
-            <input id="ghPullReload" type="checkbox" checked>
-            Reload this GAS tab after applying so the editor shows the new content.
-          </label>
-        `
-        : '';
-
-      DomUtils.setHTML(overlay, `
-        <div class="qc__gh-modal" role="dialog" aria-label="Pull from repository"
-             style="max-width: 460px">
-          <div class="qc__gh-modalTitle">Pull from repository</div>
-
-          <div class="qc__gh-modalTextWrap">
-            <div class="qc__gh-pullSummary">
-              <i class="material-icons">cloud_download</i>
-              <span>${summaryText} from <strong>${this._escape_((this._project?.repo || '') + '@' + (this._project?.branch || ''))}</strong></span>
+    const itemsHtml = incoming.length
+      ? incoming.map((f) => {
+          const kindClass = f.status === 'del' ? 'add' : 'mod';
+          const kindChar  = f.status === 'del' ? '+' : '~';
+          const delta = f.status === 'mod'
+            ? `<span class="qc__gh-pullDelta">
+                 <span class="add">+${f.plus || 0}</span>
+                 <span class="del">-${f.minus || 0}</span>
+               </span>`
+            : '';
+          return `
+            <div class="qc__gh-pullItem">
+              <span class="qc__gh-pullStatus ${kindClass}">${kindChar}</span>
+              <span class="qc__gh-pullPath">${this._escape_(f.path)}</span>
+              ${delta}
             </div>
+          `;
+        }).join('')
+      : `<div class="qc__gh-pullItem"><span class="qc__gh-pullPath" style="color: var(--gc-text-faint)">No incoming changes.</span></div>`;
 
-            <div class="qc__gh-pullList">${itemsHtml}</div>
-
-            ${localOnlyHint}
-            ${reloadCheck}
-          </div>
-
-          <div class="qc__gh-modalFooter">
-            <button class="qc__gh-btn qc__gh-ghost" id="ghConfirmCancel">Cancel</button>
-            <button class="qc__gh-btn qc__gh-primary" id="ghConfirmOk"
-                    ${incoming.length ? '' : 'disabled'}>
-              Apply changes
-            </button>
-          </div>
+    const localOnlyHint = opts.localOnlyCount
+      ? `
+        <div class="qc__gh-pullNote" style="margin-top:0">
+          <strong>${opts.localOnlyCount} local-only file(s)</strong> will be
+          ignored — they are not in the repo, push them separately if needed.
         </div>
-      `);
-      this.shadowRoot.querySelector('.qc__gh-shell').appendChild(overlay);
+      `
+      : '';
 
+    const reloadCheck = opts.reloadAvailable
+      ? `
+        <label class="qc__gh-pullCheckRow">
+          <input id="ghPullReload" type="checkbox" checked>
+          Reload this GAS tab after applying so the editor shows the new content.
+        </label>
+      `
+      : '';
+
+    const html = `
+      <div class="qc__gh-modal" role="dialog" aria-label="Pull from repository"
+           style="max-width: 460px">
+        <div class="qc__gh-modalTitle">Pull from repository</div>
+
+        <div class="qc__gh-modalTextWrap">
+          <div class="qc__gh-pullSummary">
+            <i class="material-icons">cloud_download</i>
+            <span>${summaryText} from <strong>${this._escape_((this._project?.repo || '') + '@' + (this._project?.branch || ''))}</strong></span>
+          </div>
+
+          <div class="qc__gh-pullList">${itemsHtml}</div>
+
+          ${localOnlyHint}
+          ${reloadCheck}
+        </div>
+
+        <div class="qc__gh-modalFooter">
+          <button class="qc__gh-btn qc__gh-ghost" id="ghConfirmCancel">Cancel</button>
+          <button class="qc__gh-btn qc__gh-primary" id="ghConfirmOk"
+                  ${incoming.length ? '' : 'disabled'}>
+            Apply changes
+          </button>
+        </div>
+      </div>
+    `;
+
+    // Cancel resuelve con `{confirmed:false, reload:false}` (no `null`).
+    const cancelValue = { confirmed: false, reload: false };
+
+    return this._openModal_(html, (overlay, finish) => {
       const ok     = overlay.querySelector('#ghConfirmOk');
       const cancel = overlay.querySelector('#ghConfirmCancel');
       const reload = overlay.querySelector('#ghPullReload');
 
-      const finish = (confirmed) => {
-        const result = {
+      const finalize = (confirmed) => {
+        finish({
           confirmed,
           reload: confirmed && opts.reloadAvailable && (reload?.checked ?? false),
-        };
-        overlay.remove();
-        resolve(result);
+        });
       };
 
-      ok.addEventListener('click', () => finish(true));
-      cancel.addEventListener('click', () => finish(false));
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) finish(false);
-      });
+      ok.addEventListener('click', () => finalize(true));
+      cancel.addEventListener('click', () => finalize(false));
       const onKey = (e) => {
-        if (e.key === 'Enter')  { e.preventDefault(); if (!ok.disabled) finish(true); }
-        if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+        if (e.key === 'Enter')  { e.preventDefault(); if (!ok.disabled) finalize(true); }
+        if (e.key === 'Escape') { e.preventDefault(); finalize(false); }
       };
       overlay.addEventListener('keydown', onKey);
       setTimeout(() => ok.focus(), 30);
-    });
+    }, cancelValue);
   }
 
 
@@ -3791,20 +3722,17 @@ class GasGithubPanel extends HTMLElement {
 
     let res;
     try {
-      res = await this._bridgeCall_('GAS_GH_API_CALL', {
-        action: 'PUSH_FILES',
-        payload: {
-          repo:     this._project.repo,
-          branch:   this._project.branch,
-          basePath: this._project.basePath || '',
-          files:    selectedFiles.map((f) => ({
-            path:    f.path,
-            // Normalize line endings + trailing newline to match the
-            // diff comparison so a fresh push leaves everything 'eq'.
-            content: String(f.source ?? '').replace(/\r\n?/g, '\n').replace(/\n?$/, '\n'),
-          })),
-          message,
-        },
+      res = await this._ghApi_('PUSH_FILES', {
+        repo:     this._project.repo,
+        branch:   this._project.branch,
+        basePath: this._project.basePath || '',
+        files:    selectedFiles.map((f) => ({
+          path:    f.path,
+          // Normalize line endings + trailing newline to match the
+          // diff comparison so a fresh push leaves everything 'eq'.
+          content: String(f.source ?? '').replace(/\r\n?/g, '\n').replace(/\n?$/, '\n'),
+        })),
+        message,
       });
     } finally {
       this._pushing = false;
@@ -4072,6 +4000,33 @@ class GasGithubPanel extends HTMLElement {
    * @returns {Promise<*>}
    * @private
    */
+  /**
+   * Atajo para invocar la API de GitHub a través del bridge. Centraliza
+   * el patrón `_bridgeCall_('GAS_GH_API_CALL', { action, payload })` que
+   * se repite en todas las operaciones contra el background.
+   *
+   * @param {string} action - Acción reconocida por el background (ej. 'LIST_REPOS').
+   * @param {object} [payload] - Argumentos específicos de la acción.
+   * @param {{timeoutMs?:number}} [opts]
+   * @returns {Promise<{ok:boolean, data?:*, error?:string}>}
+   * @private
+   */
+  _ghApi_(action, payload = {}, opts = {}) {
+    return this._bridgeCall_('GAS_GH_API_CALL', { action, payload }, opts);
+  }
+
+  /**
+   * Atajo equivalente para la API de Google (Apps Script API + userinfo).
+   * @param {string} action
+   * @param {object} [payload]
+   * @param {{timeoutMs?:number}} [opts]
+   * @returns {Promise<{ok:boolean, data?:*, error?:string}>}
+   * @private
+   */
+  _ggApi_(action, payload = {}, opts = {}) {
+    return this._bridgeCall_('GAS_GG_API_CALL', { action, payload }, opts);
+  }
+
   _bridgeCall_(eventName, payload = {}, opts = {}) {
     return new Promise((resolve) => {
       const requestId = `gh_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -4263,6 +4218,46 @@ class GasGithubPanel extends HTMLElement {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Crea un overlay modal dentro del shadow root del panel y lo inserta
+   * en `.qc__gh-shell`. Centraliza el patrón compartido por
+   * `_openCreateBranchModal_`, `_openCreateRepoModal_`, `_showConfirm_`
+   * y `_showPullConfirm_`: limpiar overlay anterior, crear el contenedor,
+   * inyectar HTML y registrar los listeners de cierre por click fuera.
+   *
+   * El callback `onMount(overlay, finish)` recibe el overlay ya montado
+   * y un helper `finish(value)` que lo desmonta y resuelve la promesa.
+   * El consumidor se encarga de cablear botones y atajos de teclado.
+   *
+   * @param {string}   html        - Contenido HTML del overlay (incluye `.qc__gh-modal`).
+   * @param {Function} onMount     - `(overlay, finish) => void`. Cablea los listeners.
+   * @param {*}        [cancelValue=null] - Valor con el que se resuelve si se cancela
+   *                                         haciendo click fuera del modal.
+   * @returns {Promise<*>} Lo que `finish(value)` reciba.
+   * @private
+   */
+  _openModal_(html, onMount, cancelValue = null) {
+    return new Promise((resolve) => {
+      // Si quedó un overlay previo, lo desmontamos antes de pintar el nuevo.
+      this.shadowRoot.querySelector('.qc__gh-modalOverlay')?.remove();
+
+      const overlay = document.createElement('div');
+      overlay.className = 'qc__gh-modalOverlay';
+      DomUtils.setHTML(overlay, html);
+      this.shadowRoot.querySelector('.qc__gh-shell').appendChild(overlay);
+
+      const finish = (value) => { overlay.remove(); resolve(value); };
+
+      // Click fuera del modal = cancelar (los modales no son modales 100%
+      // bloqueantes; se descartan con click en el backdrop).
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) finish(cancelValue);
+      });
+
+      onMount(overlay, finish);
+    });
   }
 
 

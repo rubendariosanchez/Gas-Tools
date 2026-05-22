@@ -147,7 +147,6 @@ class GasChatPanel extends HTMLElement {
       provider: 'gemini',
       model: 'gemini-2.5-flash-lite',
       apiKeys: {},
-      theme: 'light',
       // Configuración por proveedor: { providerId: { temperature, systemPrompt, customModels } }
       providerSettings: {},
     };
@@ -192,6 +191,7 @@ class GasChatPanel extends HTMLElement {
 
   /** Renderiza el shell, conecta listeners globales y carga la configuración. */
   connectedCallback() {
+    DomUtils.syncHostTheme(this);
     this._render();
     this._setupListeners();
     document.addEventListener('GAS_LLM_RESPONSE', this._onLlmResponse);
@@ -226,10 +226,7 @@ class GasChatPanel extends HTMLElement {
    * abierto (solo uno visible a la vez).
    */
   open() {
-    document.querySelector('gas-search-panel')?.close?.();
-    document.querySelector('gas-actions-panel')?.close?.();
-    document.querySelector('gas-current-file')?.close?.();
-    document.querySelector('gas-github-panel')?.close?.();
+    DomUtils.closeOtherFloatingPanels('gas-chat-panel');
     this.style.display = 'flex';
     this.style.pointerEvents = 'auto';
     setTimeout(() => {
@@ -265,31 +262,13 @@ class GasChatPanel extends HTMLElement {
         };
       }
 
-      // Aplicar tema desde config (por defecto: claro)
-      this._applyTheme_(this._config.theme || 'light');
+      // El tema (light/dark) lo decide ahora la opción global
+      // "IDE Dark Mode" del popup. `gas-tools.js` se encarga de poner
+      // el atributo `theme` en este host vía DomUtils.syncHostTheme.
       this._loadAiContext_();
       this._refreshComposerProviderUI_();
       this._refreshSettingsUI_();
     });
-  }
-
-  /** Aplica el tema al panel. */
-  _applyTheme_(theme) {
-    if (theme === 'light') {
-      this.setAttribute('theme', 'light');
-    } else {
-      this.removeAttribute('theme');
-    }
-    const btn = this.shadowRoot?.getElementById('gc__themeToggle');
-    if (btn) btn.textContent = theme === 'light' ? '☀' : '🌙';
-  }
-
-  /** Alterna entre tema claro y oscuro. */
-  _toggleTheme_() {
-    const newTheme = this._config.theme === 'light' ? 'dark' : 'light';
-    this._config.theme = newTheme;
-    this._applyTheme_(newTheme);
-    this._saveConfig();
   }
 
   /** Carga el AI Context global desde el background. */
@@ -550,92 +529,12 @@ Respond in English with practical, production-ready code examples.`,
         /* ── Google Fonts import ── */
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
 
-/* ── Design tokens ── */
-        :host {
-          /* Default: dark theme (no attribute) */          
-          --gc-color-message: #ddeeff;
-          --gc-bg:          #16181c;
-          --gc-bg-raised:   #1e2027;
-          --gc-bg-elevated: #262830;
-          --gc-bg-input:    #1a1c23;
-          --gc-border:      rgba(255,255,255,.08);
-          --gc-border-focus:rgba(99,179,237,.5);
+        /* ── Design tokens compartidos por todos los paneles flotantes ── */
+        ${DomUtils.themeTokensCss()}
 
-          /* Text */
-          --gc-text:        #e8eaed;
-          --gc-text-muted:  #8b8fa8;
-          --gc-text-faint:  #4a4d5e;
-
-          /* Accents */
-          --gc-accent:      #63b3ed;
-          --gc-accent-dim:  rgba(99,179,237,.12);
-          --gc-accent-glow: rgba(99,179,237,.25);
-          --gc-green:       #68d391;
-          --gc-red:         #fc8181;
-          --gc-amber:       #f6ad55;
-
-          /* User bubble */
-          --gc-user-bg:     #2d3a52;
-          --gc-user-border: rgba(99,179,237,.2);
-
-          /* Code */
-          --gc-code-bg:     #11131a;
-          --gc-code-border: rgba(255,255,255,.06);
-
-          /* Radii */
-          --gc-r-sm:  6px;
-          --gc-r-md:  10px;
-          --gc-r-lg:  14px;
-          --gc-r-xl:  18px;
-          --gc-r-pill:999px;
-
-          /* Shadows */
-          --gc-shadow-panel: 0 32px 64px rgba(0,0,0,.7), 0 8px 24px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.05);
-          --gc-shadow-menu:  0 16px 40px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.07);
-
-          /* Typography */
-          --gc-font: 'DM Sans', system-ui, sans-serif;
-          --gc-mono: 'DM Mono', 'Fira Code', Consolas, monospace;
-
-          /* Transitions */
-          --gc-ease: cubic-bezier(.16,1,.3,1);
-        }
-
-        /* Theme: light */
-        :host([theme="light"]) {
-          --gc-color-message: #1a0a0a;
-          --gc-bg:          #fefefe;
-          --gc-bg-raised:   #f8f9fa;
-          --gc-bg-elevated:  #ffffff;
-          --gc-bg-input:    #fafbfc;
-          --gc-border:      rgba(0,0,0,.09);
-          --gc-border-focus:rgba(26,115,232,.5);
-
-          /* Text */
-          --gc-text:        #202124;
-          --gc-text-muted:  #5f6368;
-          --gc-text-faint:  #9aa0a6;
-
-          /* Accents */
-          --gc-accent:      #1a73e8;
-          --gc-accent-dim:  rgba(26,115,232,.08);
-          --gc-accent-glow: rgba(26,115,232,.2);
-          --gc-green:       #1e8e3e;
-          --gc-red:        #d93025;
-          --gc-amber:      #ea8600;
-
-          /* User bubble */
-          --gc-user-bg:     #e8f0fe;
-          --gc-user-border: rgba(26,115,232,.15);
-
-          /* Code */
-          --gc-code-bg:     #f5f5f5;
-          --gc-code-border: rgba(0,0,0,.06);
-
-          /* Shadows */
-          --gc-shadow-panel: 0 32px 64px rgba(0,0,0,.25), 0 8px 24px rgba(0,0,0,.15), 0 0 0 1px rgba(0,0,0,.08);
-          --gc-shadow-menu:  0 16px 40px rgba(0,0,0,.2), 0 0 0 1px rgba(0,0,0,.06);
-        }
+        /* Color de mensaje del chat (no se usa en otros paneles). */
+        :host { --gc-color-message: #ddeeff; }
+        :host([theme="light"]) { --gc-color-message: #1a0a0a; }
 
         /* ── Host shell ── */
         :host {
@@ -666,40 +565,6 @@ Respond in English with practical, production-ready code examples.`,
         @keyframes gc__panelIn {
           from { transform: translateY(-8px); opacity: 0; scale: .97; }
           to   { transform: translateY(0); opacity: 1; scale: 1; }
-        }
-
-        /* Theme: light - overrides */
-        :host([theme="light"]) {
-          --gc-bg:          #fefefe;
-          --gc-bg-raised:   #f8f9fa;
-          --gc-bg-elevated:  #ffffff;
-          --gc-bg-input:    #ffffff;
-          --gc-border:      rgba(0,0,0,.12);
-          --gc-border-focus:rgba(26,115,232,.5);
-
-          /* Text */
-          --gc-text:        #202124;
-          --gc-text-muted:  #5f6368;
-          --gc-text-faint:  #9aa0a6;
-
-          /* Accents */
-          --gc-accent:      #1a73e8;
-          --gc-accent-dim:  rgba(26,115,232,.1);
-          --gc-accent-glow: rgba(26,115,232,.25);
-          --gc-green:       #1e8e3e;
-          --gc-red:        #d93025;
-          --gc-amber:      #ea8600;
-
-          /* User bubble */
-          --gc-user-bg:     #e8f0fe;
-          --gc-user-border: rgba(26,115,232,.2);
-
-          /* Code */
-          --gc-code-bg:     #f8f9fa;
-          --gc-code-border: rgba(0,0,0,.08);
-
-          /* Shadows */
-          --gc-shadow-panel: 0 8px 32px rgba(0,0,0,.15), 0 2px 8px rgba(0,0,0,.1);
         }
 
         /* Light: input text color override */
@@ -841,25 +706,6 @@ Respond in English with practical, production-ready code examples.`,
         .gc__hBtn--close:hover {
           background: rgba(252,129,129,.12);
           color: var(--gc-red);
-        }
-
-        /* Theme toggle button */
-        .gc__themeToggle {
-          width: 28px; height: 28px;
-          border: none;
-          background: transparent;
-          color: var(--gc-text-muted);
-          border-radius: var(--gc-r-sm);
-          cursor: pointer;
-          display: grid; place-items: center;
-          font-size: 13px;
-          transition: background .12s, color .12s;
-          flex-shrink: 0;
-        }
-
-        .gc__themeToggle:hover {
-          background: var(--gc-bg-elevated);
-          color: var(--gc-accent);
         }
 
         /* Resize handle */
@@ -1784,9 +1630,6 @@ Respond in English with practical, production-ready code examples.`,
               <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
             </svg>
           </button>
-          <button id="gc__themeToggle" class="gc__themeToggle" title="Toggle light/dark theme" aria-label="Toggle theme">
-            ☀
-          </button>
           <button id="gc__clearBtn" class="gc__hBtn" title="Clear conversation" aria-label="Clear conversation">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
@@ -1968,12 +1811,7 @@ Respond in English with practical, production-ready code examples.`,
     // Puebla el selector de proveedores en el composer.
     const providerSelect = this.shadowRoot.getElementById('gc__providerSelect');
     if (providerSelect) {
-      DomUtils.setHTML(
-        providerSelect,
-        Object.entries(GAS_LLM_PROVIDERS)
-          .map(([id, p]) => `<option value="${id}">${p.label}</option>`)
-          .join('')
-      );
+      DomUtils.setHTML(providerSelect, this._providersAsOptions_());
     }
   }
 
@@ -2008,12 +1846,7 @@ Respond in English with practical, production-ready code examples.`,
     providerSel?.addEventListener('change', () => this._onProviderChange());
 
     if (settingsProvSel) {
-      DomUtils.setHTML(
-        settingsProvSel,
-        Object.entries(GAS_LLM_PROVIDERS)
-          .map(([id, p]) => `<option value="${id}">${p.label}</option>`)
-          .join('')
-      );
+      DomUtils.setHTML(settingsProvSel, this._providersAsOptions_());
     }
 
     settingsProvSel?.addEventListener('change', () => this._onSettingsProviderChange());
@@ -2024,7 +1857,6 @@ Respond in English with practical, production-ready code examples.`,
     closeBtn?.addEventListener('click', () => this.close());
     clearBtn?.addEventListener('click', () => { this._messages = []; this._renderMessages_(); });
     settingsBtn?.addEventListener('click', () => this._openSettings_());
-    sr.getElementById('gc__themeToggle')?.addEventListener('click', () => this._toggleTheme_());
     sr.getElementById('gc__resizeHandle')?.addEventListener('mousedown', (evt) => this._onResizeHandleMouseDown(evt));
     settingsBack?.addEventListener('click', () => this._closeSettings_());
     cancelBtn?.addEventListener('click', () => this._closeSettings_());
@@ -2110,7 +1942,7 @@ Respond in English with practical, production-ready code examples.`,
     const allModels = [...(provider?.models || []), ...customModels];
 
     const currentModel = settingsModelSel.value;
-    DomUtils.setHTML(settingsModelSel, allModels.map(m => `<option value="${m}">${m}</option>`).join(''));
+    DomUtils.setHTML(settingsModelSel, this._modelsAsOptions_(allModels));
     
     if (allModels.includes(currentModel)) {
       settingsModelSel.value = currentModel;
@@ -2130,7 +1962,7 @@ Respond in English with practical, production-ready code examples.`,
     const provider  = GAS_LLM_PROVIDERS[id];
     const provSettings = this._getProviderSettings_(id);
     const allModels = [...(provider?.models || []), ...(provSettings.customModels || [])];
-    DomUtils.setHTML(modelSel, allModels.map((m) => `<option value="${m}">${m}</option>`).join(''));
+    DomUtils.setHTML(modelSel, this._modelsAsOptions_(allModels));
     if (this._config.provider === id && this._config.model && allModels.includes(this._config.model)) {
       modelSel.value = this._config.model;
     } else if (allModels.length > 0) {
@@ -2166,7 +1998,7 @@ Respond in English with practical, production-ready code examples.`,
     const provider = GAS_LLM_PROVIDERS[id];
     const allModels = [...(provider?.models || []), ...(providerSettings.customModels || [])];
 
-    DomUtils.setHTML(settingsModelSel, allModels.map(m => `<option value="${m}">${m}</option>`).join(''));
+    DomUtils.setHTML(settingsModelSel, this._modelsAsOptions_(allModels));
     // Seleccionar modelo guardado solo si el proveedor coincide con el activo y el modelo existe
     if (this._config.provider === id && this._config.model && allModels.includes(this._config.model)) {
       settingsModelSel.value = this._config.model;
@@ -2301,6 +2133,42 @@ Respond in English with practical, production-ready code examples.`,
   // ──────────────────────────────────────────────────────────────────
   // RENDER DE MENSAJES + MARKDOWN
   // ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Acceso corto a un elemento del Shadow DOM por id.
+   * Equivalente a `this.shadowRoot.getElementById(id)`. Reduce ruido en
+   * los handlers que consultan varios IDs seguidos.
+   * @param {string} id
+   * @returns {HTMLElement|null}
+   * @private
+   */
+  _$(id) {
+    return this.shadowRoot.getElementById(id);
+  }
+
+  /**
+   * Construye el HTML de un `<select>` a partir de una lista de modelos.
+   * Centraliza el patrón `allModels.map(m => <option value="m">m</option>).join('')`
+   * que se repite en cada sincronización de selectores de modelo.
+   * @param {string[]} models
+   * @returns {string}
+   * @private
+   */
+  _modelsAsOptions_(models) {
+    return (models || []).map((m) => `<option value="${m}">${m}</option>`).join('');
+  }
+
+  /**
+   * Construye el HTML de `<option>` para el selector de proveedores LLM,
+   * usando los `id` y `label` declarados en `GAS_LLM_PROVIDERS`.
+   * @returns {string}
+   * @private
+   */
+  _providersAsOptions_() {
+    return Object.entries(GAS_LLM_PROVIDERS)
+      .map(([id, p]) => `<option value="${id}">${p.label}</option>`)
+      .join('');
+  }
 
   /**
    * Re-renderiza la lista completa de mensajes y hace scroll al final.
@@ -3029,7 +2897,7 @@ Respond in English with practical, production-ready code examples.`,
     const provSettings = this._getProviderSettings_(providerSel.value);
     const allModels    = [...(provider.models || []), ...(provSettings.customModels || [])];
 
-    DomUtils.setHTML(modelSel, allModels.map((m) => `<option value="${m}">${m}</option>`).join(''));
+    DomUtils.setHTML(modelSel, this._modelsAsOptions_(allModels));
     modelSel.value = this._config.model || allModels[0] || '';
   }
 
@@ -3052,18 +2920,13 @@ Respond in English with practical, production-ready code examples.`,
     const provSettings = this._getProviderSettings_(providerId);
 
     if (settingsProvSel) {
-      DomUtils.setHTML(
-        settingsProvSel,
-        Object.entries(GAS_LLM_PROVIDERS)
-          .map(([id, p]) => `<option value="${id}">${p.label}</option>`)
-          .join('')
-      );
+      DomUtils.setHTML(settingsProvSel, this._providersAsOptions_());
       settingsProvSel.value = providerId;
     }
 
     const allModels = [...(provider.models || []), ...(provSettings.customModels || [])];
     if (settingsModelSel) {
-      DomUtils.setHTML(settingsModelSel, allModels.map((m) => `<option value="${m}">${m}</option>`).join(''));
+      DomUtils.setHTML(settingsModelSel, this._modelsAsOptions_(allModels));
       settingsModelSel.value = this._config.model || allModels[0] || '';
     }
 

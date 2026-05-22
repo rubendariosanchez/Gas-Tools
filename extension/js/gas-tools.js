@@ -270,22 +270,6 @@ class GasCustomEditor {
       window.__gasReturnPending = false;
       this.refreshInitialModel();
     }
-    
-    // Log estructurado al inicializar la instancia: facilita diagnosticar
-    // re-inicializaciones causadas por navegación SPA o por toggles del popup.
-    console.groupCollapsed(
-      `%c[GASTools] %cGasCustomEditor inicializada %c@ ${new Date().toLocaleTimeString()}`,
-      'color:#6366f1;font-weight:bold',
-      'color:#10b981;font-weight:bold',
-      'color:#94a3b8'
-    );
-    console.log('referenceId :', this.options?.referenceId || '(ninguno)');
-    console.log('settings keys:', Object.keys(this.options?.settings || {}).length);
-    console.log('snippets    :', (this.options?.snippets || []).length);
-    console.log('activeTheme :', this.options?.activeTheme?.text || '(ninguno)');
-    console.log('rootParent :', this._rootParent || '(DOM)');
-    console.groupEnd();
-    
   }
 
   /**
@@ -1402,8 +1386,19 @@ class GasCustomEditor {
   }
 
   /**
-   * Aplica o remueve el tema dark al entorno completo del IDE de Google Apps Script.
-   * Usa colores fijos y las clases específicas de GAS para máxima compatibilidad.
+   * Aplica o remueve el tema dark al entorno completo del IDE de Google
+   * Apps Script y notifica al resto de Web Components inyectados.
+   *
+   * Tres responsabilidades:
+   *  1. Inyecta/elimina el `<style id="qc__ide-dark-mode">` con la
+   *     paleta dark para los nodos nativos de GAS.
+   *  2. Mantiene la clase `gc__is-dark-mode` en el `<body>` como única
+   *     fuente de verdad para que cualquier componente del proyecto
+   *     pueda adaptar su estética leyéndola.
+   *  3. Sincroniza el atributo `theme` en los Web Components flotantes
+   *     (`gas-search-panel`, `gas-chat-panel`, `gas-github-panel`,
+   *     `gas-actions-panel`, `gas-current-file`) para que adopten su
+   *     paleta dark/light al instante.
    *
    * @param {boolean} enabled - true para aplicar dark mode, false para removerlo.
    * @private
@@ -1411,6 +1406,14 @@ class GasCustomEditor {
   _applyIdeDarkMode(enabled) {
     const styleId = 'qc__ide-dark-mode';
     const existing = document.getElementById(styleId);
+
+    // Marca canónica en el <body>: el resto del proyecto la consulta para
+    // decidir su paleta sin duplicar heurísticas.
+    document.body.classList.toggle('gc__is-dark-mode', !!enabled);
+
+    // Propaga el tema a los Web Components inyectados. Cada panel decide
+    // cómo reaccionar al atributo `theme` desde su propio CSS scoped.
+    this._syncFloatingPanelsTheme_(enabled);
 
     if (!enabled) {
       existing?.remove();
@@ -1472,6 +1475,16 @@ class GasCustomEditor {
       .qc__folder-children li[role="option"] div[title]::before,
       .qc__folder-header {
         color: var(--gc__root-forenground) !important;
+      }
+
+      li.UeVsd {
+        filter: none !important;
+        background: #ffb62a24 !important;
+        border-radius: 2px;
+      }
+      
+      li.UeVsd .dxw0vf{
+        color: #cfcfcf !important;
       }
 
       .ry3kXd,
@@ -1587,6 +1600,39 @@ class GasCustomEditor {
     `;
 
     document.head.appendChild(style);
+  }
+
+  /**
+   * Sincroniza el atributo `theme` en los Web Components flotantes con
+   * el estado de la opción "IDE Dark Mode". Cada componente expone su
+   * propia paleta dark/light usando selectores `:host([theme="dark"])`
+   * o `:host([theme="light"])`; este helper solo activa/desactiva el
+   * atributo, no toca CSS interno.
+   *
+   * Se ejecuta tanto al toggle del usuario como al re-init del editor,
+   * para cubrir el caso de paneles que se montaron antes de que el
+   * estado dark estuviera disponible.
+   *
+   * @param {boolean} enabled - true para tema dark, false para tema light.
+   * @private
+   */
+  _syncFloatingPanelsTheme_(enabled) {
+    const tags = (typeof DomUtils !== 'undefined' && DomUtils.FLOATING_PANEL_TAGS)
+      ? DomUtils.FLOATING_PANEL_TAGS
+      : [
+          'gas-search-panel',
+          'gas-chat-panel',
+          'gas-current-file',
+          'gas-actions-panel',
+          'gas-github-panel',
+        ];
+
+    const value = enabled ? 'dark' : 'light';
+    for (const tag of tags) {
+      document.querySelectorAll(tag).forEach((el) => {
+        el.setAttribute('theme', value);
+      });
+    }
   }
 
   // ──────────────────────────────────────────
@@ -1814,8 +1860,13 @@ class GasCustomEditor {
     this._resetEditorDefaults();
     // 4. Eliminar la UI inyectada y los listeners
     this._teardownInjectedUi_();
-    // 5. Remover el tema dark del IDE si está aplicado
+    // 5. Remover el tema dark del IDE si está aplicado.
+    //    También quitamos la clase canónica del body y reseteamos el
+    //    atributo `theme` de los paneles flotantes a 'light' para que
+    //    cualquiera que se quede montado vuelva a su paleta clara.
     document.getElementById('qc__ide-dark-mode')?.remove();
+    document.body.classList.remove('gc__is-dark-mode');
+    this._syncFloatingPanelsTheme_(false);
 
     // 6. Deshabilitar autocompletado AI si existe
     if (this._aiAutocomplete) {
