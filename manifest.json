@@ -18,6 +18,12 @@
       "matches": [
         "https://script.google.com/*"
       ],
+      "exclude_matches": [
+        "https://script.google.com/macros/s/*",
+        "https://script.google.com/macros/u/*/s/*",
+        "https://script.google.com/macros/d/*/usercallback*",
+        "https://script.google.com/oauth/*"
+      ],
       "js": [
         "extension/js/main-functions.js"
       ],

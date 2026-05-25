@@ -1194,12 +1194,14 @@ class GasCustomEditor {
       severity = hasErr ? 'error' : hasWarn ? 'warning' : 'none';
     }
 
+    // Evento que muestra el nombre del archivo actual
     document.querySelectorAll('#ctnCurrentFileName').forEach((wrapper) => {
+      const btnCurrentFile_ = wrapper.querySelector('#ctnCurrentFileName .qc__cfn-host');
       const nameEl = wrapper.querySelector('#qcCfnName');
       const dotEl  = wrapper.querySelector('#qcCfnDot');
       if (nameEl) {
         nameEl.textContent = name;
-        nameEl.title = name;
+        btnCurrentFile_.setAttribute("data-tt", name);
       }
       if (dotEl) {
         dotEl.classList.remove('qc__cfn-dot--error', 'qc__cfn-dot--warning');
@@ -1428,63 +1430,96 @@ class GasCustomEditor {
       /* ═══════════════════════════════════════════════════════════════
          IDE DARK MODE - Google Apps Script Tools
          Tema dark para el entorno completo del IDE de GAS
-         Basado en clases específicas de Google Apps Script
+         Basado en clases específicas de Google Apps Script.
+         La paleta se mantiene alineada con la del chat/web components
+         (ver DomUtils.themeTokensCss): mismas familias de fondo, texto y
+         acento para que el IDE y los paneles flotantes "respiren" igual.
          ═══════════════════════════════════════════════════════════════ */
       :root{
-        --gc__root-background: #19161d;
-        --gc__root-forenground: #dfdedb;
+        /* Backgrounds (mirror de --gc-bg / --gc-bg-raised / --gc-bg-elevated). */
+        --gc__root-bg:           #16181c;
+        --gc__root-bg-raised:    #1e2027;
+        --gc__root-bg-elevated:  #262830;
+        --gc__root-bg-deep:      #11131a;  /* equivalente a --gc-code-bg */
+
+        /* Texto. */
+        --gc__root-foreground:   #e8eaed;  /* --gc-text */
+        --gc__root-text-muted:   #8b8fa8;  /* --gc-text-muted */
+
+        /* Borde sólido equivalente a --gc-border (rgba .08) sobre bg-raised. */
+        --gc__root-border:       #262830;
+
+        /* Acento (highlight de archivo activo, hovers azulados). */
+        --gc__root-accent-dim:   rgba(99,179,237,.12);  /* --gc-accent-dim */
+        --gc__root-accent-soft:  rgba(99,179,237,.20);
+
+        /* Aliases legacy: nombres antiguos siguen funcionando para
+           cualquier consumidor externo que los lea. */
+        --gc__root-background:   var(--gc__root-bg);
+        --gc__root-forenground:  var(--gc__root-foreground);
       }
 
       /* ── Fondo principal y body ────────────────────────────────── */
       body {
-        background: var(--gc__root-background) !important;
+        background: var(--gc__root-bg) !important;
+      }
+
+      .gb_Zc .gb_Vd{
+        color: var(--gc__root-foreground) !important;
+      }
+
+      .UGZzee, .jvZ3Wb, .e0Nwve{
+        color: var(--gc__root-text-muted) !important;
       }
 
       /* ── Header y navegación superior ──────────────────────────── */
       .voS0mf,
       .xifBgf {
-        background: var(--gc__root-background) !important;
-        border-bottom: 1px #25231f solid !important;
+        background: var(--gc__root-bg) !important;
+        border-bottom: 1px solid var(--gc__root-border) !important;
       }
 
       header {
-        background: black !important;
+        background: var(--gc__root-bg-deep) !important;
       }
 
       /* ── Separadores y bordes ──────────────────────────────────── */
       .ZHQ5U,
       .GLLFQe:not(:first-child) {
-        border-top: 1px #25231f solid !important;
+        border-top: 1px solid var(--gc__root-border) !important;
       }
 
       .yggLIc::after {
-        border-right: 1px #4c4c4c solid !important;
+        border-right: 1px solid var(--gc__root-bg-elevated) !important;
       }
 
       .LDouke,
       .MJnCFe {
-        border-left: 1px #25231f solid !important;
+        border-left: 1px solid var(--gc__root-border) !important;
       }
 
       /* ── Texto y colores de fuente ─────────────────────────────── */
       .AVdUn {
-        color: #cfcfcf !important;
+        color: var(--gc__root-text-muted) !important;
       }
 
       :not(.UeVsd) > .dxw0vf,
       .qc__folder-children li[role="option"] div[title]::before,
       .qc__folder-header {
-        color: var(--gc__root-forenground) !important;
+        color: var(--gc__root-foreground) !important;
       }
 
+      /* Item activo del árbol: usa el accent de la paleta del chat
+         (azul tenue) en vez de un ámbar suelto, para que el highlight
+         entre IDE y panels comparta lenguaje visual. */
       li.UeVsd {
         filter: none !important;
-        background: #ffb62a24 !important;
+        background: var(--gc__root-accent-dim) !important;
         border-radius: 2px;
       }
-      
-      li.UeVsd .dxw0vf{
-        color: #cfcfcf !important;
+
+      li.UeVsd .dxw0vf {
+        color: var(--gc__root-foreground) !important;
       }
 
       .ry3kXd,
@@ -1492,16 +1527,16 @@ class GasCustomEditor {
       .orScbe,
       .VfPpkd-fmcmS-yrriRe,
       .VfPpkd-fmcmS-yrriRe-OWXEXe-mWPk3d {
-        color: white !important;
+        color: var(--gc__root-foreground) !important;
       }
 
       .MocG8c {
-        color: #f7f7f7 !important;
+        color: var(--gc__root-foreground) !important;
       }
 
       .ncFHed .MocG8c,
       .eU809d {
-        color: var(--gc__root-background) !important;
+        color: var(--gc__root-bg) !important;
       }
 
       /* ── Paneles, modales y menús (inversión de colores) ───────── */
@@ -1576,20 +1611,21 @@ class GasCustomEditor {
 
       /* ── Scrollbars personalizados ─────────────────────────────── */
       ::-webkit-scrollbar {
-        background: var(--gc__root-background) !important;
+        background: var(--gc__root-bg) !important;
+        width: 6px !important;;
       }
 
       ::-webkit-scrollbar-thumb {
-        background: #4c4c4c !important;
+        background: var(--gc__root-bg-elevated) !important;
       }
 
       ::-webkit-scrollbar-thumb:hover {
-        background: #5c5c5c !important;
+        background: #3a3d47 !important;
       }
 
       /* ── Ajustes adicionales para compatibilidad ───────────────── */
       c-wiz[data-p] {
-        background: var(--gc__root-background) !important;
+        background: var(--gc__root-bg) !important;
       }
 
       /* Prevenir doble inversión en elementos anidados */
@@ -1633,6 +1669,12 @@ class GasCustomEditor {
         el.setAttribute('theme', value);
       });
     }
+
+    // El badge del botón de GitHub vive fuera del Shadow DOM (en la
+    // toolbar nativa de GAS) y usa estilos inline para el anillo. Tras
+    // cambiar el tema lo repintamos para que recalcule el color del
+    // ring contra el nuevo fondo del IDE.
+    document.querySelector('gas-github-panel')?.refreshBadge?.();
   }
 
   // ──────────────────────────────────────────

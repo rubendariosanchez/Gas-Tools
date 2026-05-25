@@ -7,7 +7,7 @@ import { THEME_LIST } from '../../../src/js/utils/Themes.js';
 // Importa el helper de IndexedDB para temas personalizados
 import { DB } from '../../../src/js/utils/Storage.js';
 // Helper compartido para construir errores HTTP legibles
-import { readHttpError } from './_http-utils.js';
+import { readHttpError } from './http-utils.js';
 
 /**
  * Resuelve el tema activo desde chrome.storage y, si es necesario, desde IndexedDB.

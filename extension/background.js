@@ -497,17 +497,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // ── GITHUB_API_CALL ───────────────────────────────────────────────
   // Despacho genérico para todas las llamadas autenticadas (list repos,
   // create, branches, push, fetch). El token se inyecta aquí desde
-  // storage para que NUNCA viaje al MAIN world.
+  // storage para que NUNCA viaje al MAIN world. Cuando la acción es
+  // PUSH_FILES, reenviamos eventos de progreso al tab originador para
+  // que el panel pueda pintar el avance archivo a archivo.
   if (msg.type === 'GITHUB_API_CALL') {
-    const { action, payload } = msg.payload || {};
+    const { action, payload, requestId } = msg.payload || {};
+    const tabId = sender?.tab?.id ?? null;
+
+    const onProgress = (action === 'PUSH_FILES' && tabId)
+      ? (evt) => {
+          try {
+            chrome.tabs.sendMessage(tabId, {
+              type:    'GH_PUSH_PROGRESS',
+              payload: { requestId, ...evt },
+            });
+          } catch (_) {}
+        }
+      : null;
+
     (async () => {
       try {
         const auth = await _getGithubAuth();
         if (!auth?.token) throw new Error('Not authenticated.');
-        const data = await callGithubApi(action, auth.token, payload || {});
+        const data = await callGithubApi(action, auth.token, payload || {}, { onProgress });
         sendResponse({ ok: true, data });
       } catch (err) {
-        sendResponse({ ok: false, error: String(err?.message || err) });
+        sendResponse({
+          ok: false,
+          error: String(err?.message || err),
+          uploadedBlobs: err?.uploadedBlobs || null,
+        });
       }
     })();
     return true;

@@ -15,7 +15,7 @@
  *  - Pull del árbol y descarga del contenido por archivo.
  */
 
-import { readHttpError } from './_http-utils.js';
+import { readHttpError } from './http-utils.js';
 
 const GH_BASE     = 'https://api.github.com';
 const GH_API_VER  = '2022-11-28';
@@ -97,6 +97,92 @@ function _headers(token, extra = {}) {
   };
 }
 
+// ─────────────────────────────────────────────
+// FETCH CON RETRY ANTE RATE LIMIT
+// ─────────────────────────────────────────────
+
+/**
+ * Detecta si una respuesta corresponde a un rate limit secundario o
+ * primario de GitHub. Cuando ocurre, GitHub responde con 403 (a veces
+ * 429 en endpoints nuevos) y un cuerpo o un header informativo.
+ *
+ * @param {Response} res
+ * @param {string}   bodyText  Cuerpo ya leído (texto).
+ * @returns {boolean}
+ */
+function _isRateLimited(res, bodyText) {
+  if (res.status === 429) return true;
+  if (res.status !== 403) return false;
+  if (res.headers.get('Retry-After')) return true;
+  if (res.headers.get('X-RateLimit-Remaining') === '0') return true;
+  return /(secondary rate limit|exceeded a (?:secondary )?rate limit|abuse detection)/i.test(bodyText || '');
+}
+
+/**
+ * Calcula cuánto esperar antes del siguiente reintento. Prioriza el
+ * header `Retry-After` (segundos), luego `X-RateLimit-Reset` (epoch),
+ * y finalmente un backoff exponencial. Cap a 60 s para no bloquear al
+ * usuario indefinidamente.
+ *
+ * @param {Response} res
+ * @param {number}   attempt  0-indexed
+ * @returns {number}  Milisegundos a esperar.
+ */
+function _retryDelayMs(res, attempt) {
+  const retryAfter = parseFloat(res.headers.get('Retry-After') || '');
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return Math.min(retryAfter * 1000, 60000);
+  }
+  const reset = parseInt(res.headers.get('X-RateLimit-Reset') || '', 10);
+  if (Number.isFinite(reset) && reset > 0) {
+    const wait = reset * 1000 - Date.now();
+    if (wait > 0) return Math.min(wait, 60000);
+  }
+  // Backoff exponencial: 1s, 2s, 4s, 8s.
+  return Math.min(1000 * Math.pow(2, attempt), 60000);
+}
+
+/**
+ * Wrapper de `fetch` que reintenta automáticamente en caso de rate
+ * limit secundario. Necesario para endpoints que se llaman varias veces
+ * por operación (blobs en push, blobs en pull): sin esto un push de
+ * muchos archivos basta para gatillar el rate limit y dejar al usuario
+ * con un error que parece de auth.
+ *
+ * @param {string} url
+ * @param {RequestInit} [init]
+ * @param {{maxRetries?:number}} [opts]
+ * @returns {Promise<Response>}
+ */
+async function _ghFetch(url, init, opts = {}) {
+  const maxRetries = opts.maxRetries ?? 3;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, init);
+    if (res.ok) return res;
+
+    // Para el caller: leemos el body solo si vamos a decidir si
+    // reintentar. Si decidimos no, devolvemos el Response intacto y el
+    // caller hace su propio readHttpError.
+    if (!_isRateLimited(res, '')) {
+      // Necesitamos leer body solo para detectar el "secondary rate
+      // limit" cuya señal está en el cuerpo. Clonamos para no consumir
+      // el original.
+      let body = '';
+      try { body = await res.clone().text(); } catch (_) {}
+      if (!_isRateLimited(res, body)) return res;
+    }
+
+    if (attempt === maxRetries) return res;
+
+    const delay = _retryDelayMs(res, attempt);
+    await new Promise((r) => setTimeout(r, delay));
+  }
+
+  // Inalcanzable; el bucle siempre devuelve antes.
+  return fetch(url, init);
+}
+
 /**
  * Lee el cuerpo de una respuesta fallida y devuelve un Error descriptivo.
  * @param {Response} res
@@ -144,7 +230,7 @@ function _fromBase64(b64) {
  * @returns {Promise<{login:string, name:string|null, avatar_url:string, html_url:string}>}
  */
 export async function getAuthenticatedUser(token) {
-  const res = await fetch(`${GH_BASE}/user`, { headers: _headers(token) });
+  const res = await _ghFetch(`${GH_BASE}/user`, { headers: _headers(token) });
   if (!res.ok) throw await _readError(res);
   const u = await res.json();
   return {
@@ -173,7 +259,7 @@ export async function listRepos(token, opts = {}) {
   const all = [];
   for (let page = 1; page <= maxPages; page++) {
     const url = `${GH_BASE}/user/repos?per_page=100&page=${page}&sort=pushed&affiliation=owner,collaborator,organization_member`;
-    const res = await fetch(url, { headers: _headers(token) });
+    const res = await _ghFetch(url, { headers: _headers(token) });
     if (!res.ok) throw await _readError(res);
     const items = await res.json();
     if (!Array.isArray(items) || !items.length) break;
@@ -200,7 +286,7 @@ export async function listRepos(token, opts = {}) {
  * @returns {Promise<{full_name:string, default_branch:string, html_url:string}>}
  */
 export async function createRepo(token, { name, isPrivate = true, description = '' }) {
-  const res = await fetch(`${GH_BASE}/user/repos`, {
+  const res = await _ghFetch(`${GH_BASE}/user/repos`, {
     method:  'POST',
     headers: _headers(token, { 'Content-Type': 'application/json' }),
     body:    JSON.stringify({
@@ -226,7 +312,7 @@ export async function createRepo(token, { name, isPrivate = true, description = 
  * @returns {Promise<Array<{name:string, commitSha:string}>>}
  */
 export async function listBranches(token, fullName) {
-  const res = await fetch(`${GH_BASE}/repos/${fullName}/branches?per_page=100`, {
+  const res = await _ghFetch(`${GH_BASE}/repos/${fullName}/branches?per_page=100`, {
     headers: _headers(token),
   });
   if (!res.ok) throw await _readError(res);
@@ -250,7 +336,7 @@ export async function createBranch(token, { repo, name, fromBranch }) {
   }
 
   // Resolve the source commit.
-  const srcRes = await fetch(
+  const srcRes = await _ghFetch(
     `${GH_BASE}/repos/${repo}/git/ref/heads/${encodeURIComponent(fromBranch)}`,
     { headers: _headers(token) }
   );
@@ -259,7 +345,7 @@ export async function createBranch(token, { repo, name, fromBranch }) {
   if (!sha) throw new Error('Could not resolve source branch SHA.');
 
   // Create the new ref.
-  const res = await fetch(`${GH_BASE}/repos/${repo}/git/refs`, {
+  const res = await _ghFetch(`${GH_BASE}/repos/${repo}/git/refs`, {
     method:  'POST',
     headers: _headers(token, { 'Content-Type': 'application/json' }),
     body:    JSON.stringify({ ref: `refs/heads/${name}`, sha }),
@@ -286,7 +372,7 @@ async function _getBranchCommitSha(token, fullName, branch) {
   // El SHA del head es lo que decide si un push será fast-forward, así
   // que necesitamos el valor en vivo aunque tarde un poco más.
   const url = `${GH_BASE}/repos/${fullName}/git/ref/heads/${encodeURIComponent(branch)}?_=${Date.now()}`;
-  const res = await fetch(url, {
+  const res = await _ghFetch(url, {
     headers: _headers(token, { 'Cache-Control': 'no-cache' }),
     cache:   'no-store',
   });
@@ -303,24 +389,72 @@ async function _getBranchCommitSha(token, fullName, branch) {
  */
 async function _getTree(token, fullName, commitSha) {
   // 1. Necesitamos el tree sha del commit.
-  const cRes = await fetch(`${GH_BASE}/repos/${fullName}/git/commits/${commitSha}`, {
+  const cRes = await _ghFetch(`${GH_BASE}/repos/${fullName}/git/commits/${commitSha}`, {
     headers: _headers(token),
   });
   if (!cRes.ok) throw await _readError(cRes);
   const treeSha = (await cRes.json())?.tree?.sha;
 
   // 2. Pedimos el árbol recursivo.
-  const tRes = await fetch(`${GH_BASE}/repos/${fullName}/git/trees/${treeSha}?recursive=1`, {
+  const tRes = await _ghFetch(`${GH_BASE}/repos/${fullName}/git/trees/${treeSha}?recursive=1`, {
     headers: _headers(token),
   });
   if (!tRes.ok) throw await _readError(tRes);
   const tree = await tRes.json();
-  return {
-    treeSha,
-    entries: (tree.tree || [])
+
+  // GitHub puede devolver `truncated: true` cuando el árbol supera 100k
+  // entradas o 7MB de payload. En ese caso la lista llega incompleta y
+  // archivos que claramente existen en el repo no aparecen, y el panel
+  // los confunde con "solo en GAS". Recursamos manualmente nivel a nivel
+  // hasta cubrir todo.
+  let entries;
+  if (tree.truncated) {
+    console.warn('[github-api] Tree truncated, walking subdirs manually for', fullName);
+    entries = await _walkTreeRecursively(token, fullName, treeSha);
+  } else {
+    entries = (tree.tree || [])
       .filter((e) => e.type === 'blob')
-      .map((e) => ({ path: e.path, sha: e.sha, type: e.type, size: e.size || 0 })),
-  };
+      .map((e) => ({ path: e.path, sha: e.sha, type: e.type, size: e.size || 0 }));
+  }
+
+  return { treeSha, entries };
+}
+
+/**
+ * Camina el árbol nivel a nivel cuando GitHub responde con
+ * `truncated: true` al pedir el tree completo recursivo. Pide cada
+ * subdirectorio por separado (sin `recursive`) y va acumulando blobs.
+ *
+ * @param {string} token
+ * @param {string} fullName
+ * @param {string} rootTreeSha
+ * @returns {Promise<Array<{path:string,sha:string,type:string,size:number}>>}
+ */
+async function _walkTreeRecursively(token, fullName, rootTreeSha) {
+  const out = [];
+  /** @type {Array<{sha:string, prefix:string}>} */
+  const queue = [{ sha: rootTreeSha, prefix: '' }];
+
+  while (queue.length) {
+    const { sha, prefix } = queue.shift();
+    const res = await _ghFetch(`${GH_BASE}/repos/${fullName}/git/trees/${sha}`, {
+      headers: _headers(token),
+    });
+    if (!res.ok) {
+      console.warn('[github-api] Could not read subtree', sha, 'at', prefix);
+      continue;
+    }
+    const data = await res.json();
+    for (const e of (data.tree || [])) {
+      const fullPath = prefix ? `${prefix}/${e.path}` : e.path;
+      if (e.type === 'tree') {
+        queue.push({ sha: e.sha, prefix: fullPath });
+      } else if (e.type === 'blob') {
+        out.push({ path: fullPath, sha: e.sha, type: 'blob', size: e.size || 0 });
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -331,7 +465,7 @@ async function _getTree(token, fullName, commitSha) {
  * @returns {Promise<string>}
  */
 async function _getBlobContent(token, fullName, blobSha) {
-  const res = await fetch(`${GH_BASE}/repos/${fullName}/git/blobs/${blobSha}`, {
+  const res = await _ghFetch(`${GH_BASE}/repos/${fullName}/git/blobs/${blobSha}`, {
     headers: _headers(token),
   });
   if (!res.ok) throw await _readError(res);
@@ -359,8 +493,18 @@ export async function fetchRepoFiles(token, { repo, branch, basePath = '' }) {
     ? entries.filter((e) => e.path === base || e.path.startsWith(`${base}/`))
     : entries;
 
-  // Limita a 200 archivos para evitar abuso accidental con repos enormes.
-  const limited = inScope.slice(0, 200);
+  // Cap defensivo: 1000 archivos. Pasado ese punto el pull/diff sería
+  // pesado y el rate limit de GitHub se vuelve un problema (cada blob
+  // es una request). Lo subimos respecto al 200 anterior porque
+  // proyectos GAS reales pueden tener varios cientos de archivos
+  // distribuidos en carpetas.
+  const HARD_CAP = 1000;
+  if (inScope.length > HARD_CAP) {
+    console.warn(
+      `[github-api] Repo has ${inScope.length} files, capping at ${HARD_CAP}.`,
+    );
+  }
+  const limited = inScope.slice(0, HARD_CAP);
 
   const files = [];
   for (const entry of limited) {
@@ -401,40 +545,71 @@ export async function fetchRepoFiles(token, { repo, branch, basePath = '' }) {
  * }} cfg
  * @returns {Promise<{commitSha:string, htmlUrl:string|null, branch:string}>}
  */
-export async function pushFiles(token, { repo, branch, basePath = '', files, message, force = false }) {
+export async function pushFiles(token, {
+  repo, branch, basePath = '', files, message, force = false,
+  existingBlobs = null, onProgress = null,
+}) {
   if (!Array.isArray(files) || !files.length) throw new Error('No files to push.');
   if (!message) message = 'Update from gas-tools';
 
   const norm = (p) => String(p || '').replace(/^\/+|\/+$/g, '');
   const base = norm(basePath);
   const fullPath = (p) => (base ? `${base}/${norm(p)}` : norm(p));
+  const emit = (evt) => { try { onProgress && onProgress(evt); } catch (_) {} };
 
-  // ── 1. Subir blobs en paralelo limitado (8 a la vez) ─────────────────
+  // Cache de blobs ya subidos en intentos previos: si el caller pasa
+  // `existingBlobs` (Map de path local → blob sha), reutilizamos esos
+  // blobs en lugar de re-subirlos. Esto permite reintentar un push
+  // que cayó a la mitad sin gastar cuota ni saturar el rate limit.
+  const cached = existingBlobs instanceof Map ? existingBlobs : new Map();
+
+  emit({ type: 'phase', phase: 'blobs', total: files.length });
+
+  // ── 1. Subir blobs en paralelo limitado (3 a la vez) ─────────────────
+  // 3 paralelos + retry con backoff balancea velocidad y estabilidad
+  // frente al secondary rate limit de GitHub.
   const blobs = [];
-  const queue = [...files];
+  let done = 0;
+  const queue = files.map((f) => ({ ...f, _idx: f.path }));
   const inFlight = [];
-  const MAX_PARALLEL = 8;
+  const MAX_PARALLEL = 3;
   const worker = async () => {
     while (queue.length) {
       const file = queue.shift();
-      const res = await fetch(`${GH_BASE}/repos/${repo}/git/blobs`, {
-        method:  'POST',
-        headers: _headers(token, { 'Content-Type': 'application/json' }),
-        body:    JSON.stringify({ content: _toBase64(file.content || ''), encoding: 'base64' }),
-      });
-      if (!res.ok) throw await _readError(res);
-      const b = await res.json();
-      blobs.push({ path: fullPath(file.path), sha: b.sha });
+      const localPath = file.path;
+      let sha = cached.get(localPath);
+      let reused = false;
+
+      if (sha) {
+        reused = true;
+      } else {
+        const res = await _ghFetch(`${GH_BASE}/repos/${repo}/git/blobs`, {
+          method:  'POST',
+          headers: _headers(token, { 'Content-Type': 'application/json' }),
+          body:    JSON.stringify({ content: _toBase64(file.content || ''), encoding: 'base64' }),
+        });
+        if (!res.ok) throw await _readError(res);
+        sha = (await res.json()).sha;
+      }
+      blobs.push({ path: fullPath(localPath), sha, localPath });
+      done++;
+      emit({ type: 'blob', path: localPath, sha, reused, done, total: files.length });
     }
   };
   for (let i = 0; i < Math.min(MAX_PARALLEL, files.length); i++) inFlight.push(worker());
-  await Promise.all(inFlight);
+  try {
+    await Promise.all(inFlight);
+  } catch (err) {
+    err.uploadedBlobs = Object.fromEntries(blobs.map((b) => [b.localPath, b.sha]));
+    throw err;
+  }
 
   // ── 2. Helper: construye tree + commit basados en un parent dado ─────
   const buildCommit = async (parentSha) => {
+    emit({ type: 'phase', phase: 'tree' });
     let baseTreeSha = null;
     if (parentSha) {
-      const parentCommitRes = await fetch(`${GH_BASE}/repos/${repo}/git/commits/${parentSha}`, {
+      const parentCommitRes = await _ghFetch(`${GH_BASE}/repos/${repo}/git/commits/${parentSha}`, {
         headers: _headers(token),
       });
       if (parentCommitRes.ok) {
@@ -447,7 +622,7 @@ export async function pushFiles(token, { repo, branch, basePath = '', files, mes
     };
     if (baseTreeSha) treePayload.base_tree = baseTreeSha;
 
-    const treeRes = await fetch(`${GH_BASE}/repos/${repo}/git/trees`, {
+    const treeRes = await _ghFetch(`${GH_BASE}/repos/${repo}/git/trees`, {
       method:  'POST',
       headers: _headers(token, { 'Content-Type': 'application/json' }),
       body:    JSON.stringify(treePayload),
@@ -455,10 +630,11 @@ export async function pushFiles(token, { repo, branch, basePath = '', files, mes
     if (!treeRes.ok) throw await _readError(treeRes);
     const newTreeSha = (await treeRes.json()).sha;
 
+    emit({ type: 'phase', phase: 'commit' });
     const commitBody = { message, tree: newTreeSha };
     if (parentSha) commitBody.parents = [parentSha];
 
-    const commitRes = await fetch(`${GH_BASE}/repos/${repo}/git/commits`, {
+    const commitRes = await _ghFetch(`${GH_BASE}/repos/${repo}/git/commits`, {
       method:  'POST',
       headers: _headers(token, { 'Content-Type': 'application/json' }),
       body:    JSON.stringify(commitBody),
@@ -471,14 +647,13 @@ export async function pushFiles(token, { repo, branch, basePath = '', files, mes
   let parentSha = null;
   try {
     parentSha = await _getBranchCommitSha(token, repo, branch);
-  } catch (_) {
-    // La rama no existe todavía: el primer commit será huérfano.
-  }
+  } catch (_) {}
 
   // ── 4. Crear commit basado en ese head ───────────────────────────────
   let newCommit = await buildCommit(parentSha);
 
   // ── 5. Mover (o crear) la ref con auto-rebase si hubo avance ─────────
+  emit({ type: 'phase', phase: 'ref' });
   /** Hace el PATCH/POST de la ref. @returns {Promise<{ok:boolean, error?:string, isFastForward?:boolean}>} */
   const updateRef = async (commitSha, hadParent) => {
     const url = hadParent
@@ -489,7 +664,7 @@ export async function pushFiles(token, { repo, branch, basePath = '', files, mes
       ? JSON.stringify({ sha: commitSha, force })
       : JSON.stringify({ ref: `refs/heads/${branch}`, sha: commitSha });
 
-    const res = await fetch(url, {
+    const res = await _ghFetch(url, {
       method,
       headers: _headers(token, { 'Content-Type': 'application/json' }),
       body,
@@ -531,12 +706,19 @@ export async function pushFiles(token, { repo, branch, basePath = '', files, mes
     }
   }
 
-  if (!refResult.ok) throw new Error(refResult.error);
+  if (!refResult.ok) {
+    // Pasamos el mapa de blobs ya subidos al caller para que pueda
+    // reintentar sin re-subirlos.
+    const err = new Error(refResult.error);
+    err.uploadedBlobs = Object.fromEntries(blobs.map((b) => [b.localPath, b.sha]));
+    throw err;
+  }
 
   return {
-    commitSha: newCommit.sha,
-    htmlUrl:   newCommit.html_url || null,
+    commitSha:     newCommit.sha,
+    htmlUrl:       newCommit.html_url || null,
     branch,
+    uploadedBlobs: Object.fromEntries(blobs.map((b) => [b.localPath, b.sha])),
   };
 }
 
@@ -554,7 +736,16 @@ export async function pushFiles(token, { repo, branch, basePath = '', files, mes
  * @param {Object} payload
  * @returns {Promise<*>}
  */
-export async function callGithubApi(action, token, payload = {}) {
+/**
+ * Despacha una acción al cliente correspondiente.
+ *
+ * @param {string} action
+ * @param {string} token
+ * @param {Object} payload
+ * @param {{onProgress?:Function}} [opts]
+ * @returns {Promise<*>}
+ */
+export async function callGithubApi(action, token, payload = {}, opts = {}) {
   if (!token && action !== 'PING') throw new Error('Missing GitHub token.');
 
   switch (action) {
@@ -564,7 +755,8 @@ export async function callGithubApi(action, token, payload = {}) {
     case 'CREATE_BRANCH':return createBranch(token, payload);
     case 'CREATE_REPO':  return createRepo(token, payload);
     case 'FETCH_FILES':  return fetchRepoFiles(token, payload);
-    case 'PUSH_FILES':   return pushFiles(token, payload);
+    case 'PUSH_FILES':   return pushFiles(token,
+      { ...payload, onProgress: opts.onProgress || null });
     default:             throw new Error(`Unknown GitHub action: ${action}`);
   }
 }

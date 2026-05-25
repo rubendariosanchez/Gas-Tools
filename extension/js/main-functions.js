@@ -24,6 +24,27 @@
  */
 
 // ─────────────────────────────────────────────
+// GUARD DE SCOPE
+// La extensión solo opera dentro del IDE de Apps Script
+// (`script.google.com/home/...`). Para webapps publicadas
+// (`/macros/s/...`, `/macros/u/N/s/...`) y callbacks de OAuth NO
+// queremos inyectar nada: no hay Monaco, no hay toolbar, y los scripts
+// de MAIN world tirarían errores ruidosos en la consola de la webapp
+// del usuario final. Lo redundamos con `exclude_matches` en el
+// manifest, pero dejamos el guard también aquí por si alguna URL nueva
+// se cuela (Apps Script ha cambiado el patrón varias veces).
+// ─────────────────────────────────────────────
+
+const __GAS_TOOLS_IS_WEBAPP_OR_OAUTH__ = (() => {
+  const path = location.pathname || '';
+  return (
+    /^\/macros\/(?:u\/\d+\/)?s\//.test(path) ||
+    /^\/macros\/d\/[^/]+\/usercallback/.test(path) ||
+    /^\/oauth\//.test(path)
+  );
+})();
+
+// ─────────────────────────────────────────────
 // CONSTANTES DE EVENTOS (compartidas con gas-tools.js vía CustomEvent)
 // Los valores string deben coincidir exactamente con los usados en el mundo MAIN.
 // ─────────────────────────────────────────────
@@ -453,48 +474,59 @@ async function init() {
 
 // ─────────────────────────────────────────────
 // ACTUALIZACIONES EN TIEMPO REAL
+// Los listeners solo se registran en el IDE. En una webapp publicada
+// no tiene sentido escuchar SETTINGS_UPDATED ni device codes.
 // ─────────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener(async (msg) => {
-  // Push del device flow desde el background → MAIN world.
-  if (msg.type === 'GITHUB_DEVICE_CODE') {
-    dispatchGAS(GAS_EVENTS.GH_DEVICE_CODE, msg.payload || {});
-    return;
-  }
-
-  if (msg.type !== 'SETTINGS_UPDATED') return;
-
-  const { options, data, updateType } = msg.payload;
-
-  // Se valida si es una actualización de configuración
-  if (updateType === 'settings') {
-    // Si se reactiva la extensión y los scripts aún no se inyectaron en el
-    // mundo MAIN, hacemos init() completo. La presencia del flag
-    // `__gasToolsInit` (que persiste aunque los <script> se hayan removido)
-    // indica que el bootstrap ya se ejecutó al menos una vez.
-    const alreadyBooted = !!document.querySelector('script[data-gas-tools-loaded]');
-    if (options['global-enable'] === true && !alreadyBooted) {
-      document.querySelectorAll('.monaco-editor[data-gasreference]').forEach(el => {
-        delete el.dataset.gasreference;
-      });
-      dispatchGAS(GAS_EVENTS.GLOBAL_ENABLE);
-      await init();
+if (!__GAS_TOOLS_IS_WEBAPP_OR_OAUTH__) {
+  chrome.runtime.onMessage.addListener(async (msg) => {
+    // Push del device flow desde el background → MAIN world.
+    if (msg.type === 'GITHUB_DEVICE_CODE') {
+      dispatchGAS(GAS_EVENTS.GH_DEVICE_CODE, msg.payload || {});
+      return;
     }
-    dispatchGAS(GAS_EVENTS.SETTINGS_UPDATED, options);
-  }
 
-  // Se valida si es una actualización de snippets
-  if (updateType === 'snippets') {
-    const newSnippets = data || await getSavedSnippets();
-    dispatchGAS(GAS_EVENTS.DATA_UPDATED, { updateType: 'snippets', data: newSnippets });
-  }
+    // Eventos de progreso del push: el background los emite por cada
+    // blob subido y por cada cambio de fase.
+    if (msg.type === 'GH_PUSH_PROGRESS') {
+      dispatchGAS('GAS_GH_PUSH_PROGRESS', msg.payload || {});
+      return;
+    }
 
-  // Se valida si es una actualización de temas
-  if (updateType === 'themes') {
-    const newTheme = data || await getSavedTheme();
-    dispatchGAS(GAS_EVENTS.DATA_UPDATED, { updateType: 'themes', data: newTheme });
-  }
-});
+    if (msg.type !== 'SETTINGS_UPDATED') return;
+
+    const { options, data, updateType } = msg.payload;
+
+    // Se valida si es una actualización de configuración
+    if (updateType === 'settings') {
+      // Si se reactiva la extensión y los scripts aún no se inyectaron en el
+      // mundo MAIN, hacemos init() completo. La presencia del flag
+      // `__gasToolsInit` (que persiste aunque los <script> se hayan removido)
+      // indica que el bootstrap ya se ejecutó al menos una vez.
+      const alreadyBooted = !!document.querySelector('script[data-gas-tools-loaded]');
+      if (options['global-enable'] === true && !alreadyBooted) {
+        document.querySelectorAll('.monaco-editor[data-gasreference]').forEach(el => {
+          delete el.dataset.gasreference;
+        });
+        dispatchGAS(GAS_EVENTS.GLOBAL_ENABLE);
+        await init();
+      }
+      dispatchGAS(GAS_EVENTS.SETTINGS_UPDATED, options);
+    }
+
+    // Se valida si es una actualización de snippets
+    if (updateType === 'snippets') {
+      const newSnippets = data || await getSavedSnippets();
+      dispatchGAS(GAS_EVENTS.DATA_UPDATED, { updateType: 'snippets', data: newSnippets });
+    }
+
+    // Se valida si es una actualización de temas
+    if (updateType === 'themes') {
+      const newTheme = data || await getSavedTheme();
+      dispatchGAS(GAS_EVENTS.DATA_UPDATED, { updateType: 'themes', data: newTheme });
+    }
+  });
+}
 
 // ─────────────────────────────────────────────
 // BRIDGE LLM — tabla de despacho unificada
@@ -591,15 +623,16 @@ const G_LLM_BRIDGE = [
   {
     listenEvent:   GAS_EVENTS.GH_API_CALL,
     responseEvent: GAS_EVENTS.GH_API_RESULT,
-    buildMessage:  ({ action, payload }) => ({
+    buildMessage:  ({ requestId, action, payload }) => ({
       type:    'GITHUB_API_CALL',
-      payload: { action, payload },
+      payload: { requestId, action, payload },
     }),
     buildDetail:   (response, requestId) => ({
       requestId,
       ok:    response?.ok ?? false,
       data:  response?.ok ? (response.data || null) : null,
       error: response?.ok ? null : (response?.error || 'Unknown error'),
+      uploadedBlobs: response?.uploadedBlobs || null,
     }),
   },
   {
@@ -641,20 +674,27 @@ const G_LLM_BRIDGE = [
   },
 ];
 
-// Se realiza el recurrido para enviar los datos necesarios al background
-G_LLM_BRIDGE.forEach(({ listenEvent, responseEvent, buildMessage, buildDetail }) => {
-  document.addEventListener(listenEvent, async (e) => {
-    let payload;
-    try { payload = JSON.parse(e.detail); } catch (_) { return; }
+// Se realiza el recurrido para enviar los datos necesarios al background.
+// Como el bridge solo tiene sentido cuando los componentes del editor
+// están vivos en MAIN world, lo registramos únicamente en el IDE.
+if (!__GAS_TOOLS_IS_WEBAPP_OR_OAUTH__) {
+  G_LLM_BRIDGE.forEach(({ listenEvent, responseEvent, buildMessage, buildDetail }) => {
+    document.addEventListener(listenEvent, async (e) => {
+      let payload;
+      try { payload = JSON.parse(e.detail); } catch (_) { return; }
 
-    const { requestId, ...rest } = payload || {};
-    const response = await sendToBackground(buildMessage({ requestId, ...rest }));
+      const { requestId, ...rest } = payload || {};
+      const response = await sendToBackground(buildMessage({ requestId, ...rest }));
 
-    if (responseEvent && buildDetail) {
-      dispatchGAS(responseEvent, buildDetail(response, requestId));
-    }
+      if (responseEvent && buildDetail) {
+        dispatchGAS(responseEvent, buildDetail(response, requestId));
+      }
+    });
   });
-});
+}
 
 // ─────────────────────────────────────────────
-init();
+// Solo arrancamos en el IDE. En webapps y callbacks salimos sin ruido.
+if (!__GAS_TOOLS_IS_WEBAPP_OR_OAUTH__) {
+  init();
+}

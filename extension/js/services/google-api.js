@@ -19,7 +19,7 @@
  *   JSON       → .json   (reservado para appsscript.json)
  */
 
-import { readHttpError } from './_http-utils.js';
+import { readHttpError } from './http-utils.js';
 
 const SCRIPT_BASE = 'https://script.googleapis.com/v1/projects';
 const USERINFO    = 'https://www.googleapis.com/oauth2/v3/userinfo';

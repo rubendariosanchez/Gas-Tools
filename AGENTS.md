@@ -38,7 +38,7 @@ Extensión Chrome (MV3) para mejorar el editor de Google Apps Script. Objetivo: 
 - Funciones internas con sufijo `_` (ej. `_loadSnippets_`).
 - Variables, parámetros, funciones, clases y CustomEvents en inglés (sin mezcla ES/EN en identificadores).
 - JSDoc breve en español, solo cuando aporte contexto real.
-- Una responsabilidad por archivo. Evitar variantes "copy", "old", "backup" en rutas activas (mover al subdirectorio `_backup/` solo durante migraciones puntuales).
+- Una responsabilidad por archivo. Evitar variantes "copy", "old", "backup" en rutas activas (mover al subdirectorio `backup/` solo durante migraciones puntuales). Chrome rechaza carpetas que empiezan con `_`, así que no se debe usar ese prefijo dentro del paquete de la extensión.
 - Clases CSS de la UI inyectada con prefijo `qc__` para evitar colisiones con GAS.
 
 ## Inventario de la UI inyectada

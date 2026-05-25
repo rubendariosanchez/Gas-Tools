@@ -181,7 +181,7 @@ class GasCurrentFile extends HTMLElement {
           border-right: 7px solid transparent;
         }
         .qc__popover::before { border-bottom: 7px solid var(--gc-border); }
-        .qc__popover::after  { top: -6px; border-bottom: 7px solid var(--gc-accent-dim); }
+        .qc__popover::after  { top: -6px; border-bottom: 7px solid var(--gc-bg-elevated); }
 
         .qc__popover.qc__above::before,
         .qc__popover.qc__above::after {
