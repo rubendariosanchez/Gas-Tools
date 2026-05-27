@@ -328,7 +328,6 @@
 
   // Cierre de paneles flotantes ante navegación SPA fuera del editor.
   _listeners.onHidePanels = () => {
-    document.querySelector('gas-search-panel')?.close?.();
     document.querySelector('gas-chat-panel')?.close?.();
   };
   document.addEventListener('GAS_HidePanels', _listeners.onHidePanels);

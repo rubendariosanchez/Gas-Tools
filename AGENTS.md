@@ -43,9 +43,9 @@ Extensión Chrome (MV3) para mejorar el editor de Google Apps Script. Objetivo: 
 
 ## Inventario de la UI inyectada
 - **Popup (`src/`):** `OptionToggle`, `OptionSelect`, `OptionColor`, `SnippetCard`, `SnippetModal`, `ThemeCard`, `ThemeModal`.
-- **Editor (`extension/js/components/`):** `gas-search-panel`, `gas-chat-panel`, `gas-current-file`.
-- **Servicios (`extension/js/services/`):** `dom-utils`, `gas-ai-autocomplete`, `gas-error-lens`, `gas-folders`, `llm-providers`.
-- **Templates (`extension/html/`):** `searchButton.html`, `chatButton.html`, `currentFileButton.html`, `sidepanel.html`.
+- **Editor (`extension/js/components/`):** `gas-chat-panel`, `gas-current-file`, `gas-actions-panel`, `gas-github-panel`.
+- **Servicios (`extension/js/services/`):** `dom-utils`, `gas-ai-autocomplete`, `gas-error-lens`, `gas-folders`, `gas-native-search`, `gas-file-map`, `llm-providers`, `github-api`, `google-api`, `http-utils`.
+- **Templates (`extension/html/`):** `chatButton.html`, `currentFileButton.html`, `actionsButton.html`, `githubButton.html`, `sidepanel.html`.
 
 ## Reglas de calidad mínima por componente
 - API pública mínima (`open` / `close` / `toggle` / `setEditor` / `refresh` cuando aplique).
@@ -81,3 +81,4 @@ Extensión Chrome (MV3) para mejorar el editor de Google Apps Script. Objetivo: 
 ## Créditos a respetar al editar archivos relevantes
 - `themes/*.json` provienen de [JeanRemiDelteil/appsScriptColor](https://github.com/JeanRemiDelteil/appsScriptColor). No reescribir ni renombrar sin documentar el cambio.
 - `extension/js/services/gas-error-lens.js` se inspira en [usernamehw/vscode-error-lens](https://github.com/usernamehw/vscode-error-lens). Mantener la atribución en el README.
+- `extension/js/services/gas-native-search.js` se inspira en [Black edition for google apps script ide](https://www.swroot.com/black-script): la idea de extender el find widget nativo con navegación entre archivos viene de ahí. Mantener la atribución en el README.

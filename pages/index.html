@@ -4,7 +4,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Google Apps Script Tools — A modern editor for Apps Script</title>
-  <meta name="description" content="Turn the Google Apps Script editor into a modern IDE. AI suggestions, in-line errors, multi-file search, GitHub sync, folders, 50+ themes. Free Chrome extension."/>
+  <meta name="description" content="Turn the Google Apps Script editor into a modern IDE. AI suggestions (cloud or local), in-line errors, multi-file search, GitHub sync, folders, snippets, 50+ themes. Free Chrome extension."/>
   <link rel="icon" type="image/png" href="icon128.png"/>
   <link rel="apple-touch-icon" href="icon128.png"/>
   <link rel="stylesheet" href="general-styles.css"/>
@@ -30,7 +30,6 @@
 
     body { overflow-x: hidden; }
 
-    /* Section labels (the "// Features" headings) */
     .section-label {
       font-family: var(--font-mono);
       font-size: 12px;
@@ -40,7 +39,6 @@
       margin-bottom: 14px;
     }
 
-    /* Section h1 inside the page (override the global h1) */
     section h1 {
       font-size: clamp(1.9rem, 4vw, 2.8rem);
       font-weight: 300;
@@ -292,8 +290,52 @@
       font-family: var(--font-mono);
       color: var(--muted);
     }
+    .provider-pill.local {
+      color: var(--accent);
+      border-color: rgba(74,222,128,0.3);
+      background: rgba(74,222,128,0.06);
+    }
 
-    /* SHOWCASE BLOCKS (alternating image + text) */
+    /* Badge "Experimental" reusable in feature cards and panel cards. */
+    .exp-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 9px;
+      font-size: 10px; font-weight: 600;
+      letter-spacing: 0.04em;
+      border-radius: 999px;
+      background: rgba(251,188,4,0.12);
+      color: var(--g-yellow-light);
+      border: 1px solid rgba(251,188,4,0.30);
+      font-family: var(--font-mono);
+      vertical-align: middle;
+      margin-left: 8px;
+    }
+    .feature-card h3 .exp-badge,
+    .panel-card h3 .exp-badge { font-size: 9.5px; }
+
+    /* Yellow callout used to flag experimental areas. */
+    .exp-callout {
+      margin: 24px 0 8px;
+      padding: 16px 22px;
+      background: rgba(251,188,4,0.06);
+      border: 1px solid rgba(251,188,4,0.25);
+      border-left: 3px solid var(--g-yellow-light);
+      border-radius: 10px;
+      color: rgba(255,255,255,0.78);
+      font-size: 14px;
+      font-weight: 300;
+      line-height: 1.6;
+    }
+    .exp-callout strong { color: var(--g-yellow-light); }
+    .exp-callout code {
+      background: rgba(251,188,4,0.10);
+      color: var(--g-yellow-light);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 12.5px;
+    }
+
+    /* SHOWCASE */
     .showcase {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -316,7 +358,6 @@
       color: var(--accent); font-weight: 700;
     }
 
-    /* Mock cards used in the showcase blocks */
     .mock {
       background: var(--code-bg);
       border: 1px solid rgba(255,255,255,0.08);
@@ -329,7 +370,6 @@
     }
     .mock-title { color: rgba(255,255,255,0.4); font-size: 11px; margin-bottom: 12px; letter-spacing: .08em; text-transform: uppercase; }
 
-    /* Folder tree mock */
     .mock-tree { line-height: 1.95; }
     .mock-tree .folder { color: var(--g-yellow-light); }
     .mock-tree .gs     { color: var(--g-blue-light); }
@@ -339,7 +379,6 @@
     .mock-tree .row    { padding-left: 4px; }
     .mock-tree .row.active { background: rgba(66,133,244,0.10); border-radius: 6px; padding-left: 6px; }
 
-    /* GitHub mock */
     .mock-gh-row {
       display: flex; align-items: center; gap: 10px;
       padding: 6px 10px; border-radius: 6px;
@@ -361,23 +400,7 @@
       font-weight: 600; font-size: 12.5px;
     }
 
-    /* Theme mock */
-    .mock-theme {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 6px;
-    }
-    .mock-theme-card {
-      border-radius: 8px;
-      padding: 12px;
-      font-size: 11px;
-      font-family: var(--font-mono);
-      border: 1px solid rgba(255,255,255,0.08);
-      min-height: 60px;
-      display: flex; flex-direction: column; justify-content: space-between;
-    }
-
-    /* THEMES SECTION (full bleed) */
+    /* THEMES SECTION */
     .themes-section { background: var(--code-bg); padding: 80px 2rem; position: relative; overflow: hidden; }
     .themes-inner { max-width: 1100px; margin: 0 auto; }
     .themes-section .section-label { color: var(--g-green-light); }
@@ -431,8 +454,166 @@
     }
     .shortcut-desc { font-size: 14px; color: var(--muted); font-weight: 300; }
 
-    /* CONFIG GRID */
-    .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 32px; }
+    /* CONFIG TABLES */
+    .config-block { margin-top: 40px; }
+    .config-block h3 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 14px;
+      color: var(--text);
+    }
+    .config-block h3 .config-tag {
+      display: inline-block;
+      margin-right: 10px;
+      padding: 2px 9px;
+      border-radius: 5px;
+      font-size: 10.5px;
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      vertical-align: middle;
+      font-weight: 500;
+    }
+    table.opts {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      font-size: 13.5px;
+    }
+    table.opts th, table.opts td {
+      padding: 11px 18px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    table.opts thead th {
+      background: var(--surface2);
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 11.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    table.opts tbody tr:last-child td { border-bottom: 0; }
+    table.opts td:first-child { color: var(--text); font-weight: 500; }
+    table.opts td:nth-child(2) { color: var(--muted); font-weight: 300; }
+    table.opts td:nth-child(3) {
+      color: var(--g-blue-light);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    table.opts code {
+      background: var(--surface2);
+      color: var(--g-blue-light);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    /* SNIPPETS / MODELS TABLES */
+    table.snippets, table.models {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      font-size: 13.5px;
+      margin-top: 16px;
+    }
+    table.snippets th, table.snippets td,
+    table.models th, table.models td {
+      padding: 10px 18px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    table.snippets thead th, table.models thead th {
+      background: var(--surface2);
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 11.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    table.snippets tbody tr:last-child td,
+    table.models tbody tr:last-child td { border-bottom: 0; }
+    table.snippets td:first-child, table.models td code {
+      font-family: var(--font-mono);
+      color: var(--g-blue-light);
+      font-size: 12.5px;
+    }
+    table.snippets td:nth-child(2),
+    table.models td:nth-child(2),
+    table.models td:nth-child(3) { color: var(--muted); font-weight: 300; }
+    table.models tr td.recommended {
+      color: var(--accent);
+      font-weight: 500;
+    }
+    table.models td:last-child code,
+    table.snippets td code {
+      background: var(--surface2);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    /* AI CONTEXT EXAMPLE */
+    .prompt-card {
+      background: var(--code-bg);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 18px 22px;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.7;
+      color: #cdd6f4;
+      white-space: pre-wrap;
+      margin-top: 16px;
+      overflow-x: auto;
+    }
+    .prompt-card .ph { color: var(--g-yellow-light); }
+
+    /* PANELS GRID */
+    .panels-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 14px; margin-top: 32px; }
+    .panel-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 26px 28px;
+    }
+    .panel-card h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-top: 0;
+      margin-bottom: 8px;
+    }
+    .panel-card p {
+      font-size: 13.5px;
+      color: var(--muted);
+      font-weight: 300;
+      margin-bottom: 12px;
+    }
+    .panel-card ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .panel-card ul li {
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 300;
+      padding: 3px 0 3px 18px;
+      position: relative;
+    }
+    .panel-card ul li::before {
+      content: '✓';
+      position: absolute;
+      left: 0;
+      color: var(--accent);
+    }
 
     /* FAQ */
     .faq { display: grid; gap: 12px; max-width: 760px; }
@@ -492,7 +673,6 @@
       position: relative;
     }
 
-    /* FOOTER override */
     footer { justify-content: space-between; max-width: 1100px; margin: 0 auto; }
     .footer-links { display: flex; gap: 24px; flex-wrap: wrap; }
 
@@ -510,11 +690,16 @@
       .showcase { grid-template-columns: 1fr; gap: 30px; }
       .showcase.reverse > .showcase-text { order: 1; }
       .showcase.reverse > .showcase-mock { order: 2; }
+      table.opts, table.snippets, table.models { font-size: 12.5px; }
+      table.opts th, table.opts td,
+      table.snippets th, table.snippets td,
+      table.models th, table.models td { padding: 9px 12px; }
     }
     @media(max-width: 640px) {
       .nav-links { display: none; }
       .editor-preview { display: none; }
       .stats { grid-template-columns: repeat(2, 1fr); }
+      table.models { font-size: 11.5px; }
     }
   </style>
 </head>
@@ -532,8 +717,9 @@
   </a>
   <div class="nav-links">
     <a href="#features">Features</a>
+    <a href="#panels">Panels</a>
+    <a href="#config">Settings</a>
     <a href="#ai">AI</a>
-    <a href="#github">GitHub</a>
     <a href="#themes">Themes</a>
     <a href="#faq">FAQ</a>
     <a href="https://chromewebstore.google.com/detail/google-apps-script-tools/iigobcdpmngdgiacebgenbccmdacnjhp" class="nav-cta" target="_blank">Add to Chrome →</a>
@@ -556,7 +742,7 @@
   <h1>Apps Script,<br/><em>without the friction.</em></h1>
   <div class="hero-subtitle">AI suggestions. Real errors. GitHub sync. Folders. 50+ themes.</div>
 
-  <p class="desc">Everything you wished the Apps Script editor had — code suggestions while you type, errors highlighted before you save, push and pull from GitHub, organize your project in folders, and a theme for every mood.</p>
+  <p class="desc">Everything you wished the Apps Script editor had — code suggestions while you type (cloud or local), errors highlighted before you save, push and pull from GitHub, organize your project in folders, and a theme for every mood.</p>
 
   <div class="color-stripe">
     <div class="cs cs-g"></div>
@@ -625,35 +811,36 @@
      STATS
      ============================================================ -->
 <div class="stats">
-  <div class="stat"><div class="stat-val">50+</div><div class="stat-lbl">Editor themes</div></div>
-  <div class="stat"><div class="stat-val">8</div><div class="stat-lbl">AI providers</div></div>
+  <div class="stat"><div class="stat-val">51</div><div class="stat-lbl">Editor themes</div></div>
+  <div class="stat"><div class="stat-val">9</div><div class="stat-lbl">AI providers</div></div>
   <div class="stat"><div class="stat-val">$0</div><div class="stat-lbl">Always free</div></div>
   <div class="stat"><div class="stat-val">1-click</div><div class="stat-lbl">to install</div></div>
 </div>
 
+
 <!-- ============================================================
-     FEATURES
+     FEATURES OVERVIEW
      ============================================================ -->
 <section id="features">
   <div class="section-label">// What you get</div>
   <h1>Everything Apps Script<br/><strong>has been missing.</strong></h1>
-  <p class="section-sub">Six tools designed to save you time every day, working together inside the editor you already use.</p>
+  <p class="section-sub">Eight tools designed to save you time every day, working together inside the editor you already use.</p>
 
   <div class="features-grid">
     <div class="feature-card">
       <div class="feature-tag tag-green">AI suggestions</div>
-      <h3>It writes with you</h3>
-      <p>Suggestions appear as gray text while you type. Press Tab to accept. Write a comment describing what you need and the AI completes the function for you.</p>
+      <h3>It writes with you <span class="exp-badge">⚗️ Experimental</span></h3>
+      <p>Suggestions appear as gray text while you type. Press <kbd>Tab</kbd> to accept. Write a comment with what you need and the AI completes the function for you.</p>
       <ul>
         <li>Suggests the next few lines, not just one word</li>
         <li>Understands what you wrote before and after</li>
-        <li>Works in scripts, HTML and JSON files</li>
+        <li>Works in <code>.gs</code>, <code>.html</code>, <code>.json</code> and <code>.css</code> files</li>
       </ul>
     </div>
 
     <div class="feature-card">
       <div class="feature-tag tag-blue">AI chat</div>
-      <h3>Ask questions, get code</h3>
+      <h3>Ask questions, get code <span class="exp-badge">⚗️ Experimental</span></h3>
       <p>A chat panel right inside the editor. Send the selected text, the open file, or the whole project as context, and get answers you can paste with one click.</p>
       <div class="providers">
         <span class="provider-pill">OpenAI</span>
@@ -664,6 +851,7 @@
         <span class="provider-pill">Kimi</span>
         <span class="provider-pill">Nvidia</span>
         <span class="provider-pill">ChatLLM</span>
+        <span class="provider-pill local">Local (LM Studio / Ollama)</span>
       </div>
     </div>
 
@@ -682,11 +870,12 @@
     <div class="feature-card">
       <div class="feature-tag tag-purple">Search</div>
       <h3>Find anything, anywhere</h3>
-      <p>Press <kbd>Alt+Shift+F</kbd> and search across every file in the project at once. Results group by file and you can jump with the arrow keys.</p>
+      <p>Press <kbd>Ctrl+F</kbd> and the native find widget gets a richer toolbar that knows about every file in the project. Hop between files with the keyboard, jump straight to any match, no extra panel.</p>
       <ul>
-        <li>Search the whole project from one box</li>
-        <li>Keyboard navigation through results</li>
-        <li>Click any match to jump straight to it</li>
+        <li>Cross-file navigation built into the native find widget</li>
+        <li>File picker popover with match counts and live filter</li>
+        <li>Per-file match list to jump directly to any line</li>
+        <li>Case-sensitive, whole word and regex toggles still work</li>
       </ul>
     </div>
 
@@ -711,6 +900,110 @@
         <li>Triggered by prefix in the autocomplete</li>
       </ul>
     </div>
+
+    <div class="feature-card">
+      <div class="feature-tag tag-pink">GitHub sync</div>
+      <h3>Push and pull, no terminal</h3>
+      <p>Connect once and the editor gets a sync panel. Pick which files to push, see the diff, pull updates with one click.</p>
+      <ul>
+        <li>Visual diff per file with line-by-line changes</li>
+        <li>Resumable transfers — retries reuse what already finished</li>
+        <li>Tokens stay in your browser</li>
+      </ul>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-tag tag-yellow">Themes</div>
+      <h3>51 themes, fully editable</h3>
+      <p>Classics from the VS Code world plus colorful options for every taste. Apply with one click, duplicate to tweak, or build your own from scratch.</p>
+      <ul>
+        <li>Dracula, Monokai, Night Owl, Solarized…</li>
+        <li>Visual editor for every color token</li>
+        <li>Export and import themes as JSON</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     PANELS - in-depth
+     ============================================================ -->
+<section id="panels" style="padding-top:0;">
+  <div class="section-label">// Editor panels</div>
+  <h1>The buttons in your toolbar.<br/><strong>What each one really does.</strong></h1>
+  <p class="section-sub">When the extension is on, the Apps Script toolbar gets six new buttons. This is what hides behind each.</p>
+
+  <div class="panels-grid">
+    <div class="panel-card">
+      <h3>📄 Active file <span class="exp-badge">⚗️ Experimental</span></h3>
+      <p>A button that always shows the active file's name — even when the Apps Script tree highlight doesn't reflect it.</p>
+      <ul>
+        <li>Full file name with virtual folder</li>
+        <li>Detected language and file size</li>
+        <li>Live counts of errors, warnings and hints</li>
+        <li>Click any error count to jump to the line</li>
+      </ul>
+    </div>
+
+    <div class="panel-card">
+      <h3>🔎 Multi-file search</h3>
+      <p>Open Monaco's native find widget with <kbd>Ctrl+F</kbd>. The toolbar below the inputs tells you which file you're on and how many files have matches.</p>
+      <ul>
+        <li>Native find widget extended, no extra panel</li>
+        <li>Active file name and position across the project</li>
+        <li>Click the file name to pick from a popover with filter and match counts</li>
+        <li>List icon to jump directly to any match in the current file</li>
+        <li><kbd>Ctrl+Alt+F</kbd> / <kbd>Ctrl+Shift+F</kbd> to hop between files</li>
+      </ul>
+    </div>
+
+    <div class="panel-card">
+      <h3>🤖 AI chat <span class="exp-badge">⚗️ Experimental</span></h3>
+      <p>Talk to the AI, send context, paste answers with one click. Open with <kbd>Alt+Shift+C</kbd>.</p>
+      <ul>
+        <li>Chat history kept inside the panel for the session</li>
+        <li>Switch provider on the fly</li>
+        <li><code>@selection</code>, <code>@file</code>, <code>@project</code> commands</li>
+        <li>Code blocks: copy / insert / replace selection</li>
+        <li>Settings, key, model and AI context inline</li>
+      </ul>
+    </div>
+
+    <div class="panel-card">
+      <h3>🐙 GitHub sync</h3>
+      <p>Push and pull from any repo without a terminal. Diff per file, file-by-file selection, resumable transfers.</p>
+      <ul>
+        <li>Repo and branch selectors with search and create</li>
+        <li>Subfolder mapping if you don't push to root</li>
+        <li>Live progress with a numbered list of files</li>
+        <li>Retries reuse what was already uploaded or merged</li>
+        <li>Cannot close the panel mid-sync (avoids broken state)</li>
+      </ul>
+    </div>
+
+    <div class="panel-card">
+      <h3>⚡ Project actions</h3>
+      <p>Small tools that save clicks during your day-to-day with Apps Script.</p>
+      <ul>
+        <li>Download the entire project as a ZIP</li>
+        <li>Open the project in another tab</li>
+        <li>Refresh the file tree</li>
+        <li>Jump to project settings</li>
+      </ul>
+    </div>
+
+    <div class="panel-card">
+      <h3>🚦 Live errors</h3>
+      <p>Errors and warnings shown inline at the offending line as you type. No save, no run.</p>
+      <ul>
+        <li>Unclosed parentheses / braces / brackets</li>
+        <li>Unterminated strings</li>
+        <li><code>==</code> / <code>!=</code> (suggests <code>===</code> / <code>!==</code>)</li>
+        <li>Reassigning a <code>const</code></li>
+        <li>Dead code after <code>return</code> / <code>throw</code></li>
+        <li>Comparing with <code>NaN</code> instead of <code>Number.isNaN()</code></li>
+      </ul>
+    </div>
   </div>
 </section>
 
@@ -722,12 +1015,13 @@
     <div class="showcase-text">
       <div class="section-label">// GitHub sync</div>
       <h2>Push and pull <strong>without leaving Apps Script.</strong></h2>
-      <p>Connect your GitHub account once and the editor gets a sync panel. See which files changed, write a commit message and push — or pull updates from the repo and the editor reloads with the latest content.</p>
+      <p>Connect your GitHub account once and the editor gets a sync panel. Sign in with Google to read and write your project files via the Apps Script API, then sign in with GitHub via Device Flow. Pick a repo and a branch and you are ready.</p>
       <ul>
         <li>Visual diff per file with line-by-line changes</li>
         <li>Pick exactly which files to push, file by file</li>
         <li>Pull creates new files automatically — no manual steps</li>
-        <li>One panel per project, remembers your repo and branch</li>
+        <li>Live progress: each file checked off in real time</li>
+        <li>Resumable transfers if the network or rate limit hits</li>
         <li>Your GitHub token stays in your browser</li>
       </ul>
     </div>
@@ -798,121 +1092,430 @@
   </div>
 </section>
 
+
 <!-- ============================================================
-     STEPS - AI SETUP
+     CONFIGURATION (deep)
+     ============================================================ -->
+<section id="config" style="padding-top:0;">
+  <div class="section-label">// Settings</div>
+  <h1>Every setting,<br/><strong>explained one by one.</strong></h1>
+  <p class="section-sub">Click the extension icon in Chrome to open the popup. Five tabs: Options, Snippets, Themes, AI and About. Changes apply live.</p>
+
+  <div class="config-block">
+    <h3><span class="config-tag tag-green">Extension</span> Master toggles</h3>
+    <table class="opts">
+      <thead>
+        <tr><th>Option</th><th>What it does</th><th>Default</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Enable extension</td><td>Master switch. Pauses every feature without uninstalling.</td><td>On</td></tr>
+        <tr><td>AI Autocomplete</td><td>Inline ghost-text suggestions while you type. Press <code>Tab</code> to accept.</td><td>Off</td></tr>
+        <tr><td>Custom folders</td><td>Treats <code>/</code> in file names as folders in the file tree.</td><td>On</td></tr>
+        <tr><td>Folder color</td><td>Color used for folder icons in the file tree.</td><td>Neutral grey</td></tr>
+        <tr><td>.gs file color</td><td>Color of the icon for Apps Script files.</td><td>Google blue</td></tr>
+        <tr><td>.html file color</td><td>Color of the icon for HTML files.</td><td>Google red</td></tr>
+        <tr><td>.json file color</td><td>Color of the icon for JSON files.</td><td>Google green</td></tr>
+        <tr><td>Error lens</td><td>Shows inline diagnostics at the offending line.</td><td>On</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="config-block">
+    <h3><span class="config-tag tag-blue">Font</span> Typography</h3>
+    <table class="opts">
+      <thead>
+        <tr><th>Option</th><th>What it does</th><th>Default</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Font family</td><td>Pick the editor monospace font: JetBrains Mono, Fira Code, Roboto Mono, Source Code Pro, Geist Mono, IBM Plex Mono and more.</td><td>Roboto Mono</td></tr>
+        <tr><td>Font size</td><td>Editor font size in pixels (10–48).</td><td>13</td></tr>
+        <tr><td>Line height</td><td>Vertical line spacing in pixels (12–48).</td><td>19</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="config-block">
+    <h3><span class="config-tag tag-yellow">Visuals</span> Layout &amp; rendering</h3>
+    <table class="opts">
+      <thead>
+        <tr><th>Option</th><th>What it does</th><th>Default</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>IDE Dark Mode</td><td>Applies a dark theme to the entire Apps Script interface.</td><td>Off</td></tr>
+        <tr><td>Show minimap</td><td>High-level code overview on the right side.</td><td>On</td></tr>
+        <tr><td>Line numbers</td><td>Line numbers on the left margin.</td><td>On</td></tr>
+        <tr><td>Word wrap</td><td>Wrap long lines so they fit within the editor width.</td><td>Off</td></tr>
+        <tr><td>Line highlight</td><td>Highlights the line where the cursor is.</td><td>On</td></tr>
+        <tr><td>Rulers</td><td>Vertical rulers at column 80 and 120.</td><td>Off</td></tr>
+        <tr><td>Occurrences highlight</td><td>Highlights every occurrence of the word under the cursor.</td><td>On</td></tr>
+        <tr><td>Show whitespace</td><td>Renders spaces, tabs and other invisible characters.</td><td>Off</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="config-block">
+    <h3><span class="config-tag tag-red">Code Assistance</span> Helpers while you type</h3>
+    <table class="opts">
+      <thead>
+        <tr><th>Option</th><th>What it does</th><th>Default</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Bracket pair colorization</td><td>Paints matching brackets with unique colors.</td><td>On</td></tr>
+        <tr><td>Quick suggestions</td><td>Editor's autocomplete list while typing.</td><td>On</td></tr>
+        <tr><td>Auto closing brackets</td><td>Closes brackets, quotes and tags as you type.</td><td>On</td></tr>
+        <tr><td>Indentation guides</td><td>Vertical lines at each indentation level.</td><td>On</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="config-block">
+    <h3><span class="config-tag tag-purple">Behavior</span> Navigation &amp; cursor</h3>
+    <table class="opts">
+      <thead>
+        <tr><th>Option</th><th>What it does</th><th>Default</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Code folding</td><td>Gutter to collapse code blocks (functions, objects, regions).</td><td>On</td></tr>
+        <tr><td>Smooth scrolling</td><td>Animates scroll motion for a more fluid feel.</td><td>On</td></tr>
+        <tr><td>Scroll beyond last line</td><td>Lets you scroll past the final line.</td><td>Off</td></tr>
+        <tr><td>Tab size</td><td>Indentation width: 2, 4, 6 or 8.</td><td>2</td></tr>
+        <tr><td>Cursor style</td><td>Line, Block, Underline + thin variants.</td><td>Line</td></tr>
+        <tr><td>Cursor blinking</td><td>Blink, Smooth, Phase, Expand or Solid.</td><td>Blink</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================
+     SNIPPETS - catalog
+     ============================================================ -->
+<section style="padding-top:0;">
+  <div class="section-label">// Snippets</div>
+  <h1>Type a prefix.<br/><strong>Get the whole block.</strong></h1>
+  <p class="section-sub">A built-in catalog of useful snippets for JavaScript and HTML / GAS, plus a visual editor to add your own. Triggered by their prefix in Monaco's autocomplete.</p>
+
+  <div class="config-block">
+    <h3><span class="config-tag tag-yellow">JavaScript</span> Built-in catalog</h3>
+    <table class="snippets">
+      <thead>
+        <tr><th>Prefix</th><th>What it inserts</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>clog</code></td><td>console.log(variable)</td></tr>
+        <tr><td><code>log</code></td><td>Logger.log(message) — Apps Script logger</td></tr>
+        <tr><td><code>gss</code></td><td>Get active spreadsheet and a sheet by name</td></tr>
+        <tr><td><code>getval</code></td><td>Get values from a range (A2:C)</td></tr>
+        <tr><td><code>alert</code></td><td>SpreadsheetApp.getUi().alert(…)</td></tr>
+        <tr><td><code>for</code></td><td>Classic for loop with i++</td></tr>
+        <tr><td><code>forof</code></td><td>Modern for…of loop</td></tr>
+        <tr><td><code>fe</code></td><td>array.forEach(item =&gt; { … })</td></tr>
+        <tr><td><code>ife</code></td><td>if…else block</td></tr>
+        <tr><td><code>try</code></td><td>try…catch with Logger.log on error</td></tr>
+        <tr><td><code>map</code></td><td>array.map(item =&gt; …)</td></tr>
+        <tr><td><code>filter</code></td><td>array.filter(item =&gt; …)</td></tr>
+        <tr><td><code>doc</code></td><td>JSDoc comment block with @param and @return</td></tr>
+        <tr><td><code>todo</code></td><td>// TODO: … with current date</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="config-block">
+    <h3><span class="config-tag tag-red">HTML / GAS</span> Built-in catalog</h3>
+    <table class="snippets">
+      <thead>
+        <tr><th>Prefix</th><th>What it inserts</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>htmlgas</code></td><td>Boilerplate index.html for HtmlService, with normalize.css</td></tr>
+        <tr><td><code>field</code></td><td>Input wrapped in a label with a placeholder</td></tr>
+        <tr><td><code>btn</code></td><td>Styled button with id and class</td></tr>
+        <tr><td><code>select</code></td><td>Select dropdown with two options</td></tr>
+        <tr><td><code>divc</code></td><td>&lt;div class="container"&gt; block</td></tr>
+        <tr><td><code>table</code></td><td>Table with &lt;thead&gt; and &lt;tbody&gt; and two columns</td></tr>
+        <tr><td><code>incjs</code></td><td>&lt;?!= include("JavaScript"); ?&gt; for HtmlService</td></tr>
+        <tr><td><code>incss</code></td><td>&lt;?!= include("Stylesheet"); ?&gt; for HtmlService</td></tr>
+        <tr><td><code>loader</code></td><td>Loading spinner skeleton</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p style="margin-top:24px;color:var(--muted);font-size:14px;font-weight:300;">Snippets support placeholders (<code>${1:name}</code>) and tab navigation. Type a prefix, press <kbd>Tab</kbd>, fill the first slot, press <kbd>Tab</kbd> again to jump to the next.</p>
+</section>
+
+<!-- ============================================================
+     AI - providers + local model + AI context examples
      ============================================================ -->
 <section id="ai" style="padding-top:0;">
-  <div class="section-label">// Get started</div>
-  <h1>Use your own AI account.<br/><strong>Your keys, your data.</strong></h1>
-  <p class="section-sub">Choose any provider you already have a key for. Your key never leaves your browser — it goes from your machine straight to the AI provider.</p>
+  <div class="section-label">// AI</div>
+  <h1>Use your own AI account.<br/><strong>Cloud or local.</strong></h1>
+  <p class="section-sub">Choose any provider you already have a key for, or run a model on your own machine. Your key never leaves your browser — requests go from your machine straight to the provider.</p>
 
-  <div class="steps">
-    <div class="step">
-      <div class="step-num">01</div>
-      <h3>Open the editor</h3>
-      <p>Go to any Google Apps Script project in your browser.</p>
+  <div class="exp-callout">
+    <strong>⚗️ Heads-up:</strong>
+    AI features (chat, autocomplete and the active-file panel) are <strong>experimental</strong>.
+    They work well in most cases but may behave inconsistently with very large projects, unusual file structures or specific provider models.
+    Disable them from the popup if you hit issues, and feel free to share feedback at <code>rubencho.dev@gmail.com</code>.
+  </div>
+
+  <div class="features-grid" style="margin-bottom:48px;">
+    <div class="feature-card">
+      <div class="feature-tag tag-blue">Cloud providers</div>
+      <h3>Bring your own key</h3>
+      <ul>
+        <li>OpenAI — <code>platform.openai.com</code></li>
+        <li>Anthropic — <code>console.anthropic.com</code></li>
+        <li>Google Gemini — <code>aistudio.google.com</code></li>
+        <li>DeepSeek — <code>platform.deepseek.com</code></li>
+        <li>Kimi (Moonshot) — <code>platform.moonshot.cn</code></li>
+        <li>Nvidia Build — <code>build.nvidia.com</code></li>
+        <li>ChatLLM — <code>apps.abacus.ai</code></li>
+        <li>OpenRouter — <code>openrouter.ai</code></li>
+      </ul>
     </div>
-    <div class="step">
-      <div class="step-num">02</div>
-      <h3>Open AI chat</h3>
-      <p>Click the <strong>AI</strong> button in the toolbar or press <kbd>Alt+Shift+C</kbd>.</p>
+
+    <div class="feature-card">
+      <div class="feature-tag tag-green">Local models</div>
+      <h3>Run it on your laptop</h3>
+      <p>Pick <strong>Custom</strong> as provider and point it to your local server. Works with any OpenAI-compatible endpoint.</p>
+      <ul>
+        <li><strong>LM Studio</strong> — port <code>1234</code></li>
+        <li><strong>Ollama</strong> — port <code>11434</code></li>
+        <li>API key field can stay empty</li>
+        <li>Nothing leaves your machine</li>
+      </ul>
     </div>
-    <div class="step">
-      <div class="step-num">03</div>
-      <h3>Paste your key</h3>
-      <p>Pick a provider (OpenAI, Claude, Gemini…) in settings and paste your API key.</p>
+
+    <div class="feature-card">
+      <div class="feature-tag tag-yellow">AI Context</div>
+      <h3>Project conventions</h3>
+      <p>A small free-text block sent with every request. Use it for project-wide rules: style, formats, libraries to avoid.</p>
+      <ul>
+        <li>Adds context the AI keeps in mind</li>
+        <li>Two ready-to-use examples below</li>
+        <li>Edit it from the popup or from the chat panel</li>
+      </ul>
     </div>
-    <div class="step">
-      <div class="step-num">04</div>
-      <h3>Start asking</h3>
-      <p>Send a question with <code>@selection</code>, <code>@file</code> or <code>@project</code> as context.</p>
+  </div>
+
+  <div class="config-block">
+    <h3><span class="config-tag tag-green">Local</span> Recommended models for Apps Script / JS / HTML / CSS</h3>
+    <p style="color:var(--muted);font-weight:300;font-size:14px;margin-top:0;">The author's pick: <strong style="color:var(--accent);">qwen2.5-coder-3b-instruct</strong>. Fast even on regular laptops, understands <code>.gs</code>, <code>.html</code>, <code>.css</code> and <code>.json</code> well. Five solid options below, ordered from lightest to most capable.</p>
+    <table class="models">
+      <thead>
+        <tr><th>Model</th><th>Size</th><th>Strengths</th><th>Ollama tag</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="recommended">Qwen2.5 Coder 3B Instruct ★</td>
+          <td>~3 B</td>
+          <td>Very fast, great quality for its size, strong on JS / HTML / CSS / SQL.</td>
+          <td><code>qwen2.5-coder:3b-instruct</code></td>
+        </tr>
+        <tr>
+          <td>Stable Code 3B Instruct</td>
+          <td>~3 B</td>
+          <td>Tuned for code completion. Excellent latency for inline ghost-text.</td>
+          <td><code>stable-code:3b-instruct</code></td>
+        </tr>
+        <tr>
+          <td>Qwen2.5 Coder 7B Instruct</td>
+          <td>~7 B</td>
+          <td>Bigger steps, longer responses, better on tricky refactors.</td>
+          <td><code>qwen2.5-coder:7b-instruct</code></td>
+        </tr>
+        <tr>
+          <td>Llama 3.1 8B Instruct</td>
+          <td>~8 B</td>
+          <td>Strong general-purpose model that also handles JS / HTML well. Use it for chat and explanations.</td>
+          <td><code>llama3.1:8b-instruct</code></td>
+        </tr>
+        <tr>
+          <td>DeepSeek Coder V2 Lite Instruct</td>
+          <td>~16 B (MoE)</td>
+          <td>Best quality of the list. MoE keeps it fast despite the size; needs ~12 GB of RAM.</td>
+          <td><code>deepseek-coder-v2:lite-instruct</code></td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="color:var(--muted);font-size:13px;font-weight:300;margin-top:16px;">
+      <strong style="color:var(--text);">How to pick:</strong>
+      8 GB RAM and want speed → 3 B models.
+      16 GB and want better answers → 7 B / 8 B.
+      24 GB+ and want close-to-cloud quality → DeepSeek Coder V2 Lite.
+    </p>
+  </div>
+
+  <div class="config-block">
+    <h3><span class="config-tag tag-blue">LM Studio</span> Step-by-step</h3>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <h3>Install LM Studio</h3>
+        <p>Download <code>lmstudio.ai</code> and run the installer.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <h3>Download a model</h3>
+        <p>Discover tab → search <code>Qwen2.5 Coder 3B Instruct</code> → download.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <h3>Start the server</h3>
+        <p>Developer tab → <strong>Start Server</strong>. Default port <code>1234</code>.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">04</div>
+        <h3>Connect</h3>
+        <p>Provider <code>Custom</code>, URL <code>http://localhost:1234/v1/chat/completions</code>, API key empty.</p>
+      </div>
     </div>
+  </div>
+
+  <div class="config-block">
+    <h3><span class="config-tag tag-green">Ollama</span> Step-by-step</h3>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <h3>Install Ollama</h3>
+        <p>Download from <code>ollama.com</code> and run the installer.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <h3>Pull a model</h3>
+        <p><code>ollama pull qwen2.5-coder:3b-instruct</code> from a terminal.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <h3>Service running</h3>
+        <p>Auto-starts on Windows / macOS. On Linux: <code>ollama serve</code>. Default port <code>11434</code>.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">04</div>
+        <h3>Connect</h3>
+        <p>Provider <code>Custom</code>, URL <code>http://localhost:11434/v1/chat/completions</code>, API key empty.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="config-block">
+    <h3><span class="config-tag tag-yellow">AI Context</span> Two prompts that work</h3>
+    <p style="color:var(--muted);font-weight:300;font-size:14px;margin-top:0;">Keep your AI Context short and specific. These two examples work well in real Apps Script projects — copy, adapt and paste.</p>
+
+    <div class="prompt-card">This project is a Google Apps Script web app for <span class="ph">{YOUR USE CASE}</span>.
+- Use modern JavaScript (let / const, arrow functions, async / await).
+- Prefer Logger.log over console.log for runtime traces.
+- Wrap risky calls in try / catch and log errors with the function name.
+- Date format: dd/MM/yyyy. Currency format: 1,234.56 (en-US).
+- Keep functions under 40 lines. Comment intent, not syntax.</div>
+
+    <div class="prompt-card">You are pair-programming on Apps Script HTML Service.
+- Use &lt;?!= include('Name'); ?&gt; to embed templates.
+- Avoid inline event handlers; bind events with addEventListener.
+- For Spreadsheet calls, batch reads / writes (getValues / setValues).
+- Don't suggest libraries that need npm; only what runs natively in GAS.</div>
   </div>
 
   <div style="margin-top:60px;">
     <div class="section-label">// Keyboard shortcuts</div>
     <div class="shortcut-grid">
       <div class="shortcut-card">
-        <kbd>Alt+Shift+F</kbd>
-        <span class="shortcut-desc">Search across every file in the project</span>
+        <kbd>Tab</kbd>
+        <span class="shortcut-desc">Accept the current AI suggestion</span>
+      </div>
+      <div class="shortcut-card">
+        <kbd>Ctrl+F</kbd>
+        <span class="shortcut-desc">Open the native find widget (extended with cross-file navigation)</span>
+      </div>
+      <div class="shortcut-card">
+        <kbd>Ctrl+Alt+F</kbd>
+        <span class="shortcut-desc">Jump to the next file with matches</span>
+      </div>
+      <div class="shortcut-card">
+        <kbd>Ctrl+Shift+F</kbd>
+        <span class="shortcut-desc">Jump to the previous file with matches</span>
       </div>
       <div class="shortcut-card">
         <kbd>Alt+Shift+C</kbd>
         <span class="shortcut-desc">Open the AI chat panel</span>
       </div>
+      <div class="shortcut-card">
+        <kbd>Esc</kbd>
+        <span class="shortcut-desc">Close the active panel</span>
+      </div>
     </div>
   </div>
 </section>
 
 <!-- ============================================================
-     THEMES
+     THEMES (51)
      ============================================================ -->
 <div class="themes-section" id="themes">
   <div class="themes-inner">
     <div class="section-label">// Themes</div>
-    <h2>50+ themes. <strong>Make it yours.</strong></h2>
+    <h2>51 themes. <strong>Make it yours.</strong></h2>
     <p class="sub">Classics from the VS Code world plus colorful options for every taste. Apply with one click, duplicate to tweak the colors, or build your own from scratch.</p>
 
     <div class="themes-grid">
-      <div class="theme-pill" style="background:#282a36;color:#f8f8f2;border-color:rgba(255,255,255,.1);">Dracula</div>
-      <div class="theme-pill" style="background:#272822;color:#f8f8f2;border-color:rgba(255,255,255,.1);">Monokai</div>
-      <div class="theme-pill" style="background:#002b36;color:#839496;border-color:rgba(255,255,255,.1);">Solarized Dark</div>
-      <div class="theme-pill" style="background:#1d1f21;color:#c5c8c6;border-color:rgba(255,255,255,.1);">Tomorrow Night</div>
-      <div class="theme-pill" style="background:#011627;color:#d6deeb;border-color:rgba(255,255,255,.1);">Night Owl</div>
-      <div class="theme-pill" style="background:#1e2127;color:#abb2bf;border-color:rgba(255,255,255,.1);">One Dark</div>
-      <div class="theme-pill" style="background:#002240;color:#e8e9ea;border-color:rgba(255,255,255,.1);">Cobalt</div>
-      <div class="theme-pill" style="background:#1a1a2e;color:#eaeaea;border-color:rgba(255,255,255,.1);">Twilight</div>
-      <div class="theme-pill" style="background:#ffffff;color:#333;border-color:rgba(0,0,0,.2);">GitHub Light</div>
-      <div class="theme-pill" style="background:#fffde4;color:#6c5f00;border-color:rgba(0,0,0,.1);">Xcode</div>
-      <div class="theme-pill" style="background:#0e0e0e;color:#f8c555;border-color:rgba(255,255,255,.1);">Material Dark</div>
-      <div class="theme-pill" style="background:rgba(52,168,83,0.2);color:#a6e3a1;border-color:rgba(52,168,83,0.3);">+ 40 more</div>
+      <div class="theme-pill" style="background:#001e1d;color:#a3a297;border-color:rgba(255,255,255,.08);">Active4D</div>
+      <div class="theme-pill" style="background:#000000;color:#ffd700;border-color:rgba(255,255,255,.08);">All Hallows Eve</div>
+      <div class="theme-pill" style="background:#200020;color:#d1b6e1;border-color:rgba(255,255,255,.08);">Amy</div>
+      <div class="theme-pill" style="background:#372725;color:#e6e1c4;border-color:rgba(255,255,255,.08);">Birds of Paradise</div>
+      <div class="theme-pill" style="background:#0c1014;color:#f8f8f8;border-color:rgba(255,255,255,.08);">Blackboard</div>
+      <div class="theme-pill" style="background:#000000;color:#fcfbcc;border-color:rgba(255,255,255,.08);">Brilliance Black</div>
+      <div class="theme-pill" style="background:#191919;color:#cccccc;border-color:rgba(255,255,255,.08);">Brilliance Dull</div>
+      <div class="theme-pill" style="background:#171717;color:#dcdcdc;border-color:rgba(255,255,255,.08);">Chrome DevTools</div>
+      <div class="theme-pill" style="background:#ffffff;color:#000000;border-color:rgba(0,0,0,.15);">Clouds</div>
+      <div class="theme-pill" style="background:#191970;color:#929292;border-color:rgba(255,255,255,.08);">Clouds Midnight</div>
+      <div class="theme-pill" style="background:#002240;color:#ffffff;border-color:rgba(255,255,255,.08);">Cobalt</div>
+      <div class="theme-pill" style="background:#f9f9f9;color:#080808;border-color:rgba(0,0,0,.15);">Dawn</div>
+      <div class="theme-pill" style="background:#000000;color:#ffffff;border-color:rgba(255,255,255,.08);">Dominion Day</div>
+      <div class="theme-pill" style="background:#282a36;color:#f8f8f2;border-color:rgba(255,255,255,.08);">Dracula</div>
+      <div class="theme-pill" style="background:#262631;color:#d2d2d2;border-color:rgba(255,255,255,.08);">Dreamweaver</div>
+      <div class="theme-pill" style="background:#fef9ec;color:#000000;border-color:rgba(0,0,0,.15);">Eiffel</div>
+      <div class="theme-pill" style="background:#2a211c;color:#bdae9d;border-color:rgba(255,255,255,.08);">Espresso Libre</div>
+      <div class="theme-pill" style="background:#ffffff;color:#3b3b3b;border-color:rgba(0,0,0,.15);">GitHub</div>
+      <div class="theme-pill" style="background:#ffffff;color:#000000;border-color:rgba(0,0,0,.15);">IDLE</div>
+      <div class="theme-pill" style="background:#323232;color:#ffffff;border-color:rgba(255,255,255,.08);">idleFingers</div>
+      <div class="theme-pill" style="background:#f7f7f7;color:#000000;border-color:rgba(0,0,0,.15);">iPlastic</div>
+      <div class="theme-pill" style="background:#211511;color:#dadada;border-color:rgba(255,255,255,.08);">Katzenmilch</div>
+      <div class="theme-pill" style="background:#1a1d23;color:#ddd9c5;border-color:rgba(255,255,255,.08);">Kiro dark</div>
+      <div class="theme-pill" style="background:#ffffff;color:#1a1d23;border-color:rgba(0,0,0,.15);">Kiro light</div>
+      <div class="theme-pill" style="background:#3b0102;color:#cccccc;border-color:rgba(255,255,255,.08);">krTheme</div>
+      <div class="theme-pill" style="background:#2c2c2c;color:#e8e9eb;border-color:rgba(255,255,255,.08);">Kuroir</div>
+      <div class="theme-pill" style="background:#2b224b;color:#cdcdcd;border-color:rgba(255,255,255,.08);">LAZY</div>
+      <div class="theme-pill" style="background:#0a3399;color:#ffffff;border-color:rgba(255,255,255,.08);">MagicWB (Amiga)</div>
+      <div class="theme-pill" style="background:#161616;color:#e6e1dc;border-color:rgba(255,255,255,.08);">Merbivore</div>
+      <div class="theme-pill" style="background:#1c1c1c;color:#e6e1dc;border-color:rgba(255,255,255,.08);">Merbivore Soft</div>
+      <div class="theme-pill" style="background:#000000;color:#ffffff;border-color:rgba(255,255,255,.08);">monoindustrial</div>
+      <div class="theme-pill" style="background:#272822;color:#f8f8f2;border-color:rgba(255,255,255,.08);">Monokai</div>
+      <div class="theme-pill" style="background:#1d1c19;color:#f8f8f2;border-color:rgba(255,255,255,.08);">Monokai Bright</div>
+      <div class="theme-pill" style="background:#011627;color:#d6deeb;border-color:rgba(255,255,255,.08);">Night Owl</div>
+      <div class="theme-pill" style="background:#1b2b34;color:#d8dee9;border-color:rgba(255,255,255,.08);">Oceanic Next</div>
+      <div class="theme-pill" style="background:#211e1e;color:#dadada;border-color:rgba(255,255,255,.08);">Pastels on Dark</div>
+      <div class="theme-pill" style="background:#f1f1f1;color:#000000;border-color:rgba(0,0,0,.15);">Slush and Poppies</div>
+      <div class="theme-pill" style="background:#002b36;color:#839496;border-color:rgba(255,255,255,.08);">Solarized Dark</div>
+      <div class="theme-pill" style="background:#fdf6e3;color:#657b83;border-color:rgba(0,0,0,.15);">Solarized Light</div>
+      <div class="theme-pill" style="background:#0d0a3d;color:#dee2e7;border-color:rgba(255,255,255,.08);">SpaceCadet</div>
+      <div class="theme-pill" style="background:#000000;color:#f8f8f2;border-color:rgba(255,255,255,.08);">Sunburst</div>
+      <div class="theme-pill" style="background:#ffffff;color:#000000;border-color:rgba(0,0,0,.15);">Textmate (Mac Classic)</div>
+      <div class="theme-pill" style="background:#ffffff;color:#4d4d4c;border-color:rgba(0,0,0,.15);">Tomorrow</div>
+      <div class="theme-pill" style="background:#1d1f21;color:#c5c8c6;border-color:rgba(255,255,255,.08);">Tomorrow Night</div>
+      <div class="theme-pill" style="background:#002451;color:#ffffff;border-color:rgba(255,255,255,.08);">Tomorrow Night Blue</div>
+      <div class="theme-pill" style="background:#000000;color:#eaeaea;border-color:rgba(255,255,255,.08);">Tomorrow Night Bright</div>
+      <div class="theme-pill" style="background:#000000;color:#cccccc;border-color:rgba(255,255,255,.08);">Tomorrow Night Eighties</div>
+      <div class="theme-pill" style="background:#141414;color:#ffffff;border-color:rgba(255,255,255,.08);">Twilight</div>
+      <div class="theme-pill" style="background:#000000;color:#ddffdd;border-color:rgba(255,255,255,.08);">Upstream Sunburst</div>
+      <div class="theme-pill" style="background:#000000;color:#ffffff;border-color:rgba(255,255,255,.08);">Vibrant Ink</div>
+      <div class="theme-pill" style="background:#fffbf0;color:#000000;border-color:rgba(0,0,0,.15);">Xcode</div>
+      <div class="theme-pill" style="background:#404040;color:#ddcca5;border-color:rgba(255,255,255,.08);">Zenburnesque</div>
     </div>
 
-    <p style="margin-top:24px;color:rgba(255,255,255,0.3);font-size:14px;font-weight:300;">Don't like a color? Duplicate any theme and change anything you want — keywords, comments, background, every detail.</p>
+    <p style="margin-top:24px;color:rgba(255,255,255,0.45);font-size:13.5px;font-weight:300;line-height:1.7;">
+      Don't like a color? Duplicate any theme and change anything you want — keywords, comments, background, every detail.
+      Themes courtesy of <a href="https://github.com/JeanRemiDelteil/appsScriptColor" target="_blank">JeanRemiDelteil / appsScriptColor</a>.
+    </p>
   </div>
 </div>
-
-<!-- ============================================================
-     CONFIGURATION
-     ============================================================ -->
-<section>
-  <div class="section-label">// Settings</div>
-  <h1>Everything you can tweak.<br/><strong>Without leaving Chrome.</strong></h1>
-  <p class="section-sub">Click the extension icon to open the popup. Changes apply instantly — no need to refresh the page.</p>
-
-  <div class="config-grid">
-    <div class="feature-card">
-      <div class="feature-tag tag-blue">Look</div>
-      <h3>Make it pretty</h3>
-      <ul>
-        <li>Pick the editor theme</li>
-        <li>Choose a font (JetBrains Mono, Fira Code, Roboto Mono…)</li>
-        <li>Set font size and line spacing</li>
-      </ul>
-    </div>
-    <div class="feature-card">
-      <div class="feature-tag tag-yellow">Behavior</div>
-      <h3>Make it yours</h3>
-      <ul>
-        <li>Show or hide the minimap and line numbers</li>
-        <li>Wrap long lines</li>
-        <li>Pick tab size, cursor style and blink</li>
-        <li>Code folding and smooth scrolling</li>
-        <li>Guide lines at 80 / 120 columns</li>
-      </ul>
-    </div>
-    <div class="feature-card">
-      <div class="feature-tag tag-red">Features</div>
-      <h3>Turn things on or off</h3>
-      <ul>
-        <li>AI suggestions while you type</li>
-        <li>Live error highlighting</li>
-        <li>Folders in the file tree</li>
-        <li>Master switch — pause everything in one click</li>
-      </ul>
-    </div>
-  </div>
-</section>
 
 <!-- ============================================================
      PRIVACY HIGHLIGHT
@@ -926,6 +1529,7 @@
       <ul>
         <li>No analytics, no tracking, no telemetry</li>
         <li>AI requests go from your browser straight to the provider</li>
+        <li>GitHub sync goes from your browser straight to GitHub</li>
         <li>Settings stored in Chrome — sync with your Google account if you want</li>
         <li>Open source under the MIT license</li>
       </ul>
@@ -964,7 +1568,7 @@
   <div class="faq">
     <details>
       <summary>Is it really free?</summary>
-      <p>Yes. The extension is free, open source under MIT. The only thing that costs money is the AI itself: you bring your own provider key (OpenAI, Claude, Gemini, etc.) and pay them directly for the usage. We never charge a cent.</p>
+      <p>Yes. The extension is free, open source under MIT. The only thing that costs money is the AI itself: you bring your own provider key (OpenAI, Claude, Gemini, etc.) and pay them directly for the usage. We never charge a cent. If you don't want to pay anything, run a local model with LM Studio or Ollama.</p>
     </details>
     <details>
       <summary>Do I need to know how to code?</summary>
@@ -976,7 +1580,11 @@
     </details>
     <details>
       <summary>Will my code be sent to a server you control?</summary>
-      <p>Never. AI requests go from your browser straight to the provider you chose. GitHub sync goes from your browser straight to GitHub. We don't have a server in the middle.</p>
+      <p>Never. AI requests go from your browser straight to the provider you chose. GitHub sync goes from your browser straight to GitHub. Apps Script sync goes from your browser straight to Google's API. We don't have a server in the middle.</p>
+    </details>
+    <details>
+      <summary>How does the local model option work?</summary>
+      <p>Pick <strong>Custom</strong> as the provider in the popup AI tab. Paste the URL of your local server (LM Studio: <code>http://localhost:1234/v1/chat/completions</code>, Ollama: <code>http://localhost:11434/v1/chat/completions</code>). Put the exact model name in the model field and leave the API key empty. From then on every request goes only to localhost.</p>
     </details>
     <details>
       <summary>Can I use it on a corporate Google account?</summary>
@@ -986,6 +1594,61 @@
       <summary>Does it work outside Chrome?</summary>
       <p>Today only on Chromium-based browsers (Chrome, Edge, Brave). The Apps Script editor itself runs there, so we focus on that environment.</p>
     </details>
+    <details>
+      <summary>What happens if a push or pull is interrupted?</summary>
+      <p>The panel keeps track of the files that already finished. When you retry, those files are reused without re-uploading or re-downloading, so you don't waste time or hit GitHub's rate limits twice.</p>
+    </details>
+    <details>
+      <summary>How do I create my own snippet or theme?</summary>
+      <p>Open the popup, go to Snippets or Themes, click the <strong>+</strong> button. You'll get a visual editor with a preview while you type. Save and the new item appears in the editor immediately.</p>
+    </details>
+  </div>
+</section>
+
+<!-- ============================================================
+     CREDITS
+     ============================================================ -->
+<section id="credits" style="padding-top:0;">
+  <div class="section-label">// Credits</div>
+  <h1>Standing on <strong>great work.</strong></h1>
+  <p class="section-sub">A few of these features were sparked by other projects. Their ideas helped shape what's here.</p>
+
+  <div class="feature-grid" style="margin-top:48px;">
+    <div class="feature-card">
+      <div class="feature-tag tag-orange">Folders &amp; themes</div>
+      <h3>JeanRemiDelteil / appsScriptColor</h3>
+      <p>The approach for the editor's file tree (parsing slashes into a real folder hierarchy) and the catalog of color themes both come from this extension.</p>
+      <p style="margin-top:14px;">
+        <a href="https://github.com/JeanRemiDelteil/appsScriptColor" target="_blank" class="btn-secondary" style="padding:10px 20px;font-size:14px;">View on GitHub</a>
+      </p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-tag tag-purple">Error Lens</div>
+      <h3>usernamehw / vscode-error-lens</h3>
+      <p>The idea of showing diagnostics inline at the end of the line, with severity colors and counts, is inspired by this VS Code extension.</p>
+      <p style="margin-top:14px;">
+        <a href="https://github.com/usernamehw/vscode-error-lens" target="_blank" class="btn-secondary" style="padding:10px 20px;font-size:14px;">View on GitHub</a>
+      </p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-tag tag-teal">GitHub sync</div>
+      <h3>leonhartX / gas-github</h3>
+      <p>The approach for reading and writing the project content from outside the editor via the Apps Script API was inspired by this project.</p>
+      <p style="margin-top:14px;">
+        <a href="https://github.com/leonhartX/gas-github" target="_blank" class="btn-secondary" style="padding:10px 20px;font-size:14px;">View on GitHub</a>
+      </p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-tag tag-purple">Native search</div>
+      <h3>Black edition for google apps script ide</h3>
+      <p>Extending Monaco's native find widget with cross-file navigation (instead of opening a separate search panel) is based on this extension.</p>
+      <p style="margin-top:14px;">
+        <a href="https://www.swroot.com/black-script" target="_blank" class="btn-secondary" style="padding:10px 20px;font-size:14px;">Visit project</a>
+      </p>
+    </div>
   </div>
 </section>
 
@@ -1017,6 +1680,7 @@
 <footer>
   <p>© <span id="year"></span> Google Apps Script Tools · MIT License · Built by <a href="https://github.com/rubendariosanchez" target="_blank">Rubén Darío Sánchez</a></p>
   <div class="footer-links">
+    <a href="#credits">Credits</a>
     <a href="mailto:rubencho.dev@gmail.com">Contact</a>
     <a href="privacy-policy.html">Privacy</a>
     <a href="terms.html">Terms</a>
@@ -1026,9 +1690,6 @@
 </footer>
 
 <script>
-  // Mantiene el año del footer al día sin tocar el HTML cada enero.
-  // Como fallback (si JS está deshabilitado), el span ya viene con un
-  // valor sensato hardcoded.
   document.getElementById('year').textContent = new Date().getFullYear();
 </script>
 

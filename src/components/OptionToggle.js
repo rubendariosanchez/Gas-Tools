@@ -37,15 +37,32 @@ export class OptionToggle extends HTMLElement {
     const title_ = this.getAttribute('title') || 'Opción';
     const desc_ = this.getAttribute('description') || '';
     const isChecked_ = this.hasAttribute('checked');
+    const isExperimental_ = this.hasAttribute('experimental');
 
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; padding: 14px 0; border-bottom: 1px solid #222; }
         .qc__row { display: flex; justify-content: space-between; align-items: center; }
         .qc__info { flex: 1; padding-right: 16px; }
-        .qc__title { color: #fff; font-size: 14px; font-weight: 500; font-family: sans-serif; }
+        .qc__title { color: #fff; font-size: 14px; font-weight: 500; font-family: sans-serif; display: inline-flex; align-items: center; gap: 8px; }
         .qc__desc { color: #9ca3af; font-size: 11px; margin-top: 3px; line-height: 1.4; }
-        
+        .qc__exp-badge {
+          display: inline-flex; align-items: center; gap: 3px;
+          padding: 1px 7px;
+          font-size: 9.5px; font-weight: 600;
+          letter-spacing: 0.04em; text-transform: uppercase;
+          border-radius: 999px;
+          background: rgba(251,188,4,0.14);
+          color: #fbbc04;
+          border: 1px solid rgba(251,188,4,0.35);
+          font-family: sans-serif;
+        }
+        .qc__exp-note {
+          color: #f5b343; font-size: 10.5px; margin-top: 4px;
+          font-family: sans-serif; line-height: 1.45;
+          font-style: italic;
+        }
+
         .qc__switch {
           position: relative; display: inline-block; width: 36px; height: 20px;
         }
@@ -63,8 +80,12 @@ export class OptionToggle extends HTMLElement {
       </style>
       <div class="qc__row">
         <div class="qc__info">
-          <div class="qc__title">${title_}</div>
+          <div class="qc__title">
+            ${title_}
+            ${isExperimental_ ? `<span class="qc__exp-badge" title="Experimental — may not work fully on all projects">⚗️ Experimental</span>` : ''}
+          </div>
           ${desc_ ? `<div class="qc__desc">${desc_}</div>` : ''}
+          ${isExperimental_ ? `<div class="qc__exp-note">Experimental feature. It may not work in 100% of cases — feedback welcome.</div>` : ''}
         </div>
         <label class="qc__switch">
           <input type="checkbox" ${isChecked_ ? 'checked' : ''}>

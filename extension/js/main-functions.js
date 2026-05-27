@@ -201,7 +201,6 @@ function createNavigationDetector(callbacks) {
 
 async function loadResources() {
   const urls = {
-    searchButton: 'extension/html/searchButton.html',
     chatButton:   'extension/html/chatButton.html',
     fileButton:   'extension/html/currentFileButton.html',
     actionsButton:'extension/html/actionsButton.html',
@@ -228,9 +227,9 @@ async function injectScripts() {
     'extension/js/services/gas-ai-autocomplete.js',
     'extension/js/services/gas-folders.js',
     'extension/js/services/gas-error-lens.js',
+    'extension/js/services/gas-native-search.js',
     'src/vendor/diff/diff.min.js',
     'src/vendor/diff2html/diff2html-ui.min.js',
-    'extension/js/components/gas-search-panel.js',
     'extension/js/components/gas-chat-panel.js',
     'extension/js/components/gas-current-file.js',
     'extension/js/components/gas-actions-panel.js',
@@ -456,7 +455,6 @@ async function init() {
     });
 
     watchForEditors({
-      searchButton:  resources.searchButton,
       chatButton:    resources.chatButton,
       fileButton:    resources.fileButton,
       actionsButton: resources.actionsButton,

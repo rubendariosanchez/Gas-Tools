@@ -1351,9 +1351,68 @@ class GasGithubPanel extends HTMLElement {
         }
         .qc__gh-modalFooter {
           flex: 0 0 auto;
+          display: flex;
+          justify-content: flex-end;
+          align-items: center;
+          gap: 10px;
           border-top: 1px solid var(--gc-border);
           padding-top: 10px;
           margin-top: 4px;
+        }
+
+        /* Confirm modal: header tonal con icono + cuerpo + footer.
+           Se usa exclusivamente desde _showConfirm_. Reemplaza al
+           layout neutro de qc__gh-modalTitle/TextWrap/Footer para que
+           las acciones destructivas o críticas tengan más jerarquía
+           visual. El padding de 0 sobreescribe el del modal genérico
+           porque cada sección lleva su propio padding. */
+        .qc__gh-modal.qc__gh-confirm {
+          padding: 0;
+          gap: 0;
+          overflow: hidden;
+        }
+        .qc__gh-confirmHead {
+          padding: 14px 18px;
+          border-bottom: 1px solid var(--gc-border);
+        }
+        .qc__gh-confirmHead--danger {
+          background: var(--gc-red-dim);
+        }
+        .qc__gh-confirmHead--primary {
+          background: var(--gc-accent-dim);
+        }
+        .qc__gh-confirmTitle {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-size: 14px;
+          font-weight: 600;
+        }
+        .qc__gh-confirmTitle .material-icons {
+          font-size: 20px;
+        }
+        .qc__gh-confirmTitle--danger,
+        .qc__gh-confirmTitle--danger .material-icons {
+          color: var(--gc-red-text);
+        }
+        .qc__gh-confirmTitle--primary,
+        .qc__gh-confirmTitle--primary .material-icons {
+          color: var(--gc-accent);
+        }
+        .qc__gh-confirmBody {
+          padding: 16px 18px;
+        }
+        .qc__gh-confirmMessage {
+          font-size: 13px;
+          line-height: 1.5;
+          color: var(--gc-text);
+        }
+        .qc__gh-confirmFoot {
+          display: flex;
+          justify-content: flex-end;
+          gap: 10px;
+          padding: 12px 18px;
+          border-top: 1px solid var(--gc-border);
         }
         .qc__gh-modalSelect {
           height: 36px;
@@ -3355,6 +3414,7 @@ class GasGithubPanel extends HTMLElement {
             : 'The Google account will be disconnected from this browser.'),
       confirmLabel: 'Sign out',
       tone:         'danger',
+      icon:         'logout',
     });
     if (!confirmed) return;
 
@@ -3432,6 +3492,7 @@ class GasGithubPanel extends HTMLElement {
                     'account. Your GitHub session is not affected.',
       confirmLabel: 'Disconnect',
       tone:         'danger',
+      icon:         'link_off',
     });
     if (!confirmed) return;
 
@@ -3770,34 +3831,45 @@ class GasGithubPanel extends HTMLElement {
   }
 
   /**
-   * Modal genérico de confirmación dentro del shadow root del panel.
-   * Sustituye al `window.confirm` nativo (la página de GAS lo bloquea
-   * en algunos casos).
+   * Modal de confirmación con cabecera tonal (icono + título), cuerpo
+   * con el mensaje y footer alineado a la derecha. Reutilizable para
+   * acciones destructivas (`tone: 'danger'`, header rojo) o positivas
+   * (`tone: 'primary'`, header accent).
    *
    * @param {{
    *   title:string,
    *   message:string,
    *   confirmLabel?:string,
    *   cancelLabel?:string,
-   *   tone?:'primary'|'danger'
+   *   tone?:'primary'|'danger',
+   *   icon?:string,
    * }} opts
    * @returns {Promise<boolean>}
    * @private
    */
   _showConfirm_(opts) {
-    const tone = opts.tone === 'danger' ? 'qc__gh-danger' : 'qc__gh-primary';
-    const cLabel = opts.confirmLabel || 'Confirm';
-    const xLabel = opts.cancelLabel  || 'Cancel';
+    const isDanger = opts.tone === 'danger';
+    const headClass  = isDanger ? 'qc__gh-confirmHead--danger' : 'qc__gh-confirmHead--primary';
+    const titleClass = isDanger ? 'qc__gh-confirmTitle--danger' : 'qc__gh-confirmTitle--primary';
+    const btnClass   = isDanger ? 'qc__gh-danger' : 'qc__gh-primary';
+    const icon       = opts.icon || (isDanger ? 'warning' : 'help_outline');
+    const cLabel     = opts.confirmLabel || 'Confirm';
+    const xLabel     = opts.cancelLabel  || 'Cancel';
 
     const html = `
-      <div class="qc__gh-modal" role="dialog" aria-label="${this._escape_(opts.title)}">
-        <div class="qc__gh-modalTitle">${this._escape_(opts.title)}</div>
-        <div class="qc__gh-modalTextWrap">
-          <div class="qc__gh-modalText">${this._escape_(opts.message).replace(/\n/g, '<br>')}</div>
+      <div class="qc__gh-modal qc__gh-confirm" role="dialog" aria-label="${this._escape_(opts.title)}">
+        <div class="qc__gh-confirmHead ${headClass}">
+          <div class="qc__gh-confirmTitle ${titleClass}">
+            <i class="material-icons">${icon}</i>
+            <span>${this._escape_(opts.title)}</span>
+          </div>
         </div>
-        <div class="qc__gh-modalFooter">
+        <div class="qc__gh-confirmBody">
+          <div class="qc__gh-confirmMessage">${this._escape_(opts.message).replace(/\n/g, '<br>')}</div>
+        </div>
+        <div class="qc__gh-confirmFoot">
           <button class="qc__gh-btn qc__gh-ghost" id="ghConfirmCancel">${this._escape_(xLabel)}</button>
-          <button class="qc__gh-btn ${tone}" id="ghConfirmOk">${this._escape_(cLabel)}</button>
+          <button class="qc__gh-btn ${btnClass}" id="ghConfirmOk">${this._escape_(cLabel)}</button>
         </div>
       </div>
     `;

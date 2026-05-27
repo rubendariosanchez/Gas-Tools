@@ -16,13 +16,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://script.google.com/*"
-      ],
-      "exclude_matches": [
-        "https://script.google.com/macros/s/*",
-        "https://script.google.com/macros/u/*/s/*",
-        "https://script.google.com/macros/d/*/usercallback*",
-        "https://script.google.com/oauth/*"
+        "https://script.google.com/home/projects/*/edit",
+        "https://script.google.com/u/*/home/projects/*/edit"
       ],
       "js": [
         "extension/js/main-functions.js"
@@ -58,7 +53,8 @@
       "128": "resources/icons/icon128.png"
     },
     "show_matches": [
-      "https://script.google.com/*"
+      "https://script.google.com/home/projects/*/edit",
+      "https://script.google.com/u/*/home/projects/*/edit"
     ]
   },
   "content_security_policy": {

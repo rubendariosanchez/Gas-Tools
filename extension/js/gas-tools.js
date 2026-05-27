@@ -23,7 +23,6 @@ class GasCustomEditor {
    * @param {Object} options.settings      - Toggles de configuración del usuario.
    * @param {Array}  options.snippets      - Snippets del usuario + predeterminados.
    * @param {Object} options.activeTheme   - Entrada del tema activo.
-   * @param {string} options.searchButton  - HTML del botón de búsqueda avanzada.
    * @param {string} options.chatButton    - HTML del botón del chat AI.
    * @param {string} options.fileButton    - HTML del indicador de archivo activo.
    * @param {string} options.actionsButton - HTML del botón de acciones del proyecto.
@@ -53,7 +52,7 @@ class GasCustomEditor {
      * cargar la página. Se captura UNA SOLA VEZ y no se reasigna al
      * navegar entre archivos. Útil para acciones que necesitan referirse
      * al "archivo de entrada" del proyecto (p. ej. la URI inicial al
-     * abrir el chat o el panel de búsqueda).
+     * abrir el chat).
      * @type {object|null}
      */
     this._initialModel = null;
@@ -71,13 +70,10 @@ class GasCustomEditor {
     this._rootParent = null;
     /** @type {HTMLElement[]} Todas las toolbars `.INSTk` activas. */
     this._toolsMenuElements = [];
-    this._searchPanel = null;
     this._chatPanel = null;
 
     // ── Listeners (guardados para poder eliminarlos en disable()) ─
-    this._onSearchButtonClick = null;
     this._onChatButtonClick = null;
-    this._onSearchShortcut = null;
     this._onChatShortcut = null;
 
     // ── Indicador de archivo activo ──────────────────────────────
@@ -99,7 +95,6 @@ class GasCustomEditor {
     // ── Flags de registro único ──────────────────────────────────
     // Solo aplican a comandos registrados con `editor.addCommand` (Monaco
     // no expone API para deshacerlos, por eso se registran una sola vez).
-    this._searchMonacoCommandBound = false;
     this._chatMonacoCommandBound = false;
 
     // ── Tema ─────────────────────────────────────────────────────
@@ -117,8 +112,8 @@ class GasCustomEditor {
 
     // ── Mapa URI → nombre legible de archivo ─────────────────────
     // Apuntamos al singleton global `window.gasFileMap` para que los
-    // web components (gas-current-file, gas-search-panel, gas-chat-panel)
-    // lo consuman directamente sin que tengamos que pasarles el mapa.
+    // web components (gas-current-file, gas-chat-panel) lo consuman
+    // directamente sin que tengamos que pasarles el mapa.
     this._fileNameObjectMap = window.gasFileMap;
     this._aiAutocomplete = null;
   }
@@ -247,7 +242,8 @@ class GasCustomEditor {
     // Aplicar tema activo
     await this.reloadTheme();
 
-    // Construir el mapa URI → nombre legible para el panel de búsqueda
+    // Construir el mapa URI → nombre legible (consumido por gas-current-file
+    // y otros componentes que muestran el nombre del archivo activo).
     this._buildUriToNameMap();
 
     // Si encontramos al menos una toolbar, inyectamos la UI propia.
@@ -372,8 +368,6 @@ class GasCustomEditor {
     // Construye el mapa y refresca todos los consumidores en cadena.
     const syncAll = () => {
       this._buildUriToNameMap();
-      this._searchPanel?.setEditor?.(this.editor);
-      this._searchPanel?.setFileNameObjectMap?.(this._fileNameObjectMap);
       this._chatPanel?.setEditor?.(this.editor);
       document.querySelectorAll('gas-current-file').forEach((el) => {
         el.setEditor?.(this.editor);
@@ -646,7 +640,7 @@ class GasCustomEditor {
    * reinyectar después de un cambio de panel SPA.
    *
    * @param {string} buttonId   ID del wrapper a crear (también usado para
-   *   evitar duplicados, p.ej. `'buttonAdvancedSearch'`).
+   *   evitar duplicados, p.ej. `'buttonChatGas'`).
    * @param {string} html       HTML del botón a inyectar dentro del wrapper.
    * @private
    */
@@ -664,21 +658,19 @@ class GasCustomEditor {
   /**
    * Mantiene la UI inyectada al día con un comportamiento idempotente:
    *
-   *  - Si el panel de búsqueda o de chat falta en el body (GAS desmontó
-   *    la página por completo), reinyecta TODO desde cero.
-   *  - Si los paneles siguen vivos, solo añade los botones faltantes a las
-   *    toolbars `.INSTk` que aún no los tienen. Esto evita cerrar el panel
-   *    abierto cuando el usuario está usándolo.
+   *  - Si el panel de chat falta en el body (GAS desmontó la página por
+   *    completo), reinyecta TODO desde cero.
+   *  - Si el panel sigue vivo, solo añade los botones faltantes a las
+   *    toolbars `.INSTk` que aún no los tienen. Esto evita cerrar el
+   *    panel abierto cuando el usuario está usándolo.
    *
    * @private
    */
   _ensureUiInjected_() {
-    const searchPanel = document.querySelector('gas-search-panel');
-    const chatPanel   = document.querySelector('gas-chat-panel');
-    const panelsAlive = !!searchPanel && !!chatPanel;
+    const chatPanel = document.querySelector('gas-chat-panel');
+    const panelsAlive = !!chatPanel;
 
     if (!panelsAlive) {
-      this._injectAdvancedSearch_();
       this._injectChatPanel_();
       this._injectActionsPanel_();
       this._injectGithubPanel_();
@@ -686,22 +678,16 @@ class GasCustomEditor {
       return;
     }
 
-    // Paneles vivos: refrescamos referencias para que esta instancia los
-    // controle y el editor activo sea el actual (clave para que `_goTo`
-    // navegue en el modelo correcto tras una re-inicialización).
-    this._searchPanel = searchPanel;
-    this._chatPanel   = chatPanel;
-    this._searchPanel.setEditor(this.editor);
+    // Panel vivo: refrescamos referencias para que esta instancia lo
+    // controle y el editor activo sea el actual.
+    this._chatPanel = chatPanel;
     this._chatPanel.setEditor(this.editor);
-    this._searchPanel._formatModelName = this._formatModelName.bind(this);
     this._buildUriToNameMap();
-    this._searchPanel.setFileNameObjectMap(this._fileNameObjectMap);
 
     // Y solo añadir los botones que falten en alguna toolbar.
-    this._injectToolbarButton_('buttonAdvancedSearch', this.options.searchButton);
-    this._injectToolbarButton_('buttonChatGas',        this.options.chatButton);
-    this._injectToolbarButton_('buttonActionsGas',     this.options.actionsButton);
-    this._injectToolbarButton_('buttonGithubGas',      this.options.githubButton);
+    this._injectToolbarButton_('buttonChatGas',    this.options.chatButton);
+    this._injectToolbarButton_('buttonActionsGas', this.options.actionsButton);
+    this._injectToolbarButton_('buttonGithubGas',  this.options.githubButton);
 
     // El indicador de archivo activo se monta dentro de cada toolbar para
     // que aparezca alineado a la derecha.
@@ -772,75 +758,6 @@ class GasCustomEditor {
 
       const timeoutId = setTimeout(() => finish([]), 15000);
     });
-  }
-
-  /**
-   * Crea (o recrea) el botón de búsqueda avanzada. El panel se crea una
-   * sola vez por documento y se reutiliza entre re-inyecciones para
-   * preservar tamaño/posición ajustados por el usuario.
-   * @private
-   */
-  _injectAdvancedSearch_() {
-    // 1. Limpiar todo: botones duplicados, panel viejo, listeners y atajo.
-    this._teardownAdvancedSearch_();
-
-    // 2. Crear el panel limpio y configurarlo. Inyectamos `_formatModelName`
-    //    y el mapa URI→archivo de inmediato para que el panel pueda buscar
-    //    incluso si se abre vía atajo de teclado, sin depender del click.
-    this._searchPanel = document.createElement('gas-search-panel');
-    document.body.appendChild(this._searchPanel);
-    this._searchPanel.setEditor(this.editor);
-    this._searchPanel._formatModelName = this._formatModelName.bind(this);
-    this._buildUriToNameMap();
-    this._searchPanel.setFileNameObjectMap(this._fileNameObjectMap);
-
-    // 3. Insertar un botón en cada toolbar `.INSTk` activa, ANTES del
-    //    elemento, para que aparezca a su izquierda.
-    this._injectToolbarButton_('buttonAdvancedSearch', this.options.searchButton);
-
-    // 4. Click delegado a nivel de documento: cualquier `#rsBtnSearchGas`
-    //    en cualquier toolbar `.INSTk` dispara el panel. Verificamos que
-    //    el trigger esté dentro de una toolbar real (no dentro del propio
-    //    panel ni de otros paneles flotantes que pudieran tener el mismo id).
-    this._onSearchButtonClick = (e) => {
-      const trigger = e.target.closest('#rsBtnSearchGas');
-      if (!trigger) return;
-      if (!trigger.closest('.INSTk') && !trigger.closest('#buttonAdvancedSearch')) return;
-      e.preventDefault();
-      this._buildUriToNameMap();
-      this._searchPanel.setFileNameObjectMap(this._fileNameObjectMap);
-      this._searchPanel.toggle(trigger);
-    };
-    document.addEventListener('click', this._onSearchButtonClick);
-
-    // 5. Atajo global Alt+Shift+F. Siempre abre y enfoca el panel; si ya
-    //    está abierto, lo deja abierto (no alterna).
-    const openSearch = () => {
-      this._buildUriToNameMap();
-      this._searchPanel?.setFileNameObjectMap(this._fileNameObjectMap);
-      this._searchPanel?.open(document.querySelector('#rsBtnSearchGas'));
-    };
-    this._onSearchShortcut = this._bindGlobalShortcut_('f', openSearch);
-
-    // 6. Atajo dentro de Monaco (registrado una sola vez por vida del editor).
-    this._bindMonacoShortcut_(
-      '_searchMonacoCommandBound',
-      window.monaco?.KeyCode?.KeyF,
-      openSearch
-    );
-  }
-
-  /**
-   * Elimina todos los botones de búsqueda duplicados, el panel del body,
-   * el click delegado y el atajo global.
-   * @private
-   */
-  _teardownAdvancedSearch_() {
-    this._teardownToolbarUi_('buttonAdvancedSearch', 'gas-search-panel', [
-      { prop: '_onSearchButtonClick', type: 'click' },
-      { prop: '_onSearchShortcut',    type: 'keydown', capture: true },
-    ]);
-    this._searchPanel = null;
   }
 
   /**
@@ -1398,9 +1315,9 @@ class GasCustomEditor {
    *     fuente de verdad para que cualquier componente del proyecto
    *     pueda adaptar su estética leyéndola.
    *  3. Sincroniza el atributo `theme` en los Web Components flotantes
-   *     (`gas-search-panel`, `gas-chat-panel`, `gas-github-panel`,
-   *     `gas-actions-panel`, `gas-current-file`) para que adopten su
-   *     paleta dark/light al instante.
+   *     (`gas-chat-panel`, `gas-github-panel`, `gas-actions-panel`,
+   *     `gas-current-file`) para que adopten su paleta dark/light al
+   *     instante.
    *
    * @param {boolean} enabled - true para aplicar dark mode, false para removerlo.
    * @private
@@ -1656,7 +1573,6 @@ class GasCustomEditor {
     const tags = (typeof DomUtils !== 'undefined' && DomUtils.FLOATING_PANEL_TAGS)
       ? DomUtils.FLOATING_PANEL_TAGS
       : [
-          'gas-search-panel',
           'gas-chat-panel',
           'gas-current-file',
           'gas-actions-panel',
@@ -1958,7 +1874,6 @@ class GasCustomEditor {
    */
   _reinjectUI_() {
     const inject = () => {
-      this._injectAdvancedSearch_();
       this._injectChatPanel_();
       this._injectActionsPanel_();
       this._injectGithubPanel_();
@@ -1988,13 +1903,11 @@ class GasCustomEditor {
    */
   _teardownInjectedUi_() {
     // Cerrar paneles antes de eliminarlos para que cierren listeners propios.
-    this._searchPanel?.close?.();
     this._chatPanel?.close?.();
     this._actionsPanel?.close?.();
     this._githubPanel?.close?.();
 
     // Delegar el teardown específico (botones + paneles + listeners + atajos).
-    this._teardownAdvancedSearch_();
     this._teardownChatPanel_();
     this._teardownActionsPanel_();
     this._teardownGithubPanel_();

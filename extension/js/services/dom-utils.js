@@ -131,7 +131,6 @@ class DomUtils {
    * @type {string[]}
    */
   static FLOATING_PANEL_TAGS = [
-    'gas-search-panel',
     'gas-chat-panel',
     'gas-current-file',
     'gas-actions-panel',

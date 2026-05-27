@@ -1,52 +1,29 @@
 "use strict";
+
 /**
  * @fileoverview gas-folders.js
- *
- * Implementa una estructura de carpetas nativa (Material Design) con visualización de árbol punteada.
- * Gestiona actualizaciones dinámicas por creación, eliminación o renombrado de archivos.
- * Íconos de archivo diferenciados por extensión: .gs, .html, .json y genérico.
- */
-/**
- * @class GasFolders
- * @classdesc Componente principal que transforma la lista plana de archivos del IDE de
- * Google Apps Script en un árbol visual de carpetas con estética Material Design.
- * Observa el DOM mediante {@link MutationObserver} para mantener la estructura
- * sincronizada con los cambios que realiza GAS sobre el `<ul role="listbox">`.
- *
- * @example
- * const folders = new GasFolders();
- * folders.setColor('#1a73e8');
- * folders.enable();
+ * Convierte la lista plana del editor de Apps Script en un árbol de
+ * carpetas (interpretando `/` en `title`) con iconos por extensión.
+ * Sincronización vía MutationObserver y rebuild idempotente.
  */
 class GasFolders {
-  /** @type {string} Clase aplicada al `<li>` que representa una carpeta. */
   static FOLDER_CLASS          = 'qc__folder-item';
-  /** @type {string} Clase del encabezado clickeable de la carpeta (chevron + ícono + label). */
   static FOLDER_HEADER_CLASS   = 'qc__folder-header';
-  /** @type {string} Clase del contenedor de hijos de una carpeta. */
   static FOLDER_CHILDREN_CLASS = 'qc__folder-children';
-  /** @type {string} Clase del `<span>` que envuelve el SVG de ícono de carpeta. */
   static FOLDER_ICON_WRAPPER   = 'qc__folder-icon-wrapper';
-  /** @type {string} Clase del `<span>` que contiene el chevron de colapso. */
   static FOLDER_CHEVRON_CLASS  = 'qc__folder-chevron';
-  /** @type {string} Clase aplicada al `<li>` de carpeta cuando está colapsada. */
   static COLLAPSED_CLASS       = 'qc__folder-collapsed';
-  /** @type {string} Clase del `<span>` que envuelve el ícono SVG de un archivo. */
   static FILE_ICON_CLASS       = 'qc__file-icon';
-  /** SVG del chevron de colapso/expansión (estilo outline). */
+
   static SVG_CHEVRON     = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>`;
-
-  /** SVG de carpeta cerrada en formato sólido. */
   static SVG_FOLDER      = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
-
-  /** SVG de carpeta abierta en estilo outline. */
   static SVG_FOLDER_OPEN = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3V7z"/><path d="M3 9h18l-2 8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z"/></svg>`;
 
   /**
-   * Plantilla común: página de contorno con esquina doblada. El interior se
-   * inyecta como argumento, en coordenadas del viewBox 0 0 16 16.
-   * @param {string} color   Color del contorno y del símbolo interior.
-   * @param {string} content Markup SVG del símbolo (paths, lines, circles, etc.).
+   * Plantilla SVG común con la silueta de página doblada. El interior
+   * recibe el símbolo específico por tipo de archivo.
+   * @param {string} color
+   * @param {string} content
    * @returns {string}
    * @private
    */
@@ -57,107 +34,28 @@ class GasFolders {
       `${content}</svg>`;
   }
 
-  /**
-   * Número máximo de intentos para localizar el `<ul role="listbox">` raíz
-   * antes de abandonar la escucha. Evita un loop infinito si GAS nunca monta
-   * la lista (p. ej. en una URL que no corresponde al editor de scripts).
-   * @type {number}
-   */
-  static MAX_RETRY_ATTEMPTS = 30;   // 30 × rAF ≈ ~500 ms máximo de espera
-  /**
-   * Milisegundos entre cada reintento de localización del `<ul>` raíz.
-   * @type {number}
-   */
+  static MAX_RETRY_ATTEMPTS = 30;
   static RETRY_INTERVAL_MS  = 500;
-  /**
-   * Inicializa el estado interno del componente.
-   * No realiza ninguna operación sobre el DOM; las mutaciones comienzan
-   * con {@link GasFolders#enable}.
-   */
+
   constructor() {
-    /** @type {boolean} Indica si el componente está activo y procesando el DOM. */
     this._enabled        = false;
-    /**
-     * Observer principal que escucha cambios en el `<ul>` raíz y en `document.body`.
-     * Se desconecta durante cada rebuild para que los movimientos de nodos propios
-     * no disparen nuevas rondas de reconstrucción.
-     * @type {MutationObserver|null}
-     */
     this._observer       = null;
-    /**
-     * Observer auxiliar sobre `document.body` con `subtree: true` para detectar
-     * cuándo GAS reemplaza por completo el `<ul>` raíz durante una navegación SPA.
-     * Las mutaciones originadas en nodos propios del componente (clases `qc__`)
-     * se filtran dentro del callback para evitar loops de rebuild.
-     * @type {MutationObserver|null}
-     */
     this._docObserver    = null;
-    /**
-     * Referencias a los `<ul role="listbox">` que contienen los ítems de archivo de GAS.
-     * @type {HTMLUListElement[]}
-     */
+    /** @type {HTMLUListElement[]} */
     this._rootLists      = [];
-    /**
-     * Bandera de guardia que previene reentradas en {@link GasFolders#_rebuildFullTree}.
-     * @type {boolean}
-     */
     this._isRebuilding   = false;
-    /**
-     * ID del `setTimeout` pendiente para el próximo rebuild debounceado.
-     * @type {ReturnType<setTimeout>|null}
-     */
     this._rebuildTimeout = null;
-    /**
-     * Color CSS usado para los íconos de carpeta. Se puede sobreescribir con
-     * {@link GasFolders#setColor} antes o después de habilitar el componente.
-     * @type {string}
-     */
     this._folderColor    = '#5f6368';
-    /**
-     * Mapa de colores por extensión de archivo. Se puede actualizar con
-     * {@link GasFolders#setFileColors} para personalizar cada tipo desde
-     * el popup. Las extensiones no listadas usan el color del icono genérico.
-     * @type {{gs:string, html:string, json:string, generic:string}}
-     */
-    this._fileColors     = {
-      gs:      '#4086f4',
-      html:    '#fc490b',
-      json:    '#1bb24b',
-      generic: '#9aa0a6',
-    };
-    /**
-     * Contador de intentos acumulados para localizar el `<ul>` raíz.
-     * Se resetea a 0 cada vez que se encuentra exitosamente.
-     * @type {number}
-     */
+    this._fileColors     = { gs: '#4086f4', html: '#fc490b', json: '#1bb24b', generic: '#9aa0a6' };
     this._retryCount     = 0;
-    /**
-     * ID del `setTimeout` activo del ciclo de retry, o `null` si no hay ninguno.
-     * @type {ReturnType<setTimeout>|null}
-     */
     this._retryTimer     = null;
-    /**
-     * Cola de configuraciones pendientes que llegaron vía `GAS_TransferData`
-     * antes de que el DOM estuviera listo (race condition entre el evento
-     * de datos y el montaje de la UI de GAS).
-     * @type {Array<{color?:string, enable:boolean}>}
-     */
     this._pendingApply   = null;
-    /**
-     * Bandera que indica que al menos una mutación del DOM llegó mientras
-     * `_isRebuilding` estaba activo y fue descartada. Al finalizar el rebuild
-     * se programa un nuevo ciclo para no perder esos cambios.
-     * @type {boolean}
-     */
     this._dirtyDuringRebuild = false;
   }
+
   /**
-   * Actualiza el color de los íconos de carpeta y regenera los estilos CSS
-   * si el componente ya está activo.
-   *
-   * @param {string} color - Valor CSS válido (hex, rgb, variable, etc.).
-   *   Si es falsy la llamada no tiene efecto.
-   * @returns {void}
+   * Cambia el color de los iconos de carpeta y refresca los estilos.
+   * @param {string} color
    */
   setColor(color) {
     if (!color) return;
@@ -166,13 +64,9 @@ class GasFolders {
   }
 
   /**
-   * Actualiza uno o varios colores de iconos de archivo. Acepta un objeto
-   * parcial: `{ gs?: string, html?: string, json?: string, generic?: string }`.
-   * Tras actualizar fuerza un rebuild para que los SVG ya inyectados se
-   * vuelvan a generar con los nuevos colores.
-   *
+   * Actualiza uno o varios colores de iconos por extensión y dispara
+   * un rebuild para regenerar los SVG ya inyectados.
    * @param {{gs?:string, html?:string, json?:string, generic?:string}} colors
-   * @returns {void}
    */
   setFileColors(colors) {
     if (!colors || typeof colors !== 'object') return;
@@ -185,18 +79,12 @@ class GasFolders {
     }
     if (!changed) return;
     if (this._enabled) {
-      // Forzamos un rebuild para que los SVG ya inyectados se regeneren.
       if (this._rebuildTimeout) clearTimeout(this._rebuildTimeout);
       this._rebuildTimeout = setTimeout(() => this._rebuildFullTree(), 50);
     }
   }
-  /**
-   * Habilita el componente: inyecta los estilos CSS, arranca la observación
-   * del DOM y construye el árbol de carpetas inicial.
-   * Es idempotente: llamarlo múltiples veces sólo inyecta los estilos una vez.
-   *
-   * @returns {void}
-   */
+
+  /** Activa el componente: estilos, observers y primer rebuild. */
   enable() {
     if (!this._enabled) {
       this._enabled = true;
@@ -205,63 +93,41 @@ class GasFolders {
     this._startObserving();
     this._rebuildFullTree();
   }
-  /**
-   * Deshabilita el componente: desconecta todos los observers, cancela timers
-   * pendientes y restaura el `<ul>` a su estado original (lista plana sin carpetas).
-   * Seguro de llamar aunque el componente ya esté deshabilitado.
-   *
-   * @returns {void}
-   */
+
+  /** Desactiva el componente y restaura el árbol original de GAS. */
   disable() {
     if (!this._enabled) return;
     this._enabled = false;
     this._stopRetry();
-    // Desconectar y liberar ambos observers para evitar memory leaks
     if (this._observer)    { this._observer.disconnect();    this._observer    = null; }
     if (this._docObserver) { this._docObserver.disconnect(); this._docObserver = null; }
     if (this._rebuildTimeout) { clearTimeout(this._rebuildTimeout); this._rebuildTimeout = null; }
     this._restoreOriginalList();
-    // Vaciar después de restaurar para que el bucle tenga datos
     this._rootLists = [];
   }
+
   /**
-   * Detecta si el editor está en modo oscuro.
-   *
-   * Fuente de verdad: la clase `gc__is-dark-mode` que pone `gas-tools.js`
-   * sobre el `<body>` cuando el toggle "IDE Dark Mode" está activo. Como
-   * fallback (cuando otro consumidor active el modo dark sin pasar por
-   * nuestra opción), también se respeta la clase oficial `ide-dark-mode`
-   * que añade GAS al cambiar su propio tema.
-   *
+   * El componente respeta el modo dark del IDE leído desde dos clases
+   * del body: la nuestra (`gc__is-dark-mode`) y la oficial de GAS
+   * (`ide-dark-mode`).
+   * @returns {boolean}
    * @private
-   * @returns {boolean} `true` si el tema es oscuro, `false` si es claro.
    */
   _isEditorDark_() {
     const cl = document.body.classList;
     return cl.contains('gc__is-dark-mode') || cl.contains('ide-dark-mode');
   }
-  /**
-   * Punto de entrada para la primera inyección de estilos.
-   * Delega directamente en {@link GasFolders#_updateStyles_} para reutilizar
-   * la lógica de creación/actualización del `<style>` existente.
-   *
-   * @private
-   * @returns {void}
-   */
+
+  /** @private */
   _injectStyles() { this._updateStyles_(); }
+
   /**
-   * Crea (o actualiza) el elemento `<style id="gas-folders-styles">` en el `<head>`.
-   * Calcula las variables CSS según el tema activo (claro/oscuro) y el color
-   * de carpeta configurado, y vuelca la hoja de estilos completa del componente.
-   *
-   * Llamar este método en cualquier momento actualiza los estilos al vuelo
-   * sin necesidad de recargar la página (útil al cambiar tema o color).
-   *
+   * Crea o actualiza el `<style>` global. Las variables de color y el
+   * color de las líneas del árbol se recalculan cada vez para reflejar
+   * cambios de tema o de configuración sin recargar la página.
    * @private
-   * @returns {void}
    */
   _updateStyles_() {
-    // Reutilizar el <style> existente si ya fue inyectado, para no duplicarlo
     let style = document.getElementById('gas-folders-styles');
     if (!style) {
       style = document.createElement('style');
@@ -270,7 +136,6 @@ class GasFolders {
     }
     const lineOpacity = 0.3;
     const dark        = this._isEditorDark_();
-    // Color de las líneas punteadas del árbol, semi-transparente sobre cualquier fondo
     const lineColor   = dark
       ? `rgba(255,255,255,${lineOpacity})`
       : `rgba(0,0,0,${lineOpacity})`;
@@ -279,9 +144,6 @@ class GasFolders {
         --qc-folder-color : ${this._folderColor};
         --qc-tree-line    : ${lineColor};
       }
-      /* Ocultar el ícono original de GAS para cada ítem de archivo;
-         se reemplaza por nuestros SVGs inyectados. Las múltiples reglas
-         cubren distintas estructuras HTML que GAS puede emitir. */
       li[role="option"] > img,
       li[role="option"] > svg,
       li[role="option"] > span:first-child:not(.${GasFolders.FILE_ICON_CLASS}) > svg,
@@ -328,7 +190,6 @@ class GasFolders {
         position     : relative !important;
         border-left  : none !important;
       }
-      /* Ocultar los hijos de una carpeta colapsada */
       .${GasFolders.COLLAPSED_CLASS} .${GasFolders.FOLDER_CHILDREN_CLASS} {
         display: none !important;
       }
@@ -339,7 +200,6 @@ class GasFolders {
         display    : block       !important;
         background : transparent !important;
       }
-      /* Línea vertical punteada del árbol (pseudo-elemento ::before de cada ítem hijo) */
       .${GasFolders.FOLDER_CHILDREN_CLASS} > li::before {
         content        : "";
         position       : absolute;
@@ -351,12 +211,10 @@ class GasFolders {
         pointer-events : none;
         z-index        : 1;
       }
-      /* El último hijo acorta la línea vertical para que no sobrepase el conector horizontal */
       .${GasFolders.FOLDER_CHILDREN_CLASS} > li:last-child::before {
         height : 18px;
         bottom : auto;
       }
-      /* Conector horizontal punteado que une la línea vertical con el ítem */
       .${GasFolders.FOLDER_CHILDREN_CLASS} > li::after {
         content        : "";
         position       : absolute;
@@ -377,7 +235,6 @@ class GasFolders {
         transition      : transform 0.2s;
         color           : var(--gm3-sys-color-on-surface-variant, #5f6368);
       }
-      /* Rotar el chevron −90° cuando la carpeta está colapsada */
       .${GasFolders.COLLAPSED_CLASS} .${GasFolders.FOLDER_CHEVRON_CLASS} {
         transform: rotate(-90deg);
       }
@@ -394,7 +251,6 @@ class GasFolders {
         align-items     : center;
         justify-content : center;
         flex-shrink     : 0;
-        /* Contrarrestar el display:hidden global aplicado a íconos de GAS */
         visibility      : visible !important;
       }
       .${GasFolders.FILE_ICON_CLASS} svg,
@@ -416,17 +272,9 @@ class GasFolders {
       .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"]:hover {
         background: var(--gm3-sys-color-surface-container-high, rgba(60,64,67,.08));
       }
-      /* Ocultamos el texto de GAS para no pelear con el DOM Virtual y evitar el loop.
-         El nombre visible se muestra exclusivamente a través del pseudo-elemento ::before
-         alimentado por data-name, sin tocar el textContent que GAS gestiona.
-         IMPORTANTE: solo aplicamos color transparent cuando data-name
-         está presente y no vacío. Durante el guardado GAS puede reemplazar
-         el li y nuestro data-name desaparece momentáneamente; en ese
-         caso preferimos mostrar el texto original de GAS antes que un
-         hueco vacío. Cuando el rebuild vuelva a poblar data-name, el
-         texto original se oculta otra vez y el pseudo-elemento toma el
-         relevo. Sin tocar textContent: GAS lo reconcilia y dispararía
-         mutaciones (loop). */
+      /* Ocultamos el textContent original de GAS sin tocarlo (escribirlo
+         dispararía un loop de mutaciones). El nombre visible se renderiza
+         vía pseudo-elemento ::before alimentado por data-name. */
       .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""]) {
         color: transparent !important;
         -webkit-text-fill-color: transparent !important;
@@ -442,25 +290,9 @@ class GasFolders {
         text-shadow: none !important;
         border-bottom-color: transparent !important;
       }
-      /* Posicionamiento del contenedor para anclar el pseudo-elemento.
-         Aplicado siempre, no solo cuando hay data-name. */
       .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title] {
         position: relative;
       }
-      /* Mostramos el nombre corto mediante un pseudo-elemento, solo si
-         realmente hay un data-name no vacío para mostrar.
-
-         IMPORTANTE — antes el color del ::before se decidía con un
-         template literal "dark ? '#e8eaed' : '#202124'", que se
-         evaluaba una sola vez al inyectar el <style>. Si el tema del
-         IDE cambiaba después, el color quedaba congelado.
-
-         Ahora la decisión la toma el navegador en cascada:
-         1. --gm3-sys-color-on-surface (Material 3, definida por GAS y
-            ya reactiva al cambio de tema del IDE).
-         2. Si por algún motivo la variable no está, las reglas
-            siguientes (prefers-color-scheme y body.ide-dark-mode) hacen
-            de fallback estable. */
       .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""])::before {
         content: attr(data-name);
         position: absolute;
@@ -475,38 +307,23 @@ class GasFolders {
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      /* Fallback por modo del SO cuando la variable Material no está. 
-      @media (prefers-color-scheme: dark) {
-        .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""])::before {
-          color: var(--gm3-sys-color-on-surface, #e8eaed);
-          -webkit-text-fill-color: var(--gm3-sys-color-on-surface, #e8eaed);
-        }
-      }*/
-      /* Fallback por clase del IDE: gana sobre prefers-color-scheme cuando
-         GAS aplica explícitamente un modo oscuro distinto al del sistema, o
-         cuando nuestra opción "IDE Dark Mode" está activa. */
       body.gc__is-dark-mode .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""])::before,
       body.ide-dark-mode .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""])::before {
         color: var(--gm3-sys-color-on-surface, #e8eaed);
         -webkit-text-fill-color: var(--gm3-sys-color-on-surface, #e8eaed);
       }
-      /* Cuando se renombra un archivo, ocultamos el pseudo-elemento */
       .${GasFolders.FOLDER_CHILDREN_CLASS} li.qc-renaming div[title]::before {
         display: none !important;
       }
-      /* Aseguramos que el input inyectado por GAS sea visible */
       .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title] input {
         color: var(--gm3-sys-color-on-surface, inherit) !important;
       }
     `;
   }
+
   /**
-   * Cancela el timer de retry activo y resetea el contador de intentos.
-   * Debe llamarse siempre que el `<ul>` sea encontrado exitosamente o cuando
-   * el componente se deshabilite, para no dejar timers huérfanos.
-   *
+   * Cancela el timer de retry y resetea el contador.
    * @private
-   * @returns {void}
    */
   _stopRetry() {
     if (this._retryTimer) {
@@ -515,15 +332,15 @@ class GasFolders {
     }
     this._retryCount = 0;
   }
+
   /**
-   * Localiza los `<ul role="listbox">` de GAS y conecta los MutationObservers.
-   *
+   * Localiza los `<ul role="listbox">` y conecta los observers.
+   * Reintenta hasta `MAX_RETRY_ATTEMPTS` mientras los UL no tengan ítems.
    * @private
    */
   _startObserving() {
     if (!this._enabled) return;
     const uls = Array.from(document.querySelectorAll('ul[role="listbox"]'));
-    // Garantizar que los UL estén cargados: deben tener al menos un li[role="option"]
     const validUls = uls.filter(ul => ul.querySelector('li[role="option"]'));
     if (validUls.length === 0) {
       this._retryCount++;
@@ -532,42 +349,33 @@ class GasFolders {
           GasFolders.MAX_RETRY_ATTEMPTS, 'intentos. Se detiene el retry.');
         return;
       }
-      // Usar requestAnimationFrame para alinear el reintento con el ciclo de render
       requestAnimationFrame(() => this._startObserving());
       return;
     }
     this._stopRetry();
-    // Comprobar si hay cambios en la lista de ULs para evitar reconexiones innecesarias
+
     const ulsChanged = validUls.length !== this._rootLists.length ||
                        validUls.some((ul, i) => ul !== this._rootLists[i]);
     if (!ulsChanged && this._observer) return;
     this._rootLists = validUls;
-    // Desconectar ambos observers antes de reconectar con la nueva lista de ULs
+
     if (this._observer)    this._observer.disconnect();
     if (this._docObserver) this._docObserver.disconnect();
-    // ── Observer principal ────────────────────────────────────────────────
+
     this._observer = new MutationObserver((mutations) => {
-      // Guard: no actuar si el componente fue deshabilitado
       if (!this._enabled) return;
 
-      // Pasada rápida: detectar entrada/salida de inputs de renombrado
-      // ANTES de cualquier debounce. Sin esto, mientras el usuario edita
-      // el texto el pseudo-elemento ::before sigue tapando el input
-      // hasta el próximo rebuild (~100 ms), produciendo "texto que
-      // desaparece" o que "se solapa con lo que escribo".
       this._syncRenamingState_(mutations);
 
-      // Cambio de clase en body → posible cambio de tema claro/oscuro
       const themeChanged = mutations.some(
         m => m.target === document.body && m.attributeName === 'class'
       );
       if (themeChanged) this._updateStyles_();
-      // Cambio estructural o de atributo title que requiere rebuild.
-      // Se ignoran mutaciones cuyos targets son nodos estructurales del componente
-      // (header, chevron, icon wrapper, children container) para no disparar rebuilds
-      // por acciones del propio usuario como colapsar/expandir carpetas.
-      // Los li[role="option"] dentro de carpetas NO se ignoran porque sus cambios
-      // de title (renombrado por GAS) sí deben desencadenar una reconstrucción.
+
+      // Si el usuario está renombrando, ignoramos cualquier rebuild: el
+      // rebuild reescribe el subárbol del li y rompería la edición.
+      if (this._isAnyItemRenaming_()) return;
+
       const ownStructuralClasses = [
         GasFolders.FOLDER_HEADER_CLASS,
         GasFolders.FOLDER_CHEVRON_CLASS,
@@ -575,43 +383,67 @@ class GasFolders {
         GasFolders.FOLDER_CHILDREN_CLASS,
         GasFolders.FILE_ICON_CLASS,
       ];
+      const containsGasItem = (list) => {
+        for (const node of list || []) {
+          if (!(node instanceof Element)) continue;
+          if (node.matches?.('li[role="option"]')) return true;
+          if (node.querySelector?.('li[role="option"]')) return true;
+        }
+        return false;
+      };
+
       const needsUpdate = mutations.some(m => {
         const el = /** @type {Element} */ (m.target);
-        // Ignorar si el target es un nodo estructural propio o está dentro de uno
-        const isOwnStructural = ownStructuralClasses.some(cls => el.closest?.(`.${cls}`));
-        // Excepciones: li[role="option"] dentro de carpetas sí interesan
+        const isOwnStructural = ownStructuralClasses.some(
+          cls => el.closest?.(`.${cls}`),
+        );
         const isGasItem = el.closest?.('li[role="option"]');
-        if (isOwnStructural && !isGasItem) return false;
+        const hasItemChange = m.type === 'childList' && (
+          containsGasItem(m.addedNodes) || containsGasItem(m.removedNodes)
+        );
+        if (isOwnStructural && !isGasItem && !hasItemChange) return false;
+
+        if (m.type === 'childList' && m.addedNodes.length > 0) {
+          const onlyInputAdded = [...m.addedNodes].every(
+            n => n instanceof Element && n.matches?.('input'),
+          );
+          if (onlyInputAdded) return false;
+        }
+
+        if (isGasItem && isGasItem.querySelector?.('input')) {
+          const inputBeingRemoved = m.type === 'childList' &&
+            [...(m.removedNodes || [])].some(
+              n => n instanceof Element && n.matches?.('input'),
+            );
+          if (!inputBeingRemoved) return false;
+        }
+
         return m.type === 'childList' ||
                (m.type === 'attributes' && m.attributeName === 'title');
       });
+
       if (needsUpdate) {
         if (this._isRebuilding) {
-          // Registra mutaciones concurrentes para programar una reconstrucción
-          // adicional al finalizar el ciclo actual
           this._dirtyDuringRebuild = true;
           return;
         }
-        // Debounce de 100 ms para agrupar ráfagas de mutaciones consecutivas
         if (this._rebuildTimeout) clearTimeout(this._rebuildTimeout);
         this._rebuildTimeout = setTimeout(() => this._rebuildFullTree(), 100);
       }
     });
-    // Observar cada <ul> para cambios estructurales y de atributo title
+
     this._rootLists.forEach(ul => {
       this._observer.observe(ul, {
         childList: true, subtree: true, attributes: true, attributeFilter: ['title']
       });
     });
-    // Observar document.body para detectar cambios de tema (cambio de clase CSS)
     this._observer.observe(document.body, {
       attributes: true, attributeFilter: ['class']
     });
-    // Observa body con subtree para capturar reemplazos SPA
+
+    // Observador secundario para detectar reemplazos del UL en navegaciones SPA.
     this._docObserver = new MutationObserver((mutations) => {
-      // Guard: no actuar si el componente fue deshabilitado
       if (!this._enabled) return;
-      // Ignorar mutaciones cuyo target pertenece a nodos creados por este componente
       const externalMutation = mutations.some(m => {
         const el = /** @type {Element} */ (m.target);
         return !el.closest?.(`.${GasFolders.FOLDER_CLASS}`) &&
@@ -629,29 +461,29 @@ class GasFolders {
     });
     this._docObserver.observe(document.body, { childList: true, subtree: true });
   }
+
   /**
-   * Recorre todos los archivos y los reorganiza en una jerarquía de carpetas
-   * basándose en su atributo `title` ("carpeta/archivo").
-   *
+   * Reordena los items en una jerarquía de carpetas según el `title`
+   * con segmentos `carpeta/archivo`. Reentrante-safe vía `_isRebuilding`.
    * @private
    */
   _rebuildFullTree() {
-    if (!this._enabled || !this._rootLists || this._rootLists.length === 0 || this._isRebuilding) {
+    if (!this._enabled || !this._rootLists?.length || this._isRebuilding) return;
+
+    // Aborta si hay un rename abierto: lo reintenta en 200 ms.
+    if (this._isAnyItemRenaming_()) {
+      if (this._rebuildTimeout) clearTimeout(this._rebuildTimeout);
+      this._rebuildTimeout = setTimeout(() => this._rebuildFullTree(), 200);
       return;
     }
+
     this._isRebuilding       = true;
     this._dirtyDuringRebuild = false;
-    // Desconectar ambos observers para que los movimientos de nodos propios
-    // no disparen nuevas rondas de rebuild durante la reconstrucción
     if (this._observer)    this._observer.disconnect();
     if (this._docObserver) this._docObserver.disconnect();
     try {
       this._rootLists.forEach((ul, index) => {
-        // Restaurar siempre antes de reconstruir para partir de un estado limpio;
-        // esto garantiza que _restoreList trabaje solo con hijos directos del UL
         this._restoreList(ul);
-        // Leer solo los hijos directos del UL (no el subárbol) para evitar
-        // procesar ítems que ya están dentro de carpetas construidas anteriormente
         const items = Array.from(ul.children)
           .filter(li => li.getAttribute('role') === 'option');
         items.forEach(item => {
@@ -659,7 +491,6 @@ class GasFolders {
           if (!titleDiv) return;
           const fullPath = titleDiv.getAttribute('title');
           if (!fullPath || !fullPath.includes('/')) {
-            // Ítem en la raíz: no requiere carpeta, solo actualizar etiqueta e ícono
             this._updateItemLabel(item, fullPath);
             this._injectFileIcon(item, fullPath);
             return;
@@ -676,24 +507,17 @@ class GasFolders {
       });
       this._removeEmptyFolders();
     } finally {
-      // Siempre liberar la bandera de guardia y reconectar observers,
-      // incluso si se produjo una excepción durante la reconstrucción
       this._isRebuilding = false;
       this._reconnectObserver();
       this._reconnectDocObserver();
-      // Si llegaron mutaciones de GAS mientras reconstruíamos, programar otra vuelta
       if (this._dirtyDuringRebuild) {
         this._dirtyDuringRebuild = false;
         this._rebuildTimeout = setTimeout(() => this._rebuildFullTree(), 100);
       }
     }
   }
-  /**
-   * Reconecta el observer principal (`_observer`) a cada `<ul>` raíz y a `document.body` tras un rebuild.
-   *
-   * @private
-   * @returns {void}
-   */
+
+  /** @private */
   _reconnectObserver() {
     if (!this._enabled || !this._observer) return;
     this._rootLists.forEach(ul => {
@@ -705,30 +529,21 @@ class GasFolders {
       attributes: true, attributeFilter: ['class']
     });
   }
-  /**
-   * Reconecta el observer auxiliar (`_docObserver`) a `document.body` tras un rebuild.
-   *
-   * @private
-   * @returns {void}
-   */
+
+  /** @private */
   _reconnectDocObserver() {
     if (!this._enabled || !this._docObserver) return;
     this._docObserver.observe(document.body, { childList: true, subtree: true });
   }
+
   /**
-   * Devuelve el `<li>` de carpeta para la ruta indicada, creando los nodos
-   * intermedios que no existan (creación recursiva de carpetas anidadas).
-   *
-   * Cada carpeta recibe un `id` determinista basado en su ruta completa
-   * para poder localizarla en el DOM sin necesidad de recorrerlo.
-   *
+   * Devuelve el `<li>` de la carpeta indicada, creando los nodos
+   * intermedios que falten.
+   * @param {HTMLUListElement} ul
+   * @param {string} path  Ruta separada por `/`.
+   * @param {number} ulIndex
+   * @returns {HTMLLIElement}
    * @private
-   * @param {HTMLUListElement} ul      - Lista raíz donde se insertará la carpeta.
-   * @param {string}           path    - Ruta de carpeta con segmentos separados por `/`.
-   *   Ejemplo: `"utils/helpers"`.
-   * @param {number}           ulIndex - Índice del UL en `_rootLists`, usado para
-   *   generar IDs únicos cuando hay múltiples listas.
-   * @returns {HTMLLIElement} El elemento `<li>` de la carpeta hoja de la ruta.
    */
   _getOrCreateFolder(ul, path, ulIndex) {
     const parts = path.split('/');
@@ -736,7 +551,6 @@ class GasFolders {
     let currentPath   = '';
     for (const part of parts) {
       currentPath = currentPath ? `${currentPath}/${part}` : part;
-      // El ID incluye el índice del UL para evitar colisiones si hay múltiples listas
       const folderId = `qc-fld-${ulIndex}-${currentPath.replace(/[^a-zA-Z0-9]/g, '-')}`;
       let folderItem = ul.querySelector(`#${folderId}`);
       if (!folderItem) {
@@ -747,69 +561,65 @@ class GasFolders {
     }
     return ul.querySelector(`#qc-fld-${ulIndex}-${path.replace(/[^a-zA-Z0-9]/g, '-')}`);
   }
+
   /**
-   * Crea y devuelve un nuevo `<li>` de carpeta con su estructura interna completa:
-   * encabezado (chevron + ícono + label) y contenedor de hijos.
-   * También registra el handler de click para colapsar/expandir.
-   *
+   * Construye un `<li>` de carpeta con header (chevron + icono + label)
+   * y contenedor de hijos. El header alterna `COLLAPSED_CLASS` al click.
+   * @param {string} name
+   * @param {string} id
+   * @returns {HTMLLIElement}
    * @private
-   * @param {string} name - Nombre visible de la carpeta (segmento final de la ruta).
-   * @param {string} id   - Valor del atributo `id` HTML que se asignará al `<li>`.
-   * @returns {HTMLLIElement} Elemento `<li>` listo para insertar en el DOM.
    */
   _createFolderItem(name, id) {
     const li = document.createElement('li');
     li.id        = id;
     li.className = `${GasFolders.FOLDER_CLASS} ${DomUtils.REF_CLASS}`;
+
     const header = document.createElement('div');
     header.className = GasFolders.FOLDER_HEADER_CLASS;
+
     const chevron = document.createElement('span');
     chevron.className = GasFolders.FOLDER_CHEVRON_CLASS;
     DomUtils.setHTML(chevron, GasFolders.SVG_CHEVRON);
+
     const iconWrapper = document.createElement('span');
     iconWrapper.className = GasFolders.FOLDER_ICON_WRAPPER;
     DomUtils.setHTML(iconWrapper, GasFolders.SVG_FOLDER_OPEN);
+
     const label = document.createElement('span');
     DomUtils.setHTML(label, name);
-    label.style.flex = '1'; // El label ocupa todo el espacio restante del flexbox
+    label.style.flex = '1';
+
     header.appendChild(chevron);
     header.appendChild(iconWrapper);
     header.appendChild(label);
+
     const children = document.createElement('div');
     children.className = GasFolders.FOLDER_CHILDREN_CLASS;
-    // Toggle colapso/expansión al hacer click en el encabezado
+
     header.onclick = (e) => {
       e.preventDefault();
-      e.stopPropagation(); // Evitar que GAS procese el click como selección de ítem
+      e.stopPropagation();
       const collapsed = li.classList.toggle(GasFolders.COLLAPSED_CLASS);
-      // Cambiar el SVG de ícono según el nuevo estado
       DomUtils.setHTML(iconWrapper, collapsed ? GasFolders.SVG_FOLDER : GasFolders.SVG_FOLDER_OPEN);
     };
+
     li.appendChild(header);
     li.appendChild(children);
     return li;
   }
+
   /**
-   * Actualiza el atributo `data-name` y el `aria-label` de un ítem de archivo
-   * para mostrar solo su nombre corto (sin la ruta).
-   *
-   * Deliberadamente **no modifica `textContent`** del `div[title]`, ya que GAS
-   * gestiona ese nodo con su propio reconciliador y cualquier escritura dispararía
-   * una mutación que provocaría un loop de rebuild. El nombre visible se delega
-   * al pseudo-elemento CSS `::before { content: attr(data-name) }`.
-   *
+   * Actualiza `data-name` y `aria-label` del item para que el pseudo
+   * elemento `::before` muestre el nombre corto. No toca textContent
+   * para no provocar mutaciones que GAS reconciliaría en bucle.
+   * @param {HTMLLIElement} item
+   * @param {string} shortName
    * @private
-   * @param {HTMLLIElement} item      - Elemento `<li role="option">` a actualizar.
-   * @param {string}        shortName - Nombre corto del archivo (sin ruta).
-   * @returns {void}
    */
   _updateItemLabel(item, shortName) {
     const titleDiv = item.querySelector('div[title]');
     if (titleDiv) {
-      // Si GAS está renombrando o creando el archivo, el title puede
-      // quedar vacío o stale por algunos ms. En ese caso conservamos el
-      // data-name anterior, y si tampoco hay anterior usamos el texto
-      // interno como último recurso para que el ítem no quede en blanco.
       const isRenaming = !!item.querySelector('input');
       const previous = titleDiv.getAttribute('data-name') || '';
       let nextName = shortName;
@@ -819,11 +629,8 @@ class GasFolders {
       if (nextName && previous !== nextName) {
         titleDiv.setAttribute('data-name', nextName);
       }
-      // Gestionar la clase qc-renaming para ocultar el pseudo-elemento durante
-      // una operación de renombrado activa (cuando GAS inyecta un <input>)
       item.classList.toggle('qc-renaming', isRenaming);
     }
-    // Actualizar aria-label para consistencia de accesibilidad
     const ariaLabel = item.getAttribute('aria-label');
     if (ariaLabel && shortName && ariaLabel !== shortName) {
       item.setAttribute('aria-label', shortName);
@@ -831,34 +638,24 @@ class GasFolders {
   }
 
   /**
-   * Actualiza la clase `qc-renaming` en tiempo real cuando GAS añade/quita
-   * un `<input>` de edición de nombre. Sin esto, el pseudo-elemento
-   * `::before` con `data-name` queda tapando el input hasta el próximo
-   * rebuild (debounced ~100 ms), lo que se ve como "el texto que escribo
-   * desaparece" o "se solapa con el nombre viejo". También detecta el
-   * caso del guardado: el input se elimina y volvemos a mostrar el
-   * `data-name` correctamente.
-   *
+   * Mantiene actualizada la clase `qc-renaming` y reposiciona
+   * `data-name` por si GAS reemplazó el subárbol durante el rename.
    * @param {MutationRecord[]} mutations
    * @private
    */
   _syncRenamingState_(mutations) {
     const seen = new Set();
     for (const m of mutations) {
-      // Solo nos interesan childList (input añadido/quitado) y attributes
-      // sobre elementos cercanos a un li[role="option"].
       const target = /** @type {Element} */ (m.target);
       const li = target?.closest?.('li[role="option"]');
       if (!li || seen.has(li)) continue;
       seen.add(li);
-      // Estado de renombrado.
+
       const renaming = !!li.querySelector('input');
       if (li.classList.contains('qc-renaming') !== renaming) {
         li.classList.toggle('qc-renaming', renaming);
       }
-      // Reseed del data-name si GAS reemplazó el subárbol y se perdió.
-      // Sin esto, durante el guardado el ::before se queda sin contenido
-      // y el ítem se ve en blanco hasta el próximo rebuild (~100 ms).
+
       const titleDiv = li.querySelector('div[title]');
       if (titleDiv) {
         const current = titleDiv.getAttribute('data-name') || '';
@@ -872,14 +669,24 @@ class GasFolders {
       }
     }
   }
+
   /**
-   * Determina el SVG apropiado para un archivo según su extensión, usando
-   * los colores configurables guardados en `_fileColors`. Las extensiones
-   * sin entrada específica caen al icono genérico.
-   *
+   * `true` si algún item del árbol tiene un `<input>` de rename activo.
+   * @returns {boolean}
    * @private
-   * @param {string} fileName Nombre del archivo incluyendo extensión.
-   * @returns {string} Cadena SVG lista para insertar.
+   */
+  _isAnyItemRenaming_() {
+    if (!this._rootLists?.length) return false;
+    return this._rootLists.some((ul) =>
+      ul.querySelector('li[role="option"] input'),
+    );
+  }
+
+  /**
+   * Devuelve el SVG del icono según extensión.
+   * @param {string} fileName
+   * @returns {string}
+   * @private
    */
   _getFileIcon(fileName) {
     const ext = (fileName || '').split('.').pop().toLowerCase();
@@ -890,13 +697,11 @@ class GasFolders {
   }
 
   /**
-   * Construye el SVG del icono para un tipo de archivo concreto, leyendo
-   * el color desde `_fileColors[type]` para que los cambios desde el popup
-   * se reflejen inmediatamente en el próximo render.
-   *
-   * @private
+   * Construye el SVG del icono para un tipo concreto leyendo el color
+   * actual de `_fileColors` en cada llamada.
    * @param {'gs'|'html'|'json'|'generic'} type
    * @returns {string}
+   * @private
    */
   _renderFileSvg_(type) {
     const color = this._fileColors[type] || this._fileColors.generic;
@@ -922,38 +727,31 @@ class GasFolders {
     }
     return GasFolders._filePageSvg(color, inner);
   }
+
   /**
-   * Inserta el `<span>` con el ícono SVG del archivo directamente antes del
-   * `div[title]` dentro del ítem. Si el ícono ya fue inyectado en una ejecución
-   * anterior, no hace nada (idempotente).
-   *
+   * Inyecta el `<span>` con el SVG del archivo justo antes del
+   * `div[title]`. Idempotente.
+   * @param {HTMLLIElement} item
+   * @param {string} fileName
    * @private
-   * @param {HTMLLIElement} item     - Elemento `<li role="option">` donde inyectar.
-   * @param {string}        fileName - Nombre del archivo para determinar el ícono.
-   * @returns {void}
    */
   _injectFileIcon(item, fileName) {
-    // Guard: evitar inyectar duplicados si el ícono ya existe
     if (item.querySelector(`.${GasFolders.FILE_ICON_CLASS}`)) return;
     const wrapper = document.createElement('span');
     wrapper.className = GasFolders.FILE_ICON_CLASS;
     DomUtils.setHTML(wrapper, this._getFileIcon(fileName));
     const labelDiv = item.querySelector('div[title]');
     if (labelDiv) {
-      // Insertar justo antes del div de texto para mantener el orden visual
       item.insertBefore(wrapper, labelDiv);
     } else {
       item.insertBefore(wrapper, item.firstChild);
     }
   }
+
   /**
-   * Elimina del DOM las carpetas que hayan quedado vacías después de un rebuild.
-   * Procesa el array en orden inverso (hojas antes que padres) para garantizar
-   * que al eliminar una subcarpeta vacía, la carpeta padre también pueda
-   * evaluarse correctamente en la misma pasada.
-   *
+   * Quita carpetas vacías. Procesa de hojas a raíces invirtiendo el
+   * array para que un padre quede vacío tras eliminar a sus hijos.
    * @private
-   * @returns {void}
    */
   _removeEmptyFolders() {
     this._rootLists.forEach(ul => {
@@ -964,13 +762,11 @@ class GasFolders {
       });
     });
   }
+
   /**
-   * Revierte el DOM al estado original de GAS: mueve todos los ítems de vuelta
-   * al `<ul>` raíz, elimina los nodos de carpeta creados por este componente
-   * y elimina los íconos SVG inyectados. También elimina el `<style>` inyectado.
-   *
+   * Restaura cada UL al estado plano original de GAS y elimina el
+   * `<style>` inyectado.
    * @private
-   * @returns {void}
    */
   _restoreOriginalList() {
     if (!this._rootLists || this._rootLists.length === 0) return;
@@ -982,62 +778,35 @@ class GasFolders {
     }
     document.getElementById('gas-folders-styles')?.remove();
   }
+
   /**
-   * Restaura un `<ul>` específico a su estado plano original:
-   * - Mueve los `<li role="option">` anidados en carpetas de vuelta al `<ul>` raíz.
-   * - Elimina todos los nodos de carpeta (`FOLDER_CLASS`) creados por este componente.
-   * - Elimina los `<span>` de ícono (`FILE_ICON_CLASS`) inyectados en cada ítem.
-   *
-   * No modifica `textContent` ni el atributo `title` de los ítems; GAS conserva
-   * el `title` con la ruta completa en todo momento y ese valor es la fuente de
-   * verdad para el siguiente rebuild.
-   *
+   * Devuelve un UL concreto al estado plano: mueve los items anidados
+   * de vuelta al raíz y elimina los nodos creados por el componente.
+   * @param {HTMLUListElement} ul
    * @private
-   * @param {HTMLUListElement} ul - El elemento `<ul>` a restaurar.
    */
   _restoreList(ul) {
-    // Mover ítems anidados de vuelta al UL raíz antes de eliminar las carpetas
     Array.from(
       ul.querySelectorAll(`.${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"]`)
     ).forEach(item => ul.appendChild(item));
-    // Eliminar todos los nodos de carpeta generados por el componente
     Array.from(ul.querySelectorAll(`.${GasFolders.FOLDER_CLASS}`))
       .forEach(f => f.remove());
-    // Eliminar los íconos SVG inyectados para que el siguiente rebuild los regenere
     Array.from(ul.querySelectorAll('li[role="option"]')).forEach(item => {
       item.querySelector(`.${GasFolders.FILE_ICON_CLASS}`)?.remove();
     });
   }
 }
-;(function() {
+
+;(function () {
   const folders = new GasFolders();
-  // Exponemos la instancia para que otros componentes (popover de archivo
-  // activo, paneles, etc.) puedan reutilizar sus iconos SVG y los colores
-  // configurados sin replicar lógica.
   if (typeof window !== 'undefined') window.gasFolders = folders;
-  /**
-   * Bandera que indica si la configuración inicial ya fue aplicada desde
-   * `GAS_TransferData`. Impide que navegaciones SPA posteriores (que vuelven
-   * a emitir el evento con los ajustes guardados) sobreescriban el estado
-   * que el usuario modificó en runtime mediante `GAS_SettingsUpdated`.
-   * @type {boolean}
-   */
+
   let initialConfigApplied = false;
-  /**
-   * Escucha el evento inicial de configuración emitido por la extensión.
-   * Se dispara una vez por carga de página con todos los ajustes guardados.
-   * En navegaciones SPA posteriores el evento puede volver a emitirse, pero
-   * el guard `initialConfigApplied` garantiza que solo la primera emisión
-   * configure el componente; las siguientes se ignoran para no pisar cambios
-   * hechos por el usuario en runtime.
-   *
-   * @listens document#GAS_TransferData
-   * @param {CustomEvent} e - Evento con `detail` = JSON string de configuración.
-   */
+
+  // Configuración inicial. El guard evita que navegaciones SPA pisen
+  // los cambios que el usuario ya hizo en runtime.
   document.addEventListener('GAS_TransferData', (e) => {
-    if (initialConfigApplied) {
-      return;
-    }
+    if (initialConfigApplied) return;
     initialConfigApplied = true;
     try {
       const data     = JSON.parse(e.detail);
@@ -1046,7 +815,6 @@ class GasFolders {
         if (settings['gas-folders-color']) {
           folders.setColor(settings['gas-folders-color']);
         }
-        // Aplicar colores de archivo personalizados desde el popup.
         folders.setFileColors({
           gs:   settings['gas-file-gs-color'],
           html: settings['gas-file-html-color'],
@@ -1054,19 +822,12 @@ class GasFolders {
         });
         folders.enable();
       }
-      // Si gas-folders es false, el componente permanece deshabilitado (estado inicial)
     } catch (err) {
       console.warn('[GasFolders] Error en GAS_TransferData:', err);
     }
   });
-  /**
-   * Escucha cambios de configuración en tiempo real desde el popup.
-   * Maneja: toggle del componente, color de carpeta, colores de archivos
-   * y el apagado global de la extensión.
-   *
-   * @listens document#GAS_SettingsUpdated
-   * @param {CustomEvent} e - Evento con `detail` = JSON string de opciones modificadas.
-   */
+
+  // Cambios live desde el popup.
   document.addEventListener('GAS_SettingsUpdated', (e) => {
     try {
       const options = JSON.parse(e.detail);
@@ -1075,15 +836,11 @@ class GasFolders {
       }
       if ('gas-folders-color' in options) {
         folders.setColor(options['gas-folders-color']);
-        // Si el componente ya está activo, refrescar el árbol para aplicar
-        // el nuevo color inmediatamente sin esperar a una mutación del DOM
-        if (folders._enabled && folders._rootLists && folders._rootLists.length > 0) {
+        if (folders._enabled && folders._rootLists?.length) {
           if (folders._rebuildTimeout) clearTimeout(folders._rebuildTimeout);
           folders._rebuildTimeout = setTimeout(() => folders._rebuildFullTree(), 50);
         }
       }
-      // Colores de archivos por extensión: cualquiera de las tres claves
-      // dispara un setFileColors parcial (solo se aplica lo presente).
       if (
         'gas-file-gs-color'   in options ||
         'gas-file-html-color' in options ||
@@ -1095,7 +852,6 @@ class GasFolders {
           json: options['gas-file-json-color'],
         });
       }
-      // Apagado global de la extensión: deshabilitar sin importar el estado actual
       if ('global-enable' in options && !options['global-enable']) {
         folders.disable();
       }
@@ -1103,18 +859,12 @@ class GasFolders {
       console.warn('[GasFolders] Error en GAS_SettingsUpdated:', err);
     }
   });
-  /**
-   * Escucha el evento de desactivación global de la extensión.
-   * Equivalente a recibir `global-enable: false` en `GAS_SettingsUpdated`,
-   * pero emitido como evento independiente para mayor simplicidad en otros módulos.
-   *
-   * @listens document#GAS_GlobalDisable
-   */
+
   document.addEventListener('GAS_GlobalDisable', () => {
     folders.disable();
   });
 })();
-// Compatibilidad dual: CommonJS (tests/Node) y navegador (extensión de Chrome)
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { GasFolders };
 } else {

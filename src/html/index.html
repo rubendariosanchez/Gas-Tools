@@ -44,7 +44,7 @@
     <div class="qc__page qc__active" id="options">
       <div class="qc__section-title">Extension</div>
       <option-toggle id="global-enable" title="Enable extension" description="Activate or deactivate features globally" checked></option-toggle>
-      <option-toggle id="ai-autocomplete" title="AI Autocomplete" description="Show AI code suggestions while typing"></option-toggle>
+      <option-toggle id="ai-autocomplete" title="AI Autocomplete" description="Show AI code suggestions while typing" experimental></option-toggle>
       <option-toggle id="gas-folders" title="Custom folders" description="Organize files using '/' (e.g. Folder/File.gs)" checked></option-toggle>
       <option-color id="gas-folders-color" title="Folder color" description="Customize the color of the folder icons" value="#5f6368"></option-color>
       <option-color id="gas-file-gs-color" title=".gs file color"   description="Color of the icon for .gs (Apps Script) files" value="#4086f4"></option-color>
@@ -135,7 +135,15 @@
 
     <!-- AI Context -->
     <div class="qc__page" id="ai-context">
-      <div class="qc__section-title">AI Context</div>
+      <div class="qc__section-title">
+        AI Context
+        <span class="qc__exp-pill" title="Experimental — may not work fully on all projects">⚗️ Experimental</span>
+      </div>
+      <div class="qc__exp-callout">
+        <strong>Heads-up:</strong> AI features (chat, autocomplete and active-file panel) are experimental.
+        They work well in most cases but may behave inconsistently with very large projects, unusual file structures or specific provider models.
+        Feedback welcome at <code>rubencho.dev@gmail.com</code>.
+      </div>
       <p class="qc__field-description">
         Define context, architecture, and coding guidelines for the AI assistant.
         Applied to all projects. Use it for general coding standards and best practices.
