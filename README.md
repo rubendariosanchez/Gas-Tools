@@ -73,7 +73,7 @@ The popup has five tabs: **Options**, **Snippets**, **Themes**, **AI** and **Abo
 ### Editor options
 
 <div align="center">
-  <img src="resources/screenshots/popup-options.png" alt="Popup Options tab with editor settings" width="600">
+  <img src="resources/screenshots/popup-options.png" alt="Popup Options tab with editor settings" style="max-height: 500px">
 </div>
 
 #### Extension
@@ -139,7 +139,7 @@ The popup has five tabs: **Options**, **Snippets**, **Themes**, **AI** and **Abo
 A built-in catalog of useful snippets for JavaScript and HTML / GAS, plus a visual editor to add your own. Snippets are triggered by their **prefix** in Monaco's autocomplete: type the prefix, press `Tab` and the body expands with placeholders you can jump through.
 
 <div align="center">
-  <img src="resources/screenshots/popup-snippets.png" alt="Popup Snippets tab with built-in and custom snippets" width="600">
+  <img src="resources/screenshots/popup-snippets.png" alt="Popup Snippets tab with built-in and custom snippets" style="max-height: 500px">
 </div>
 
 #### What you can do here
@@ -194,7 +194,7 @@ A built-in catalog of useful snippets for JavaScript and HTML / GAS, plus a visu
 Apply any theme with one click. Duplicate any built-in theme to start from a template, edit every color token in the visual editor, or build a new theme from scratch.
 
 <div align="center">
-  <img src="resources/screenshots/popup-themes.png" alt="Popup Themes tab with built-in and custom themes" width="600">
+  <img src="resources/screenshots/popup-themes.png" alt="Popup Themes tab with built-in and custom themes" style="max-height: 500px">
 </div>
 
 #### What you can do here
@@ -227,7 +227,7 @@ Choose a provider, paste your key, optionally tweak the model and the system pro
 > **Heads-up.** AI features (chat, autocomplete and the active-file panel that surfaces AI hints) are still **experimental**. They work well in most cases but may behave inconsistently with very large projects, unusual file structures or specific provider models. Disable them from the popup if you hit issues, and feel free to report what didn't work to **rubencho.dev@gmail.com**.
 
 <div align="center">
-  <img src="resources/screenshots/popup-ai.png" alt="Popup AI tab with provider, key and model selector" width="600">
+  <img src="resources/screenshots/popup-ai.png" alt="Popup AI tab with provider, key and model selector" style="max-height: 500px">
 </div>
 
 #### Supported providers
@@ -336,7 +336,7 @@ You are pair-programming on Apps Script HTML Service.
 A summary screen with the version, links to the privacy policy, terms of use and the contact email. The **Master switch** lives here too: pause every feature with one click without having to uninstall.
 
 <div align="center">
-  <img src="resources/screenshots/about.png" alt="Popup About screen with version and master switch" width="600">
+  <img src="resources/screenshots/about.png" alt="Popup About screen with version and master switch" style="max-height: 500px">
 </div>
 
 ---
@@ -350,7 +350,7 @@ These are the panels you get inside the Apps Script editor itself, right above t
 A toolbar button that always shows the active file's name — even when the Apps Script tree highlight doesn't reflect it. Click it to open a popover with details.
 
 <div align="center">
-  <img src="resources/screenshots/current-file-panel.png" alt="Active file popover with language, size and diagnostics" width="380">
+  <img src="resources/screenshots/current-file-panel.png" alt="Active file popover with language, size and diagnostics" style="max-height: 500px">
 </div>
 
 What you can see and do here:
@@ -372,7 +372,7 @@ with matches, and a popover lets you pick any file or any match
 directly without stepping through them one by one.
 
 <div align="center">
-  <img src="resources/screenshots/search-panel.png" alt="Native find widget extended with cross-file navigation" width="600">
+  <img src="resources/screenshots/search-panel.png" alt="Native find widget extended with cross-file navigation" style="max-height: 500px">
 </div>
 
 What you can do here:
@@ -391,7 +391,7 @@ What you can do here:
 A side panel to chat with your model without leaving Apps Script. Open it with `Alt+Shift+C` or the **AI** button in the toolbar.
 
 <div align="center">
-  <img src="resources/screenshots/chat-panel.png" alt="AI chat panel with provider selector and code blocks" width="600">
+  <img src="resources/screenshots/chat-panel.png" alt="AI chat panel with provider selector and code blocks" style="max-height: 500px">
 </div>
 
 What you can do here:
@@ -468,6 +468,11 @@ What you can do here:
 - **Open the project in another tab** without losing the current state.
 - **Refresh the file tree** when Apps Script doesn't update on its own.
 - **Jump to project settings** in one click.
+- **Bulk delete files** — select and permanently remove multiple files at once. A file tree with search and checkboxes lets you pick individual files or entire folders. A confirmation step prevents accidents, and a progress panel shows each file as it is deleted via the Apps Script API. After completion, the editor reloads so the sidebar reflects the changes. Requires Google sign-in.
+
+<div align="center">
+  <img src="resources/screenshots/actions-panel-delete.png" alt="Bulk delete files modal with search, file tree and checkboxes" width="380">
+</div>
 
 ---
 
@@ -591,26 +596,3 @@ The repo also has a public issue tracker on [GitHub](https://github.com/rubendar
 ## License
 
 MIT — built by [Rubén Darío Sánchez](https://github.com/rubendariosanchez).
-
----
-
-## Local development
-
-<details>
-<summary><b>Loading the extension unpacked from this repo</b></summary>
-
-If you want to load the extension unpacked (instead of installing from the Chrome Web Store), there is one extra step for the GitHub sync panel.
-
-The GitHub sync uses the Apps Script API to read and write your project's files. That requires a Google sign-in via `chrome.identity.getAuthToken`, which only works when the extension was packaged with an OAuth Client tied to its stable extension ID.
-
-1. In Google Cloud Console, create an OAuth 2.0 Client of type **Chrome App** and enable the **Apps Script API** on the same project.
-2. Use a stable extension ID. The simplest path is generating a key locally with OpenSSL:
-   ```bash
-   openssl genrsa 2048 | openssl rsa -pubout -outform DER | openssl base64 -A
-   ```
-   Add the resulting string as `"key"` in `manifest.json`. Reload the extension, copy the ID Chrome assigns, and use that ID when registering the OAuth Client in Cloud Console.
-3. Replace `manifest.oauth2.client_id` with the Client ID you just got. The scopes (`script.projects`, `userinfo.email`, `userinfo.profile`) are already set.
-4. Reload the extension and click **Sign in with Google** in the GitHub panel. The first time you'll see the Google consent screen.
-
-Tokens are managed by Chrome's identity service. They are not persisted by this extension and never travel to the MAIN world.
-</details>

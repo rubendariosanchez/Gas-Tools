@@ -1,6 +1,6 @@
 {
   "name": "Google Apps Script Tools",
-  "version": "0.0.5",
+  "version": "0.0.3",
   "manifest_version": 3,
   "author": "Rubén Sánchez",
   "description": "Enhanced development environment for Google Apps Script with custom themes and tools.",
