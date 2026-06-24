@@ -158,9 +158,6 @@ const OPENAI_COMPATIBLE_PROVIDERS = {
   openai: {
     url: 'https://api.openai.com/v1/chat/completions',
   },
-  deepseek: {
-    url: 'https://api.deepseek.com/v1/chat/completions',
-  },
   chatllm: {
     url: 'https://apps.abacus.ai/v1/chat/completions',
   },

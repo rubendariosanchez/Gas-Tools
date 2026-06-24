@@ -519,7 +519,7 @@ export async function fetchRepoFiles(token, { repo, branch, basePath = '' }) {
     }
   }
 
-  return { branch, basePath: base, files };
+  return { branch, basePath: base, files, commitSha };
 }
 
 // ─────────────────────────────────────────────

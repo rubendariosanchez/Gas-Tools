@@ -237,7 +237,6 @@ Choose a provider, paste your key, optionally tweak the model and the system pro
 | OpenAI          | [platform.openai.com](https://platform.openai.com)         |
 | Anthropic       | [console.anthropic.com](https://console.anthropic.com)     |
 | Google Gemini   | [aistudio.google.com](https://aistudio.google.com)         |
-| DeepSeek        | [platform.deepseek.com](https://platform.deepseek.com)     |
 | Kimi (Moonshot) | [platform.moonshot.cn](https://platform.moonshot.cn)       |
 | Nvidia Build    | [build.nvidia.com](https://build.nvidia.com)               |
 | ChatLLM         | [apps.abacus.ai](https://apps.abacus.ai)                   |

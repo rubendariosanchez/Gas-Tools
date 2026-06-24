@@ -3,7 +3,7 @@
  *
  * Características:
  *  - Web Component en Shadow DOM (aislado de estilos del IDE).
- *  - Proveedores soportados: OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, ChatLLM.
+ *  - Proveedores soportados: OpenAI, Anthropic, Google Gemini, Kimi, ChatLLM.
  *  - Selector de proveedor/modelo siempre visible en el composer.
  *  - Menú @ para insertar contexto del editor (@selection / @file / @project).
  *  - Renderizado de Markdown básico con botones Copy/Insert/Replace en bloques de código.
@@ -43,13 +43,6 @@ const GAS_LLM_PROVIDERS = {
     models: ['claude-haiku-4-5', 'claude-sonnet-4', 'claude-opus-4-1', 'claude-sonnet-4-5', 'claude-sonnet-4-6', 'claude-opus-4-7'],
     keyHint: 'sk-ant-...',
   },
-  deepseek: {
-    label: 'DeepSeek',
-    icon: '⬡',
-    color: '#7b68ee',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
-    keyHint: 'sk-...',
-  },
   kimi: {
     label: 'Kimi',
     icon: '◎',
@@ -62,8 +55,6 @@ const GAS_LLM_PROVIDERS = {
     icon: '⬟',
     color: '#a855f7',
     models: [
-      'deepseek-chat',
-      'deepseek-coder',
       'llama-3.3-70b-instruct',
       'qwen-2.5-72b-instruct',
       'mixtral-8x7b-instruct',
@@ -77,7 +68,6 @@ const GAS_LLM_PROVIDERS = {
     models: [
       'qwen/qwen3-coder-480b-a35b-instruct',
       'moonshotai/kimi-k2-instruct',
-      'deepseek-ai/deepseek-v3.2',
       'moonshotai/kimi-k2.6',
       'mistralai/devstral-2-123b-instruct-2512',
       'minimaxai/minimax-m2.7',
@@ -113,7 +103,6 @@ const GAS_LLM_PROVIDERS = {
       'moonshotai/kimi-k2.6',
       'anthropic/claude-sonnet-4.6',
       'anthropic/claude-opus-4.7',
-      'deepseek/deepseek-v4-flash',
       'google/gemini-3-flash-preview',
       'x-ai/grok-4.1-fast',
     ],

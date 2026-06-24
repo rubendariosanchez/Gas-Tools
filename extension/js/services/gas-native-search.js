@@ -583,7 +583,7 @@ class GasNativeSearch {
         font: inherit;
         cursor: pointer;
         padding: 2px 6px;
-        max-width: 240px;
+        max-width: 198px;
         min-width: 0;
       }
       .qc__nativeSearchTrigger:hover {

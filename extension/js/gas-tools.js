@@ -473,15 +473,27 @@ class GasCustomEditor {
       return;
     }
 
-    const files = items
-      .map(li => ({
-        name:   li.getAttribute('aria-label')?.trim(),
+    // Variable para listar todos los nombres
+    let files = [];
+
+    // Recorremos cada uno de los <li> y extraemos el nombre del archivo
+    for (const li of items) {
+      let fileName_ = li.getAttribute('aria-label')?.trim();
+      if (!fileName_) continue;
+
+      // Si el <li> tiene un <div title="...">, usamos ese título como nombre del archivo
+      fileName_ = li.querySelector('div[title]')?.getAttribute('title')?.trim() || fileName_;
+
+      // Agremamos el archivo a la lista
+      files.push({
+        name: fileName_,
         index:  parseInt(li.getAttribute('data-index'), 10),
         active: li.getAttribute('aria-selected') === 'true',
-      }))
-      .filter(f => f.name)
-      .sort((a, b) => a.index - b.index);
+      });
+    }
 
+    // Ordenamos los archivos por índice para que coincidan con el orden de Monaco
+    files.sort((a, b) => a.index - b.index);
     const normalFiles = files.filter(f => f.name !== 'appsscript.json');
     const appScript = files.find(f  => f.name === 'appsscript.json');
 

@@ -88,6 +88,14 @@ class GasGithubPanel extends HTMLElement {
     this._remoteHasChanges = false;
 
     /**
+     * Último commit SHA conocido de la rama activa, usado para detectar
+     * si hubo cambios en GitHub (SHA distinto → pull) o solo en GAS
+     * (SHA igual → push). Se actualiza tras cada diff, push y pull.
+     * @type {string|null}
+     */
+    this._lastKnownCommitSha = null;
+
+    /**
      * Snapshot del último push para enmascarar el lag de propagación
      * del CDN de GitHub durante los segundos posteriores al commit.
      *
@@ -2709,7 +2717,8 @@ class GasGithubPanel extends HTMLElement {
            <span class="add">+${item.plus}</span> <span class="del">-${item.minus}</span>
          </span>`
       : '';
-    const origin = this._renderDiffOriginBadge_(item.status);
+    const isLocal = item.status === 'add' || (item.status === 'mod' && !this._remoteHasChanges);
+    const origin = this._renderDiffOriginBadge_(item.status, isLocal);
     return `
       <div class="qc__gh-diffCard ${isOpen ? 'qc__gh-diffCardOpen' : ''}"
            data-path="${this._escape_(item.path)}">
@@ -2726,16 +2735,18 @@ class GasGithubPanel extends HTMLElement {
   }
 
   /**
-   * Devuelve el badge compacto que indica de qué lado proviene el cambio.
-   * Convención: rojo = GitHub (remoto), verde = GAS (local).
-   *   - 'add': solo existe local.
-   *   - 'del': solo existe remoto.
-   *   - 'mod': comparación bilateral, leyenda dirigida (GitHub → GAS).
-   * @param {string} status
+   * Devuelve el badge compacto que indica de qué lado proviene el cambio
+   * y en qué dirección se sincronizará.
+   *   - 'add': solo existe local → Push.
+   *   - 'del': solo existe remoto → Pull.
+   *   - 'mod': la flecha apunta al destino: `GAS → GitHub` para Push,
+   *            `GitHub → GAS` para Pull.
+   * @param {string} status  'add'|'del'|'mod'
+   * @param {boolean} [isLocalChange=false]  true = dirección Push (GAS→GitHub)
    * @returns {string}
    * @private
    */
-  _renderDiffOriginBadge_(status) {
+  _renderDiffOriginBadge_(status, isLocalChange = false) {
     if (status === 'add') {
       return `
         <span class="qc__gh-diffOrigin add"
@@ -2752,9 +2763,17 @@ class GasGithubPanel extends HTMLElement {
         </span>
       `;
     }
+    if (isLocalChange) {
+      return `
+        <span class="qc__gh-diffOrigin mod"
+              title="Changes made in GAS. Green lines (+) will be pushed to GitHub, red (−) will be replaced.">
+          GAS <i class="material-icons">arrow_forward</i> GitHub
+        </span>
+      `;
+    }
     return `
       <span class="qc__gh-diffOrigin mod"
-            title="Red lines (−) are on GitHub, green lines (+) are local in GAS.">
+            title="Changes made on GitHub. Red lines (−) will be pulled into GAS, green lines (+) are the current GAS version.">
         GitHub <i class="material-icons">arrow_forward</i> GAS
       </span>
     `;
@@ -3019,9 +3038,25 @@ class GasGithubPanel extends HTMLElement {
       );
     }
 
-    this._remoteHasChanges = this._diffItems.some(
-      (i) => i.status === 'del' || i.status === 'mod'
-    );
+    const currentSha = res.data?.commitSha || null;
+
+    if (this._lastKnownCommitSha != null && currentSha === this._lastKnownCommitSha) {
+      // SHA sin cambios → remote no tiene cambios nuevos;
+      // cualquier 'mod' / 'add' solo pudo venir de GAS.
+      this._remoteHasChanges = false;
+    } else if (this._lastKnownCommitSha != null && currentSha !== this._lastKnownCommitSha) {
+      // SHA cambió definitivamente → remote tiene cambios nuevos.
+      this._remoteHasChanges = this._diffItems.some(
+        (i) => i.status === 'del' || i.status === 'mod'
+      );
+    } else {
+      // Primera vez (null): no sabemos si el 'mod' vino de GAS o de GitHub.
+      // Solo forzamos Pull si hay archivos que EXISTEN solo en remote ('del').
+      // Si solo hay 'mod' asumimos que fueron cambios locales → Push.
+      this._remoteHasChanges = this._diffItems.some((i) => i.status === 'del');
+    }
+
+    this._lastKnownCommitSha = currentSha;
 
     this._renderTabBody_();
     this._refreshFooterButtons_();
@@ -4195,6 +4230,9 @@ class GasGithubPanel extends HTMLElement {
         };
       });
 
+      // Actualizar el SHA conocido al que acabamos de crear.
+      if (res.data?.commitSha) this._lastKnownCommitSha = res.data.commitSha;
+
       this._commitMessage = '';
       this._selectedFiles.clear();
       this._expandedDiffPaths = null;
@@ -4318,7 +4356,13 @@ class GasGithubPanel extends HTMLElement {
       this._commitMessage = '';
       this._expandedDiffPaths = null;
 
-      if (!pullResult.reload) await this._recomputeDiff_();
+      if (!pullResult.reload) {
+        await this._recomputeDiff_();
+      } else {
+        // Si recarga la página el estado en memoria se pierde;
+        // dejamos constancia para el próximo diff post-reload.
+        this._lastKnownCommitSha = null;
+      }
       this._remoteHasChanges = false;
 
       if (applied) {
