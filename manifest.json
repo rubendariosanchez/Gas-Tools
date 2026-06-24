@@ -69,8 +69,10 @@
     "alarms"
   ],
   "host_permissions": [
-    "http://localhost:*/*",
-    "http://127.0.0.1:*/*",
+    "http://localhost:11434/*",
+    "http://localhost:1234/*",
+    "http://127.0.0.1:11434/*",
+    "http://127.0.0.1:1234/*",
     "https://script.google.com/*",
     "https://*.googleusercontent.com/*",
     "https://api.openai.com/*",
@@ -86,7 +88,7 @@
     "https://accounts.google.com/*"
   ],
   "oauth2": {
-    "client_id": "1013353101079-6hdb0u6ee0qqpv1h332tma9f6622etf9.apps.googleusercontent.com",
+    "client_id": "1013353101079-ld3pd7p0q1qmarjekbmtvg53dedf09aq.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/script.projects",
       "https://www.googleapis.com/auth/userinfo.email",

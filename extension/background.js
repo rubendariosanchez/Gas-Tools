@@ -19,7 +19,7 @@
  */
 
 import { DB } from '../src/js/utils/Storage.js';
-import { G_PROPERTY_NAME, DEFAULT_SNIPPETS } from '../src/js/utils/Variables.js';
+import { G_PROPERTY_NAME, DEFAULT_SNIPPETS, DEFAULT_SETTINGS_OPTIONS } from '../src/js/utils/Variables.js';
 import { getActiveTheme, callLlmProvider } from './js/services/llm-providers.js';
 import { callGithubApi, startDeviceFlow, pollDeviceToken, getAuthenticatedUser } from './js/services/github-api.js';
 import { callGoogleApi, getGoogleUser } from './js/services/google-api.js';
@@ -310,8 +310,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // ── GET_SETTINGS ──────────────────────────────────────────────────
   if (msg.type === 'GET_SETTINGS') {
     DB.get('settings', G_PROPERTY_NAME)
-      .then(data => sendResponse(data?.options ?? {}))
-      .catch(() => sendResponse({}));
+      .then(data => sendResponse(data?.options ?? DEFAULT_SETTINGS_OPTIONS))
+      .catch(() => sendResponse(DEFAULT_SETTINGS_OPTIONS));
     return true;
   }
 

@@ -148,6 +148,7 @@ async function loadQualityCodeSettings_() {
                 lastUpdated: new Date().toISOString()
             };
             await DB.set('settings', defaultPayload);
+            await notifyEditors('settings');
             settingsData = defaultPayload;
         }
 

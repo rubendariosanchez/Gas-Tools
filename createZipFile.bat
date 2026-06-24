@@ -32,43 +32,41 @@ mkdir "%BUILD%\resources\icons"
 copy "%ROOT%manifest.json" "%BUILD%"
 
 :: extension\
-copy "%ROOT%extension\background.js"                              "%BUILD%\extension\"
-copy "%ROOT%extension\js\gas-tools.js"                            "%BUILD%\extension\js\"
-copy "%ROOT%extension\js\gas-tools-main.js"                       "%BUILD%\extension\js\"
-copy "%ROOT%extension\js\main-functions.js"                       "%BUILD%\extension\js\"
-copy "%ROOT%extension\js\services\*.js"                           "%BUILD%\extension\js\services\"
-copy "%ROOT%extension\js\components\*.js"                         "%BUILD%\extension\js\components\"
-copy "%ROOT%extension\html\*.html"                                "%BUILD%\extension\html\"
+copy "%ROOT%extension\background.js"                  "%BUILD%\extension\"
+copy "%ROOT%extension\js\gas-tools.js"                "%BUILD%\extension\js\"
+copy "%ROOT%extension\js\gas-tools-main.js"           "%BUILD%\extension\js\"
+copy "%ROOT%extension\js\main-functions.js"           "%BUILD%\extension\js\"
+copy "%ROOT%extension\js\services\*.js"               "%BUILD%\extension\js\services\"
+copy "%ROOT%extension\js\components\*.js"             "%BUILD%\extension\js\components\"
+copy "%ROOT%extension\html\*.html"                    "%BUILD%\extension\html\"
 
 :: src\ (popup)
-copy "%ROOT%src\html\index.html"                                  "%BUILD%\src\html\"
-copy "%ROOT%src\css\app.css"                                      "%BUILD%\src\css\"
-copy "%ROOT%src\js\app.js"                                        "%BUILD%\src\js\"
-copy "%ROOT%src\js\modules\*.js"                                  "%BUILD%\src\js\modules\"
-copy "%ROOT%src\js\utils\*.js"                                    "%BUILD%\src\js\utils\"
-copy "%ROOT%src\components\*.js"                                  "%BUILD%\src\components\"
-copy "%ROOT%src\vendor\codemirror\*.js"                           "%BUILD%\src\vendor\codemirror\"
-copy "%ROOT%src\vendor\diff\*.js"                                 "%BUILD%\src\vendor\diff\"
-copy "%ROOT%src\vendor\diff2html\*"                               "%BUILD%\src\vendor\diff2html\"
+copy "%ROOT%src\html\index.html"                      "%BUILD%\src\html\"
+copy "%ROOT%src\css\app.css"                          "%BUILD%\src\css\"
+copy "%ROOT%src\js\app.js"                            "%BUILD%\src\js\"
+copy "%ROOT%src\js\modules\*.js"                      "%BUILD%\src\js\modules\"
+copy "%ROOT%src\js\utils\*.js"                        "%BUILD%\src\js\utils\"
+copy "%ROOT%src\components\*.js"                      "%BUILD%\src\components\"
+copy "%ROOT%src\vendor\codemirror\codemirror.js"      "%BUILD%\src\vendor\codemirror\"
+copy "%ROOT%src\vendor\diff\diff.min.js"              "%BUILD%\src\vendor\diff\"
+copy "%ROOT%src\vendor\diff2html\diff2html-ui.min.js" "%BUILD%\src\vendor\diff2html\"
+copy "%ROOT%src\vendor\diff2html\diff2html.min.css"   "%BUILD%\src\vendor\diff2html\"
 
 :: themes\
-copy "%ROOT%themes\*.json"                                        "%BUILD%\themes\"
+copy "%ROOT%themes\*.json"                            "%BUILD%\themes\"
 
 :: icons
-copy "%ROOT%resources\icons\icon16.png"                           "%BUILD%\resources\icons\"
-copy "%ROOT%resources\icons\icon48.png"                           "%BUILD%\resources\icons\"
-copy "%ROOT%resources\icons\icon128.png"                          "%BUILD%\resources\icons\"
+copy "%ROOT%resources\icons\icon16.png"               "%BUILD%\resources\icons\"
+copy "%ROOT%resources\icons\icon48.png"               "%BUILD%\resources\icons\"
+copy "%ROOT%resources\icons\icon128.png"              "%BUILD%\resources\icons\"
 
-:: Comprimir con PowerShell
+:: Comprimir
 echo.
 echo Comprimiendo...
-powershell -Command "& {
-    Add-Type -AssemblyName System.IO.Compression.FileSystem;
-    [System.IO.Compression.ZipFile]::CreateFromDirectory('%BUILD%', '%ZIP%', [System.IO.Compression.CompressionLevel]::Optimal, $false);
-    Write-Host 'ZIP creado: %ZIP%';
-    $f = Get-Item '%ZIP%';
-    Write-Host ('Tamano: ' + [math]::Round($f.Length/1KB, 1) + ' KB');
-}"
+powershell -Command "Compress-Archive -Path '%BUILD%\*' -DestinationPath '%ZIP%' -Force"
+
+:: Mostrar tamaño
+for %%A in ("%ZIP%") do echo ZIP creado: %%~nxA (%%~zA KB)
 
 :: Limpiar
 rmdir /s /q "%BUILD%"
