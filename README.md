@@ -11,7 +11,7 @@ AI suggestions, in-line errors, multi-file search, GitHub sync, folders, snippet
 
 <br>
 
-<img src="general_resources/readme-images/mode-dark.png" alt="Apps Script editor with the extension active in dark mode" width="720">
+<img src="general_resources/readme-images/mode-dark.png" alt="Apps Script editor with the extension active in dark mode" width="640">
 
 </div>
 
@@ -82,7 +82,7 @@ The header holds three controls that are always available:
 ### Editor options
 
 <div align="center">
-  <img src="general_resources/readme-images/popup-options.png" alt="Popup Editor tab with the settings search box and the Text and Display sections" style="max-height: 500px">
+  <img src="general_resources/readme-images/popup-options.png" alt="Popup Editor tab with the settings search box and the Text and Display sections" width="260">
 </div>
 
 #### Text
@@ -161,7 +161,7 @@ The header holds three controls that are always available:
 A built-in catalog of useful snippets for JavaScript and HTML / GAS, plus a visual editor to add your own. Snippets are triggered by their **prefix** in Monaco's autocomplete: type the prefix, press `Tab` and the body expands with placeholders you can jump through.
 
 <div align="center">
-  <img src="general_resources/readme-images/popup-snippets.png" alt="Popup Snippets tab with built-in and custom snippets" style="max-height: 500px">
+  <img src="general_resources/readme-images/popup-snippets.png" alt="Popup Snippets tab with built-in and custom snippets" width="260">
 </div>
 
 #### What you can do here
@@ -216,7 +216,7 @@ A built-in catalog of useful snippets for JavaScript and HTML / GAS, plus a visu
 Apply any theme with one click. Duplicate any built-in theme to start from a template, edit every color token in the visual editor, or build a new theme from scratch. The **IDE Dark Mode** switch sits at the top of this tab.
 
 <div align="center">
-  <img src="general_resources/readme-images/popup-themes.png" alt="Popup Themes tab with the IDE Dark Mode switch, the active theme and the theme cards" style="max-height: 500px">
+  <img src="general_resources/readme-images/popup-themes.png" alt="Popup Themes tab with the IDE Dark Mode switch, the active theme and the theme cards" width="260">
 </div>
 
 #### What you can do here
@@ -250,7 +250,7 @@ The popup's **AI** tab holds the settings shared by every AI feature: inline aut
 > **Heads-up.** AI features (chat, autocomplete and the active-file panel that surfaces AI hints) are still **experimental**. They work well in most cases but may behave inconsistently with very large projects, unusual file structures or specific provider models. Disable them from the popup if you hit issues, and feel free to report what didn't work to **rubencho.dev@gmail.com**.
 
 <div align="center">
-  <img src="general_resources/readme-images/popup-ai.png" alt="Popup AI tab with the AI Autocomplete switch, the AI response language and the global context" style="max-height: 500px">
+  <img src="general_resources/readme-images/popup-ai.png" alt="Popup AI tab with the AI Autocomplete switch, the AI response language and the global context" width="260">
 </div>
 
 #### Supported providers
@@ -358,7 +358,7 @@ You are pair-programming on Apps Script HTML Service.
 Open it with the **ⓘ** button in the header. It shows the version, links to the author's GitHub, LinkedIn and email, and statistics: how many custom snippets and themes you have and when the data was last updated. Outside the Apps Script editor this is the only screen the popup shows. The master switch lives in the header, next to the language selector.
 
 <div align="center">
-  <img src="general_resources/readme-images/about.png" alt="Popup About screen with version, author links and statistics" style="max-height: 500px">
+  <img src="general_resources/readme-images/about.png" alt="Popup About screen with version, author links and statistics" width="260">
 </div>
 
 ---
@@ -372,7 +372,7 @@ These are the panels you get inside the Apps Script editor itself, right above t
 A toolbar button that always shows the active file's name — even when the Apps Script tree highlight doesn't reflect it. Click it to open a popover with details.
 
 <div align="center">
-  <img src="general_resources/readme-images/current-file-panel.png" alt="Active file popover with language, size and diagnostics" style="max-height: 500px">
+  <img src="general_resources/readme-images/current-file-panel.png" alt="Active file popover with language, size and diagnostics" width="260">
 </div>
 
 What you can see and do here:
@@ -393,9 +393,9 @@ editor, as in VS Code. Each tab uses the same colored icon as the file tree (see
 file colors in *Tools › File explorer*).
 
 <div align="center">
-  <img src="general_resources/readme-images/file-tabs.png" alt="File tabs above the editor: the active Code.gs tab, an unsaved Invoices.gs tab with an orange dot, and the button that counts the hidden tabs" width="720">
+  <img src="general_resources/readme-images/file-tabs.png" alt="File tabs above the editor: the active Code.gs tab, an unsaved Invoices.gs tab with an orange dot, and the button that counts the hidden tabs" width="600">
   <br><br>
-  <img src="general_resources/readme-images/file-tabs-list.png" alt="List of open tabs, split into hidden and visible tabs, opened from the button at the right end of the tab bar" width="720">
+  <img src="general_resources/readme-images/file-tabs-list.png" alt="List of open tabs, split into hidden and visible tabs, opened from the button at the right end of the tab bar" width="560">
 </div>
 
 What you can do here:
@@ -423,7 +423,7 @@ with matches, and a popover lets you pick any file or any match
 directly without stepping through them one by one.
 
 <div align="center">
-  <img src="general_resources/readme-images/search-panel.png" alt="Native find widget with the cross-file bar and the popover listing every file with matches" width="720">
+  <img src="general_resources/readme-images/search-panel.png" alt="Native find widget with the cross-file bar and the popover listing every file with matches" width="560">
 </div>
 
 What you can do here:
@@ -442,7 +442,7 @@ What you can do here:
 A chat with your model in Chrome's native side panel, next to the Apps Script editor. Open it with `Alt+Shift+C` or the **AI** button in the toolbar. The panel belongs to the tab: each Apps Script tab keeps its own conversation.
 
 <div align="center">
-  <img src="general_resources/readme-images/chat-panel.png" alt="AI chat in Chrome's side panel in Agent mode: a question about the active file, a markdown answer with an Apps Script code block, a proposed change to Invoices.gs with Review in editor, Reject all and Accept all, and the Ask/Agent switch with the model selector" style="max-height: 600px">
+  <img src="general_resources/readme-images/chat-panel.png" alt="AI chat in Chrome's side panel in Agent mode: a question about the active file, a markdown answer with an Apps Script code block, a proposed change to Invoices.gs with Review in editor, Reject all and Accept all, and the Ask/Agent switch with the model selector" width="280">
 </div>
 
 What you can do here:
@@ -467,9 +467,9 @@ What you can do here:
 Connect your GitHub account once and the editor gets a sync panel. Sign in with Google so the extension can read and write your project files via the Apps Script API, then sign in with GitHub via Device Flow. Pick a repo and a branch and you are ready.
 
 <div align="center">
-  <img src="general_resources/readme-images/github-login-panel.png" alt="GitHub two-step sign-in: Google then GitHub" width="380">
+  <img src="general_resources/readme-images/github-login-panel.png" alt="GitHub two-step sign-in: Google then GitHub" width="320">
   <br><br>
-  <img src="general_resources/readme-images/github-diff.png" alt="GitHub panel on the Diff tab: repository, branch and subfolder on the left, a compact diff with GitHub and GAS line numbers and origin badges on the right, Pull and Push below" width="600">
+  <img src="general_resources/readme-images/github-diff.png" alt="GitHub panel on the Diff tab: repository, branch and subfolder on the left, a compact diff with GitHub and GAS line numbers and origin badges on the right, Pull and Push below" width="480">
 </div>
 
 #### Changes tab — what you can do
@@ -494,7 +494,7 @@ Connect your GitHub account once and the editor gets a sync panel. Sign in with 
 #### Full-screen diff viewer
 
 <div align="center">
-  <img src="general_resources/readme-images/github-viewer.png" alt="Full-screen diff viewer resolving a conflict in Invoices.gs: GitHub on the left, the editable result on the right, with Copy block from GitHub and Save result" width="720">
+  <img src="general_resources/readme-images/github-viewer.png" alt="Full-screen diff viewer resolving a conflict in Invoices.gs: GitHub on the left, the editable result on the right, with Copy block from GitHub and Save result" width="640">
 </div>
 
 - **Monaco's diff editor** with GitHub on the left and GAS on the right, a file list with origin badges, side-by-side or inline, previous/next change (`Alt+↑/↓`) and the IDE theme.
@@ -506,7 +506,7 @@ Connect your GitHub account once and the editor gets a sync panel. Sign in with 
 #### Pull with control
 
 <div align="center">
-  <img src="general_resources/readme-images/github-pull.png" alt="Pull confirmation with one checkbox per file: Changed in GAS unchecked, a conflict that must be resolved first, Changed on GitHub checked" width="420">
+  <img src="general_resources/readme-images/github-pull.png" alt="Pull confirmation with one checkbox per file: Changed in GAS unchecked, a conflict that must be resolved first, Changed on GitHub checked" width="380">
 </div>
 
 - **One checkbox per file** with its origin badge and `+x −y`. Files changed on GitHub are selected; files changed only in GAS are not (selecting one warns that it will overwrite your GAS changes).
@@ -539,7 +539,7 @@ Push and pull both show a progress panel anchored at the bottom. You see each fi
 A toolbar button that gathers small but useful project tools in one place. Designed to save clicks.
 
 <div align="center">
-  <img src="general_resources/readme-images/actions-panel.png" alt="Actions panel with project shortcuts" width="380">
+  <img src="general_resources/readme-images/actions-panel.png" alt="Actions panel with project shortcuts" width="320">
 </div>
 
 What you can do here:
@@ -551,7 +551,7 @@ What you can do here:
 - **Bulk delete files** — select and permanently remove multiple files at once. A file tree with search and checkboxes lets you pick individual files or entire folders. A confirmation step prevents accidents, and a progress panel shows each file as it is deleted via the Apps Script API. After completion, the editor reloads so the sidebar reflects the changes. Requires Google sign-in.
 
 <div align="center">
-  <img src="general_resources/readme-images/actions-panel-delete.png" alt="Bulk delete files modal with search, file tree and checkboxes" width="380">
+  <img src="general_resources/readme-images/actions-panel-delete.png" alt="Bulk delete files modal with search, file tree and checkboxes" width="360">
 </div>
 
 ---
