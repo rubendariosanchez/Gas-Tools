@@ -24,7 +24,7 @@ mkdir "%BUILD%\src\js\utils"
 mkdir "%BUILD%\src\components"
 mkdir "%BUILD%\src\vendor\codemirror"
 mkdir "%BUILD%\src\vendor\diff"
-mkdir "%BUILD%\src\vendor\diff2html"
+mkdir "%BUILD%\src\vendor\markdown-it"
 mkdir "%BUILD%\themes"
 mkdir "%BUILD%\resources\icons"
 
@@ -39,6 +39,9 @@ copy "%ROOT%extension\js\main-functions.js"           "%BUILD%\extension\js\"
 copy "%ROOT%extension\js\services\*.js"               "%BUILD%\extension\js\services\"
 copy "%ROOT%extension\js\components\*.js"             "%BUILD%\extension\js\components\"
 copy "%ROOT%extension\html\*.html"                    "%BUILD%\extension\html\"
+xcopy "%ROOT%extension\css"          "%BUILD%\extension\css\" /E /I /Y >nul
+xcopy "%ROOT%extension\js\shared"    "%BUILD%\extension\js\shared\" /E /I /Y >nul
+xcopy "%ROOT%extension\js\sidepanel" "%BUILD%\extension\js\sidepanel\" /E /I /Y >nul
 
 :: src\ (popup)
 copy "%ROOT%src\html\index.html"                      "%BUILD%\src\html\"
@@ -48,12 +51,16 @@ copy "%ROOT%src\js\modules\*.js"                      "%BUILD%\src\js\modules\"
 copy "%ROOT%src\js\utils\*.js"                        "%BUILD%\src\js\utils\"
 copy "%ROOT%src\components\*.js"                      "%BUILD%\src\components\"
 copy "%ROOT%src\vendor\codemirror\codemirror.js"      "%BUILD%\src\vendor\codemirror\"
+copy "%ROOT%src\vendor\codemirror\LICENSE"            "%BUILD%\src\vendor\codemirror\"
 copy "%ROOT%src\vendor\diff\diff.min.js"              "%BUILD%\src\vendor\diff\"
-copy "%ROOT%src\vendor\diff2html\diff2html-ui.min.js" "%BUILD%\src\vendor\diff2html\"
-copy "%ROOT%src\vendor\diff2html\diff2html.min.css"   "%BUILD%\src\vendor\diff2html\"
+copy "%ROOT%src\vendor\markdown-it\markdown-it.min.js" "%BUILD%\src\vendor\markdown-it\"
+copy "%ROOT%src\vendor\markdown-it\LICENSE"            "%BUILD%\src\vendor\markdown-it\"
 
 :: themes\
 copy "%ROOT%themes\*.json"                            "%BUILD%\themes\"
+
+:: _locales\ (i18n del manifest y del popup)
+xcopy "%ROOT%_locales" "%BUILD%\_locales\" /E /I /Y >nul
 
 :: icons
 copy "%ROOT%resources\icons\icon16.png"               "%BUILD%\resources\icons\"

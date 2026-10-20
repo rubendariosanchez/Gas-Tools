@@ -12,7 +12,7 @@
  *  - Listado y creación de repos.
  *  - Listado de ramas.
  *  - Push de múltiples archivos en un único commit (Git Data API).
- *  - Pull del árbol y descarga del contenido por archivo.
+ *  - Árbol con SHA de blob (rama y commit base) y descarga de blobs en paralelo.
  */
 
 import { readHttpError } from './http-utils.js';
@@ -278,6 +278,65 @@ export async function listRepos(token, opts = {}) {
   return all;
 }
 
+// ─────────────────────────────────────────────
+// VALIDACIÓN DE ENTRADAS DEL MAIN WORLD
+// ─────────────────────────────────────────────
+
+const REPO_RE = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
+const REPO_NAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
+const BRANCH_RE = /^[^\s~^:?*[\\]{1,255}$/;
+const CONTROL_RE = /[\u0000-\u001f\u007f]/;
+const SHA_RE = /^[0-9a-f]{40}$/;
+
+/**
+ * Valida `owner/repo` (nombres de GitHub) y lo separa.
+ * @param {string} fullName
+ * @returns {{owner:string, name:string}}
+ * @throws {Error} Si no es un repo válido.
+ */
+export function parseRepo(fullName) {
+  const s = String(fullName ?? '');
+  const [owner, name] = s.split('/');
+  if (!REPO_RE.test(s) || name === '.' || name === '..') throw new Error('Invalid repository name.');
+  return { owner, name };
+}
+
+/**
+ * Nombre de rama aceptable para la API (sin `..`, espacios, controles ni barras sueltas).
+ * @param {string} branch
+ * @returns {boolean}
+ */
+export function isValidBranch(branch) {
+  return typeof branch === 'string' && BRANCH_RE.test(branch) && !CONTROL_RE.test(branch)
+    && !branch.includes('..') && !branch.includes('//') && !branch.startsWith('/') && !branch.endsWith('/')
+    && !branch.endsWith('.lock');
+}
+
+/** Codifica una ref de git segmento a segmento (`feature/x` → `feature/x`, sin `%2F`). */
+const _encRef = (ref) => String(ref).split('/').map(encodeURIComponent).join('/');
+
+/**
+ * URL de la API bajo `/repos/{owner}/{name}/`, con segmentos codificados y prefijo verificado.
+ * @param {string} repo `owner/repo`.
+ * @param {string} suffix Resto de la ruta (ya codificado), con query opcional.
+ * @returns {string}
+ * @throws {Error} Si el repo no es válido o la URL resultante sale del prefijo.
+ */
+function _repoUrl(repo, suffix) {
+  const { owner, name } = parseRepo(repo);
+  const prefix = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/`;
+  const url = `${GH_BASE}${prefix}${suffix}`;
+  if (!new URL(url).pathname.startsWith(prefix)) throw new Error('Unsafe GitHub URL.');
+  return url;
+}
+
+/** Error traducible: la rama avanzó con cambios que afectan a lo que se sube. */
+function _branchChangedError() {
+  const err = new Error('GH_BRANCH_CHANGED: The branch changed on GitHub. Recompute the diff.');
+  err.code = 'BRANCH_CHANGED';
+  return err;
+}
+
 /**
  * Crea un repositorio nuevo en la cuenta del usuario autenticado.
  * Inicializa con README para que tenga al menos un commit y una rama.
@@ -286,6 +345,7 @@ export async function listRepos(token, opts = {}) {
  * @returns {Promise<{full_name:string, default_branch:string, html_url:string}>}
  */
 export async function createRepo(token, { name, isPrivate = true, description = '' }) {
+  if (!REPO_NAME_RE.test(String(name ?? '')) || name === '.' || name === '..') throw new Error('Invalid repository name.');
   const res = await _ghFetch(`${GH_BASE}/user/repos`, {
     method:  'POST',
     headers: _headers(token, { 'Content-Type': 'application/json' }),
@@ -312,7 +372,7 @@ export async function createRepo(token, { name, isPrivate = true, description = 
  * @returns {Promise<Array<{name:string, commitSha:string}>>}
  */
 export async function listBranches(token, fullName) {
-  const res = await _ghFetch(`${GH_BASE}/repos/${fullName}/branches?per_page=100`, {
+  const res = await _ghFetch(_repoUrl(fullName, 'branches?per_page=100'), {
     headers: _headers(token),
   });
   if (!res.ok) throw await _readError(res);
@@ -321,11 +381,7 @@ export async function listBranches(token, fullName) {
 }
 
 /**
- * Creates a new branch in `repo` based on `fromBranch`.
- *
- *   1. GET /git/ref/heads/<fromBranch> → commit SHA
- *   2. POST /git/refs with `refs/heads/<newBranch>` pointing at that SHA
- *
+ * Crea una rama `name` en `repo` a partir de `fromBranch`.
  * @param {string} token
  * @param {{repo:string, name:string, fromBranch:string}} cfg
  * @returns {Promise<{name:string, commitSha:string}>}
@@ -334,18 +390,14 @@ export async function createBranch(token, { repo, name, fromBranch }) {
   if (!repo || !name || !fromBranch) {
     throw new Error('createBranch requires repo, name and fromBranch.');
   }
+  if (!isValidBranch(name) || !isValidBranch(fromBranch)) throw new Error('Invalid branch name.');
 
-  // Resolve the source commit.
-  const srcRes = await _ghFetch(
-    `${GH_BASE}/repos/${repo}/git/ref/heads/${encodeURIComponent(fromBranch)}`,
-    { headers: _headers(token) }
-  );
+  const srcRes = await _ghFetch(_repoUrl(repo, `git/ref/heads/${_encRef(fromBranch)}`), { headers: _headers(token) });
   if (!srcRes.ok) throw await _readError(srcRes);
   const sha = (await srcRes.json())?.object?.sha;
   if (!sha) throw new Error('Could not resolve source branch SHA.');
 
-  // Create the new ref.
-  const res = await _ghFetch(`${GH_BASE}/repos/${repo}/git/refs`, {
+  const res = await _ghFetch(_repoUrl(repo, 'git/refs'), {
     method:  'POST',
     headers: _headers(token, { 'Content-Type': 'application/json' }),
     body:    JSON.stringify({ ref: `refs/heads/${name}`, sha }),
@@ -359,19 +411,26 @@ export async function createBranch(token, { repo, name, fromBranch }) {
 // LECTURA DEL ÁRBOL (PULL)
 // ─────────────────────────────────────────────
 
+/** Descargas de blobs simultáneas (equilibrio entre velocidad y rate limit secundario). */
+const BLOB_CONCURRENCY = 6;
+/** Tope de archivos por árbol: más allá el diff y el rate limit se vuelven un problema. */
+const TREE_HARD_CAP = 1000;
+/** Tope de subárboles al recorrer a mano un árbol truncado. */
+const MAX_SUBTREES = 200;
+/** Blobs mayores se rechazan (binarios obvios). */
+const MAX_BLOB_BYTES = 1_000_000;
+/** Bytes máximos por llamada a `fetchBlobs` (respuesta por `sendResponse`). */
+const MAX_BLOBS_TOTAL_BYTES = 20_000_000;
+
 /**
- * Devuelve el SHA del commit referenciado por una rama.
+ * Devuelve el SHA del commit referenciado por una rama (sin caché: decide el fast-forward).
  * @param {string} token
  * @param {string} fullName
  * @param {string} branch
  * @returns {Promise<string>}
  */
 async function _getBranchCommitSha(token, fullName, branch) {
-  // `cache: 'no-store'` + cache-buster en el query: garantizamos que la
-  // respuesta es del momento (no del cache del navegador ni proxies).
-  // El SHA del head es lo que decide si un push será fast-forward, así
-  // que necesitamos el valor en vivo aunque tarde un poco más.
-  const url = `${GH_BASE}/repos/${fullName}/git/ref/heads/${encodeURIComponent(branch)}?_=${Date.now()}`;
+  const url = _repoUrl(fullName, `git/ref/heads/${_encRef(branch)}?_=${Date.now()}`);
   const res = await _ghFetch(url, {
     headers: _headers(token, { 'Cache-Control': 'no-cache' }),
     cache:   'no-store',
@@ -381,145 +440,221 @@ async function _getBranchCommitSha(token, fullName, branch) {
 }
 
 /**
- * Devuelve el árbol completo (recursivo) de un commit.
+ * Árbol completo (recursivo) de un commit.
  * @param {string} token
  * @param {string} fullName
  * @param {string} commitSha
- * @returns {Promise<{treeSha:string, entries:Array<{path:string, sha:string, type:string, size:number}>}>}
+ * @returns {Promise<{treeSha:string, entries:Array<{path:string, sha:string, type:string, size:number}>, incomplete:boolean}>}
  */
 async function _getTree(token, fullName, commitSha) {
-  // 1. Necesitamos el tree sha del commit.
-  const cRes = await _ghFetch(`${GH_BASE}/repos/${fullName}/git/commits/${commitSha}`, {
+  const cRes = await _ghFetch(_repoUrl(fullName, `git/commits/${encodeURIComponent(commitSha)}`), {
     headers: _headers(token),
   });
   if (!cRes.ok) throw await _readError(cRes);
   const treeSha = (await cRes.json())?.tree?.sha;
 
-  // 2. Pedimos el árbol recursivo.
-  const tRes = await _ghFetch(`${GH_BASE}/repos/${fullName}/git/trees/${treeSha}?recursive=1`, {
+  const tRes = await _ghFetch(_repoUrl(fullName, `git/trees/${encodeURIComponent(treeSha)}?recursive=1`), {
     headers: _headers(token),
   });
   if (!tRes.ok) throw await _readError(tRes);
   const tree = await tRes.json();
 
-  // GitHub puede devolver `truncated: true` cuando el árbol supera 100k
-  // entradas o 7MB de payload. En ese caso la lista llega incompleta y
-  // archivos que claramente existen en el repo no aparecen, y el panel
-  // los confunde con "solo en GAS". Recursamos manualmente nivel a nivel
-  // hasta cubrir todo.
-  let entries;
+  // `truncated: true` (más de 100k entradas o 7 MB): se recorre nivel a nivel.
   if (tree.truncated) {
     console.warn('[github-api] Tree truncated, walking subdirs manually for', fullName);
-    entries = await _walkTreeRecursively(token, fullName, treeSha);
-  } else {
-    entries = (tree.tree || [])
-      .filter((e) => e.type === 'blob')
-      .map((e) => ({ path: e.path, sha: e.sha, type: e.type, size: e.size || 0 }));
+    const walked = await _walkTreeRecursively(token, fullName, treeSha);
+    return { treeSha, entries: walked.entries, incomplete: walked.incomplete };
   }
-
-  return { treeSha, entries };
+  const entries = (tree.tree || [])
+    .filter((e) => e.type === 'blob')
+    .map((e) => ({ path: e.path, sha: e.sha, type: e.type, size: e.size || 0 }));
+  return { treeSha, entries, incomplete: false };
 }
 
 /**
- * Camina el árbol nivel a nivel cuando GitHub responde con
- * `truncated: true` al pedir el tree completo recursivo. Pide cada
- * subdirectorio por separado (sin `recursive`) y va acumulando blobs.
- *
+ * Recorre un árbol truncado subdirectorio a subdirectorio (máx. `MAX_SUBTREES`).
  * @param {string} token
  * @param {string} fullName
  * @param {string} rootTreeSha
- * @returns {Promise<Array<{path:string,sha:string,type:string,size:number}>>}
+ * @returns {Promise<{entries:Array<{path:string,sha:string,type:string,size:number}>, incomplete:boolean}>}
+ * @throws {Error} Si un subárbol no se puede leer (el árbol quedaría incompleto sin saberlo).
  */
 async function _walkTreeRecursively(token, fullName, rootTreeSha) {
   const out = [];
-  /** @type {Array<{sha:string, prefix:string}>} */
   const queue = [{ sha: rootTreeSha, prefix: '' }];
+  let visited = 0;
 
   while (queue.length) {
+    if (visited >= MAX_SUBTREES) return { entries: out, incomplete: true };
     const { sha, prefix } = queue.shift();
-    const res = await _ghFetch(`${GH_BASE}/repos/${fullName}/git/trees/${sha}`, {
+    visited++;
+    const res = await _ghFetch(_repoUrl(fullName, `git/trees/${encodeURIComponent(sha)}`), {
       headers: _headers(token),
     });
-    if (!res.ok) {
-      console.warn('[github-api] Could not read subtree', sha, 'at', prefix);
-      continue;
-    }
+    if (!res.ok) throw await _readError(res);
     const data = await res.json();
     for (const e of (data.tree || [])) {
       const fullPath = prefix ? `${prefix}/${e.path}` : e.path;
-      if (e.type === 'tree') {
-        queue.push({ sha: e.sha, prefix: fullPath });
-      } else if (e.type === 'blob') {
-        out.push({ path: fullPath, sha: e.sha, type: 'blob', size: e.size || 0 });
-      }
+      if (e.type === 'tree') queue.push({ sha: e.sha, prefix: fullPath });
+      else if (e.type === 'blob') out.push({ path: fullPath, sha: e.sha, type: 'blob', size: e.size || 0 });
     }
   }
-  return out;
+  return { entries: out, incomplete: false };
 }
 
 /**
- * Descarga el contenido de un blob por SHA y lo devuelve como string UTF-8.
+ * Descarga el contenido de un blob por SHA como string UTF-8.
  * @param {string} token
  * @param {string} fullName
  * @param {string} blobSha
  * @returns {Promise<string>}
+ * @throws {Error} Si falla o supera `MAX_BLOB_BYTES`.
  */
 async function _getBlobContent(token, fullName, blobSha) {
-  const res = await _ghFetch(`${GH_BASE}/repos/${fullName}/git/blobs/${blobSha}`, {
+  const res = await _ghFetch(_repoUrl(fullName, `git/blobs/${encodeURIComponent(blobSha)}`), {
     headers: _headers(token),
   });
   if (!res.ok) throw await _readError(res);
   const blob = await res.json();
+  if ((blob.size || 0) > MAX_BLOB_BYTES) throw new Error('Blob too large.');
   if (blob.encoding === 'base64') return _fromBase64(blob.content);
   return blob.content || '';
 }
 
 /**
- * Pull: descarga todos los archivos de la rama indicada, opcionalmente
- * filtrados por un `basePath` (carpeta dentro del repo).
- *
- * @param {string} token
- * @param {{repo:string, branch:string, basePath?:string}} cfg
- * @returns {Promise<{branch:string, basePath:string, files:Array<{path:string, content:string, size:number}>}>}
+ * Ejecuta `fn` sobre cada elemento con como mucho `limit` promesas a la vez.
+ * @param {Array} items Elementos de entrada.
+ * @param {number} limit Concurrencia máxima.
+ * @param {Function} fn `(item, index) => Promise`.
+ * @returns {Promise<Array>} Resultados en el mismo orden.
  */
-export async function fetchRepoFiles(token, { repo, branch, basePath = '' }) {
+export async function mapPool(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  const n = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: n }, worker));
+  return out;
+}
+
+/**
+ * Filtra las entradas del árbol al `basePath` y devuelve rutas relativas (máx. `TREE_HARD_CAP`).
+ * @param {Array<{path:string,sha:string,size:number}>} entries Blobs del árbol.
+ * @param {string} base Carpeta normalizada (sin barras extremas) o ''.
+ * @returns {{entries:Array<{path:string,sha:string,size:number}>, incomplete:boolean}}
+ */
+function _scopeEntries(entries, base) {
+  const inScope = base ? entries.filter((e) => e.path.startsWith(`${base}/`)) : entries;
+  const incomplete = inScope.length > TREE_HARD_CAP;
+  if (incomplete) console.warn(`[github-api] Repo has ${inScope.length} files, capping at ${TREE_HARD_CAP}.`);
+  return {
+    incomplete,
+    entries: inScope.slice(0, TREE_HARD_CAP).map((e) => ({
+      path: base ? e.path.slice(base.length + 1) : e.path,
+      sha:  e.sha,
+      size: e.size || 0,
+    })),
+  };
+}
+
+/** Quita barras al inicio y al final de un `basePath`. */
+const _normBase = (p) => String(p || '').replace(/^\/+|\/+$/g, '');
+
+/**
+ * Árbol de la rama (y del commit base, si se pide) con los SHA de blob, sin contenido.
+ * `incomplete`/`baseIncomplete`: la lista no cubre todo el árbol (no deducir borrados).
+ * @param {string} token
+ * @param {{repo:string, branch:string, basePath?:string, baseSha?:string|null}} cfg
+ * @returns {Promise<{branch:string, basePath:string, commitSha:string,
+ *   files:Array<{path:string,sha:string,size:number}>, incomplete:boolean, baseSha:string|null,
+ *   baseFiles:Array<{path:string,sha:string,size:number}>|null, baseIncomplete:boolean, baseMissing:boolean}>}
+ * @throws {Error} Si falla la lectura (salvo base inexistente: 404/422 → `baseMissing`).
+ */
+export async function fetchRepoTree(token, { repo, branch, basePath = '', baseSha = null }) {
+  const base = _normBase(basePath);
   const commitSha = await _getBranchCommitSha(token, repo, branch);
-  const { entries } = await _getTree(token, repo, commitSha);
+  const head = await _getTree(token, repo, commitSha);
+  const scoped = _scopeEntries(head.entries, base);
+  const files = scoped.entries;
+  const incomplete = head.incomplete || scoped.incomplete;
 
-  const norm = (p) => String(p || '').replace(/^\/+|\/+$/g, '');
-  const base = norm(basePath);
-
-  const inScope = base
-    ? entries.filter((e) => e.path === base || e.path.startsWith(`${base}/`))
-    : entries;
-
-  // Cap defensivo: 1000 archivos. Pasado ese punto el pull/diff sería
-  // pesado y el rate limit de GitHub se vuelve un problema (cada blob
-  // es una request). Lo subimos respecto al 200 anterior porque
-  // proyectos GAS reales pueden tener varios cientos de archivos
-  // distribuidos en carpetas.
-  const HARD_CAP = 1000;
-  if (inScope.length > HARD_CAP) {
-    console.warn(
-      `[github-api] Repo has ${inScope.length} files, capping at ${HARD_CAP}.`,
-    );
-  }
-  const limited = inScope.slice(0, HARD_CAP);
-
-  const files = [];
-  for (const entry of limited) {
-    // Saltamos binarios obvios (>1MB) para que el panel no se cuelgue.
-    if (entry.size > 1_000_000) continue;
+  let baseFiles = null;
+  let baseIncomplete = false;
+  let baseMissing = false;
+  const wantBase = typeof baseSha === 'string' && SHA_RE.test(baseSha);
+  if (wantBase && baseSha === commitSha) {
+    baseFiles = files;
+    baseIncomplete = incomplete;
+  } else if (wantBase) {
     try {
-      const content = await _getBlobContent(token, repo, entry.sha);
-      const relPath = base ? entry.path.slice(base.length + 1) : entry.path;
-      files.push({ path: relPath, content, size: entry.size });
+      const bt = await _getTree(token, repo, baseSha);
+      const bs = _scopeEntries(bt.entries, base);
+      baseFiles = bs.entries;
+      baseIncomplete = bt.incomplete || bs.incomplete;
     } catch (err) {
-      console.warn('[github-api] skip blob', entry.path, err?.message);
+      // Solo "no existe" (force push o rama reescrita) vale como base perdida.
+      if (!/^GitHub (404|422)\b/.test(String(err?.message || ''))) throw err;
+      baseMissing = true;
+      console.warn('[github-api] base commit not found', baseSha);
     }
   }
+  return {
+    branch, basePath: base, commitSha, files, incomplete,
+    baseSha: baseFiles ? baseSha : null, baseFiles, baseIncomplete, baseMissing,
+  };
+}
 
-  return { branch, basePath: base, files, commitSha };
+/**
+ * Descarga varios blobs por SHA (sin duplicados, concurrencia 6, tope de bytes por llamada).
+ * @param {string} token
+ * @param {{repo:string, shas:string[]}} cfg
+ * @returns {Promise<{blobs:Object<string,string>, failed:string[]}>} `failed`: no descargados (error, > 1 MB o tope).
+ */
+export async function fetchBlobs(token, { repo, shas }) {
+  parseRepo(repo);
+  const unique = [...new Set((Array.isArray(shas) ? shas : [])
+    .filter((s) => typeof s === 'string' && SHA_RE.test(s)))].slice(0, TREE_HARD_CAP * 2);
+  const blobs = {};
+  const failed = [];
+  let total = 0;
+  await mapPool(unique, BLOB_CONCURRENCY, async (sha) => {
+    if (total >= MAX_BLOBS_TOTAL_BYTES) { failed.push(sha); return; }
+    try {
+      const text = await _getBlobContent(token, repo, sha);
+      total += text.length;
+      if (total > MAX_BLOBS_TOTAL_BYTES) { failed.push(sha); return; }
+      blobs[sha] = text;
+    } catch (err) {
+      failed.push(sha);
+      console.warn('[github-api] skip blob', sha, err?.message);
+    }
+  });
+  return { blobs, failed };
+}
+
+/**
+ * Descarga todos los archivos de la rama (opcionalmente bajo `basePath`), en paralelo.
+ * @param {string} token
+ * @param {{repo:string, branch:string, basePath?:string}} cfg
+ * @returns {Promise<{branch:string, basePath:string, commitSha:string, files:Array<{path:string, content:string, size:number}>}>}
+ */
+export async function fetchRepoFiles(token, { repo, branch, basePath = '' }) {
+  const tree = await fetchRepoTree(token, { repo, branch, basePath });
+  const wanted = tree.files.filter((e) => e.size <= MAX_BLOB_BYTES);
+  const results = await mapPool(wanted, BLOB_CONCURRENCY, async (entry) => {
+    try {
+      return { path: entry.path, content: await _getBlobContent(token, repo, entry.sha), size: entry.size };
+    } catch (err) {
+      console.warn('[github-api] skip blob', entry.path, err?.message);
+      return null;
+    }
+  });
+  return { branch, basePath: tree.basePath, files: results.filter(Boolean), commitSha: tree.commitSha };
 }
 
 // ─────────────────────────────────────────────
@@ -527,12 +662,9 @@ export async function fetchRepoFiles(token, { repo, branch, basePath = '' }) {
 // ─────────────────────────────────────────────
 
 /**
- * Sube múltiples archivos en un único commit usando la Git Data API:
- *   1. GET ref → commit SHA padre
- *   2. POST blobs por archivo
- *   3. POST tree (basado en el árbol del padre + entradas nuevas)
- *   4. POST commit
- *   5. PATCH ref para mover la rama al nuevo commit
+ * Sube varios archivos en un único commit (blobs → tree → commit → ref).
+ * Con `expectedParentSha` (commit con el que se calculó el diff) solo sigue si la rama no
+ * avanzó o si los commits nuevos no tocan ninguna de las rutas que se suben.
  *
  * @param {string} token
  * @param {{
@@ -542,35 +674,67 @@ export async function fetchRepoFiles(token, { repo, branch, basePath = '' }) {
  *   files:    Array<{path:string, content:string}>,
  *   message:  string,
  *   force?:   boolean,
+ *   expectedParentSha?: string|null,
+ *   existingBlobs?: Map<string,string>|Object<string,string>|null,
  * }} cfg
- * @returns {Promise<{commitSha:string, htmlUrl:string|null, branch:string}>}
+ * @returns {Promise<{commitSha:string, parentSha:string|null, htmlUrl:string|null, branch:string}>}
+ * @throws {Error} `code === 'BRANCH_CHANGED'` si la rama avanzó con cambios en esas rutas.
  */
 export async function pushFiles(token, {
   repo, branch, basePath = '', files, message, force = false,
-  existingBlobs = null, onProgress = null,
+  existingBlobs = null, onProgress = null, expectedParentSha,
 }) {
   if (!Array.isArray(files) || !files.length) throw new Error('No files to push.');
   if (!message) message = 'Update from gas-tools';
+  const guarded = expectedParentSha !== undefined;
+  if (guarded && expectedParentSha !== null && !SHA_RE.test(String(expectedParentSha))) {
+    throw new Error('Invalid expected parent SHA.');
+  }
 
   const norm = (p) => String(p || '').replace(/^\/+|\/+$/g, '');
   const base = norm(basePath);
   const fullPath = (p) => (base ? `${base}/${norm(p)}` : norm(p));
   const emit = (evt) => { try { onProgress && onProgress(evt); } catch (_) {} };
+  const pushedPaths = new Set(files.map((f) => fullPath(f.path)));
 
-  // Cache de blobs ya subidos en intentos previos: si el caller pasa
-  // `existingBlobs` (Map de path local → blob sha), reutilizamos esos
-  // blobs en lugar de re-subirlos. Esto permite reintentar un push
-  // que cayó a la mitad sin gastar cuota ni saturar el rate limit.
-  const cached = existingBlobs instanceof Map ? existingBlobs : new Map();
+  // Caché de blobs de un intento anterior (llega como objeto por el mensaje).
+  const cached = existingBlobs instanceof Map
+    ? existingBlobs
+    : new Map(Object.entries(existingBlobs || {}).filter(([, s]) => typeof s === 'string' && SHA_RE.test(s)));
+
+  /**
+   * Permite pasar de `from` a `to` solo si `to` desciende de `from` sin tocar las rutas subidas.
+   * @throws {Error} `BRANCH_CHANGED` en cualquier otro caso.
+   */
+  const ensureSafeAdvance = async (from, to) => {
+    if ((from || null) === (to || null)) return;
+    if (!from || !to) throw _branchChangedError();
+    const res = await _ghFetch(_repoUrl(repo, `compare/${encodeURIComponent(from)}...${encodeURIComponent(to)}`), {
+      headers: _headers(token),
+    });
+    if (!res.ok) throw _branchChangedError();
+    const cmp = await res.json();
+    const changed = Array.isArray(cmp?.files) ? cmp.files : null;
+    // `ahead` = `to` desciende de `from`; la API corta en 300 archivos.
+    if (cmp?.status !== 'ahead' || !changed || changed.length >= 300) throw _branchChangedError();
+    if (changed.some((f) => pushedPaths.has(f.filename) || (f.previous_filename && pushedPaths.has(f.previous_filename)))) {
+      throw _branchChangedError();
+    }
+  };
+
+  // ── 0. Head actual y comprobación contra el commit comparado ─────────
+  let parentSha = null;
+  try {
+    parentSha = await _getBranchCommitSha(token, repo, branch);
+  } catch (_) {}
+  if (guarded && !force) await ensureSafeAdvance(expectedParentSha, parentSha);
 
   emit({ type: 'phase', phase: 'blobs', total: files.length });
 
   // ── 1. Subir blobs en paralelo limitado (3 a la vez) ─────────────────
-  // 3 paralelos + retry con backoff balancea velocidad y estabilidad
-  // frente al secondary rate limit de GitHub.
   const blobs = [];
   let done = 0;
-  const queue = files.map((f) => ({ ...f, _idx: f.path }));
+  const queue = files.map((f) => ({ ...f }));
   const inFlight = [];
   const MAX_PARALLEL = 3;
   const worker = async () => {
@@ -583,7 +747,7 @@ export async function pushFiles(token, {
       if (sha) {
         reused = true;
       } else {
-        const res = await _ghFetch(`${GH_BASE}/repos/${repo}/git/blobs`, {
+        const res = await _ghFetch(_repoUrl(repo, 'git/blobs'), {
           method:  'POST',
           headers: _headers(token, { 'Content-Type': 'application/json' }),
           body:    JSON.stringify({ content: _toBase64(file.content || ''), encoding: 'base64' }),
@@ -596,25 +760,24 @@ export async function pushFiles(token, {
       emit({ type: 'blob', path: localPath, sha, reused, done, total: files.length });
     }
   };
+  const uploaded = () => Object.fromEntries(blobs.map((b) => [b.localPath, b.sha]));
   for (let i = 0; i < Math.min(MAX_PARALLEL, files.length); i++) inFlight.push(worker());
   try {
     await Promise.all(inFlight);
   } catch (err) {
-    err.uploadedBlobs = Object.fromEntries(blobs.map((b) => [b.localPath, b.sha]));
+    err.uploadedBlobs = uploaded();
     throw err;
   }
 
   // ── 2. Helper: construye tree + commit basados en un parent dado ─────
-  const buildCommit = async (parentSha) => {
+  const buildCommit = async (parent) => {
     emit({ type: 'phase', phase: 'tree' });
     let baseTreeSha = null;
-    if (parentSha) {
-      const parentCommitRes = await _ghFetch(`${GH_BASE}/repos/${repo}/git/commits/${parentSha}`, {
+    if (parent) {
+      const parentCommitRes = await _ghFetch(_repoUrl(repo, `git/commits/${encodeURIComponent(parent)}`), {
         headers: _headers(token),
       });
-      if (parentCommitRes.ok) {
-        baseTreeSha = (await parentCommitRes.json())?.tree?.sha || null;
-      }
+      if (parentCommitRes.ok) baseTreeSha = (await parentCommitRes.json())?.tree?.sha || null;
     }
 
     const treePayload = {
@@ -622,7 +785,7 @@ export async function pushFiles(token, {
     };
     if (baseTreeSha) treePayload.base_tree = baseTreeSha;
 
-    const treeRes = await _ghFetch(`${GH_BASE}/repos/${repo}/git/trees`, {
+    const treeRes = await _ghFetch(_repoUrl(repo, 'git/trees'), {
       method:  'POST',
       headers: _headers(token, { 'Content-Type': 'application/json' }),
       body:    JSON.stringify(treePayload),
@@ -632,131 +795,120 @@ export async function pushFiles(token, {
 
     emit({ type: 'phase', phase: 'commit' });
     const commitBody = { message, tree: newTreeSha };
-    if (parentSha) commitBody.parents = [parentSha];
+    if (parent) commitBody.parents = [parent];
 
-    const commitRes = await _ghFetch(`${GH_BASE}/repos/${repo}/git/commits`, {
+    const commitRes = await _ghFetch(_repoUrl(repo, 'git/commits'), {
       method:  'POST',
       headers: _headers(token, { 'Content-Type': 'application/json' }),
       body:    JSON.stringify(commitBody),
     });
     if (!commitRes.ok) throw await _readError(commitRes);
-    return await commitRes.json();
+    return commitRes.json();
   };
 
-  // ── 3. Resolver el head actual de la rama (si existe) ────────────────
-  let parentSha = null;
-  try {
-    parentSha = await _getBranchCommitSha(token, repo, branch);
-  } catch (_) {}
-
-  // ── 4. Crear commit basado en ese head ───────────────────────────────
-  let newCommit = await buildCommit(parentSha);
-
-  // ── 5. Mover (o crear) la ref con auto-rebase si hubo avance ─────────
-  emit({ type: 'phase', phase: 'ref' });
   /** Hace el PATCH/POST de la ref. @returns {Promise<{ok:boolean, error?:string, isFastForward?:boolean}>} */
   const updateRef = async (commitSha, hadParent) => {
-    const url = hadParent
-      ? `${GH_BASE}/repos/${repo}/git/refs/heads/${encodeURIComponent(branch)}`
-      : `${GH_BASE}/repos/${repo}/git/refs`;
-    const method = hadParent ? 'PATCH' : 'POST';
-    const body = hadParent
-      ? JSON.stringify({ sha: commitSha, force })
-      : JSON.stringify({ ref: `refs/heads/${branch}`, sha: commitSha });
-
+    const url = hadParent ? _repoUrl(repo, `git/refs/heads/${_encRef(branch)}`) : _repoUrl(repo, 'git/refs');
     const res = await _ghFetch(url, {
-      method,
+      method:  hadParent ? 'PATCH' : 'POST',
       headers: _headers(token, { 'Content-Type': 'application/json' }),
-      body,
+      body:    hadParent
+        ? JSON.stringify({ sha: commitSha, force })
+        : JSON.stringify({ ref: `refs/heads/${branch}`, sha: commitSha }),
     });
     if (res.ok) return { ok: true };
-
-    // Capturamos texto + status para decidir si reintentamos.
     let text = '';
     try { text = await res.text(); } catch (_) {}
-    const isFastForward = res.status === 422 && /not a fast forward/i.test(text);
     return {
       ok: false,
-      isFastForward,
+      isFastForward: res.status === 422 && /not a fast forward/i.test(text),
       error: `GitHub ${res.status}: ${(text || res.statusText).slice(0, 240)}`,
     };
   };
 
-  let refResult = await updateRef(newCommit.sha, !!parentSha);
+  try {
+    // ── 3. Commit sobre el head y movimiento de la ref ───────────────────
+    let newCommit = await buildCommit(parentSha);
+    emit({ type: 'phase', phase: 'ref' });
+    let refResult = await updateRef(newCommit.sha, !!parentSha);
 
-  // ── 6. Auto-rebase con reintentos si la rama avanzó entre que leímos
-  //      el head y el PATCH ─────────────────────────────────────────────
-  // Pasa típicamente cuando dos pushes salen muy seguidos: el segundo ve
-  // el head viejo (cache de GitHub) y el PATCH cae como non-fast-forward.
-  // Releemos el head real, reconstruimos el commit con ese padre y
-  // reintentamos. Hasta 3 intentos con backoff (200, 500, 1000 ms) para
-  // dar tiempo a que el cache de la API propague.
-  if (parentSha && !force) {
-    const backoffs = [200, 500, 1000];
-    for (let i = 0; i < backoffs.length && !refResult.ok && refResult.isFastForward; i++) {
-      await new Promise((r) => setTimeout(r, backoffs[i]));
-
-      let realHead = null;
-      try { realHead = await _getBranchCommitSha(token, repo, branch); } catch (_) {}
-
-      if (!realHead || realHead === parentSha) continue;
-      parentSha = realHead;
-      newCommit = await buildCommit(realHead);
-      refResult = await updateRef(newCommit.sha, true);
+    // ── 4. Auto-rebase si la rama avanzó entre la lectura y el PATCH ─────
+    // Con guarda, solo si los commits nuevos no tocan las rutas que se suben.
+    if (parentSha && !force) {
+      const backoffs = [200, 500, 1000];
+      for (let i = 0; i < backoffs.length && !refResult.ok && refResult.isFastForward; i++) {
+        await new Promise((r) => setTimeout(r, backoffs[i]));
+        let realHead = null;
+        try { realHead = await _getBranchCommitSha(token, repo, branch); } catch (_) {}
+        if (!realHead || realHead === parentSha) continue;
+        if (guarded) await ensureSafeAdvance(expectedParentSha ?? parentSha, realHead);
+        parentSha = realHead;
+        newCommit = await buildCommit(realHead);
+        refResult = await updateRef(newCommit.sha, true);
+      }
     }
-  }
+    if (!refResult.ok) throw new Error(refResult.error);
 
-  if (!refResult.ok) {
-    // Pasamos el mapa de blobs ya subidos al caller para que pueda
-    // reintentar sin re-subirlos.
-    const err = new Error(refResult.error);
-    err.uploadedBlobs = Object.fromEntries(blobs.map((b) => [b.localPath, b.sha]));
+    return {
+      commitSha:     newCommit.sha,
+      // Padre real del commit (cambia si hubo auto-rebase): el panel lo compara con el diff.
+      parentSha:     parentSha || null,
+      htmlUrl:       newCommit.html_url || null,
+      branch,
+      uploadedBlobs: uploaded(),
+    };
+  } catch (err) {
+    // El caller reintenta sin re-subir los blobs ya creados.
+    err.uploadedBlobs = uploaded();
     throw err;
   }
-
-  return {
-    commitSha:     newCommit.sha,
-    htmlUrl:       newCommit.html_url || null,
-    branch,
-    uploadedBlobs: Object.fromEntries(blobs.map((b) => [b.localPath, b.sha])),
-  };
 }
 
 // ─────────────────────────────────────────────
 // DESPACHADOR (usado por background.js)
 // ─────────────────────────────────────────────
 
+/** Acciones que reciben `payload.repo` y su campo de rama, si lo tienen. */
+const REPO_ACTIONS = Object.freeze({
+  LIST_BRANCHES: null,
+  CREATE_BRANCH: null,
+  FETCH_FILES:   'branch',
+  FETCH_TREE:    'branch',
+  FETCH_BLOBS:   null,
+  PUSH_FILES:    'branch',
+});
+
 /**
- * Punto de entrada único llamado desde el background. Recibe la acción
- * y delega en la función correspondiente. Mantiene el background en una
- * sola línea por mensaje (mismo patrón que `callLlmProvider`).
- *
- * @param {string} action
- * @param {string} token
- * @param {Object} payload
- * @returns {Promise<*>}
- */
-/**
- * Despacha una acción al cliente correspondiente.
+ * Despacha una acción al cliente correspondiente. Valida `repo` y la rama que llegan
+ * del MAIN world antes de construir cualquier URL.
  *
  * @param {string} action
  * @param {string} token
  * @param {Object} payload
  * @param {{onProgress?:Function}} [opts]
  * @returns {Promise<*>}
+ * @throws {Error} Si la acción no existe o la entrada no es válida.
  */
 export async function callGithubApi(action, token, payload = {}, opts = {}) {
   if (!token && action !== 'PING') throw new Error('Missing GitHub token.');
+  const p = payload && typeof payload === 'object' ? payload : {};
+  if (Object.prototype.hasOwnProperty.call(REPO_ACTIONS, action)) {
+    parseRepo(p.repo);
+    const branchField = REPO_ACTIONS[action];
+    if (branchField && !isValidBranch(p[branchField])) throw new Error('Invalid branch name.');
+  }
 
   switch (action) {
     case 'GET_USER':     return getAuthenticatedUser(token);
     case 'LIST_REPOS':   return listRepos(token);
-    case 'LIST_BRANCHES':return listBranches(token, payload.repo);
-    case 'CREATE_BRANCH':return createBranch(token, payload);
-    case 'CREATE_REPO':  return createRepo(token, payload);
-    case 'FETCH_FILES':  return fetchRepoFiles(token, payload);
+    case 'LIST_BRANCHES':return listBranches(token, p.repo);
+    case 'CREATE_BRANCH':return createBranch(token, p);
+    case 'CREATE_REPO':  return createRepo(token, p);
+    case 'FETCH_FILES':  return fetchRepoFiles(token, p);
+    case 'FETCH_TREE':   return fetchRepoTree(token, p);
+    case 'FETCH_BLOBS':  return fetchBlobs(token, p);
     case 'PUSH_FILES':   return pushFiles(token,
-      { ...payload, onProgress: opts.onProgress || null });
+      { ...p, onProgress: opts.onProgress || null });
     default:             throw new Error(`Unknown GitHub action: ${action}`);
   }
 }

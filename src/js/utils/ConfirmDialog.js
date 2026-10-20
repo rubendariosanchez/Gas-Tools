@@ -7,24 +7,44 @@ export function ConfirmDialog(message) {
     const text = document.getElementById('qc__confirm-text');
     const ok = document.getElementById('qc__confirm-ok');
     const cancel = document.getElementById('qc__confirm-cancel');
+    const previousFocus = document.activeElement;
 
     text.textContent = message;
     modal.classList.remove('hidden');
+    cancel.focus(); // Foco en la opción segura
 
-    const clean = () => {
+    const finish = (result) => {
       modal.classList.add('hidden');
       ok.onclick = null;
       cancel.onclick = null;
+      document.removeEventListener('keydown', onKeydown, true);
+      previousFocus?.focus?.();
+      resolve(result);
     };
 
-    ok.onclick = () => {
-      clean();
-      resolve(true);
-    };
+    /** Escape cancela; Tab y Shift+Tab no salen del diálogo. */
+    function onKeydown(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        finish(false);
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const first = cancel;
+      const last = ok;
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !modal.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !modal.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
 
-    cancel.onclick = () => {
-      clean();
-      resolve(false);
-    };
+    document.addEventListener('keydown', onKeydown, true);
+    ok.onclick = () => finish(true);
+    cancel.onclick = () => finish(false);
   });
 }

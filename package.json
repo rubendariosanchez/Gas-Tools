@@ -1,0 +1,9 @@
+{
+  "name": "gas-tools",
+  "private": true,
+  "type": "module",
+  "description": "Solo para tests locales (node:test). La extensión no tiene build step.",
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\""
+  }
+}

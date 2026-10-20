@@ -36,6 +36,10 @@ class GasFolders {
 
   static MAX_RETRY_ATTEMPTS = 30;
   static RETRY_INTERVAL_MS  = 500;
+  /** Ventana de throttle del observer de documento (navegación SPA). */
+  static DOC_CHECK_THROTTLE_MS = 100;
+  /** Colores CSS aceptados: hex, rgb()/rgba()/hsl()/hsla() o nombre. */
+  static COLOR_RE = /^(?:#[0-9a-f]{3,8}|(?:rgb|hsl)a?\([\d\s.,%/]+\)|[a-z]+)$/i;
 
   constructor() {
     this._enabled        = false;
@@ -51,6 +55,38 @@ class GasFolders {
     this._retryTimer     = null;
     this._pendingApply   = null;
     this._dirtyDuringRebuild = false;
+    /** Timer del chequeo throttled del observer de documento. */
+    this._docCheckTimer  = null;
+  }
+
+  // ── API pública ────────────────────────────────────────────────────
+
+  /** `true` si el componente está activo. */
+  get enabled() { return this._enabled; }
+
+  /** `true` si ya se localizaron listas de archivos para transformar. */
+  hasRootLists() { return this._rootLists.length > 0; }
+
+  /**
+   * Programa un rebuild del árbol (con debounce). No hace nada si el
+   * componente está desactivado.
+   * @param {number} [delayMs=50]
+   */
+  scheduleRebuild(delayMs = 50) {
+    if (!this._enabled) return;
+    if (this._rebuildTimeout) clearTimeout(this._rebuildTimeout);
+    this._rebuildTimeout = setTimeout(() => this._rebuildFullTree(), delayMs);
+  }
+
+  /**
+   * Valida un color antes de interpolarlo en CSS / atributos SVG.
+   * @param {*} color
+   * @returns {string|null}
+   * @private
+   */
+  _sanitizeColor_(color) {
+    const value = typeof color === 'string' ? color.trim() : '';
+    return value && GasFolders.COLOR_RE.test(value) ? value : null;
   }
 
   /**
@@ -58,8 +94,9 @@ class GasFolders {
    * @param {string} color
    */
   setColor(color) {
-    if (!color) return;
-    this._folderColor = color;
+    const safe = this._sanitizeColor_(color);
+    if (!safe) return;
+    this._folderColor = safe;
     if (this._enabled) this._updateStyles_();
   }
 
@@ -72,16 +109,14 @@ class GasFolders {
     if (!colors || typeof colors !== 'object') return;
     let changed = false;
     for (const key of ['gs', 'html', 'json', 'generic']) {
-      if (typeof colors[key] === 'string' && colors[key]) {
-        this._fileColors[key] = colors[key];
+      const safe = this._sanitizeColor_(colors[key]);
+      if (safe) {
+        this._fileColors[key] = safe;
         changed = true;
       }
     }
     if (!changed) return;
-    if (this._enabled) {
-      if (this._rebuildTimeout) clearTimeout(this._rebuildTimeout);
-      this._rebuildTimeout = setTimeout(() => this._rebuildFullTree(), 50);
-    }
+    this.scheduleRebuild(50);
   }
 
   /** Activa el componente: estilos, observers y primer rebuild. */
@@ -102,29 +137,17 @@ class GasFolders {
     if (this._observer)    { this._observer.disconnect();    this._observer    = null; }
     if (this._docObserver) { this._docObserver.disconnect(); this._docObserver = null; }
     if (this._rebuildTimeout) { clearTimeout(this._rebuildTimeout); this._rebuildTimeout = null; }
+    if (this._docCheckTimer)  { clearTimeout(this._docCheckTimer);  this._docCheckTimer  = null; }
     this._restoreOriginalList();
     this._rootLists = [];
-  }
-
-  /**
-   * El componente respeta el modo dark del IDE leído desde dos clases
-   * del body: la nuestra (`gc__is-dark-mode`) y la oficial de GAS
-   * (`ide-dark-mode`).
-   * @returns {boolean}
-   * @private
-   */
-  _isEditorDark_() {
-    const cl = document.body.classList;
-    return cl.contains('gc__is-dark-mode') || cl.contains('ide-dark-mode');
   }
 
   /** @private */
   _injectStyles() { this._updateStyles_(); }
 
   /**
-   * Crea o actualiza el `<style>` global. Las variables de color y el
-   * color de las líneas del árbol se recalculan cada vez para reflejar
-   * cambios de tema o de configuración sin recargar la página.
+   * Crea o actualiza el `<style>` global (color de carpeta configurable).
+   * Las líneas del árbol usan `--gt-outline-variant`: siguen el tema solas.
    * @private
    */
   _updateStyles_() {
@@ -134,15 +157,9 @@ class GasFolders {
       style.id = 'gas-folders-styles';
       document.head.appendChild(style);
     }
-    const lineOpacity = 0.3;
-    const dark        = this._isEditorDark_();
-    const lineColor   = dark
-      ? `rgba(255,255,255,${lineOpacity})`
-      : `rgba(0,0,0,${lineOpacity})`;
     style.textContent = `
       :root {
         --qc-folder-color : ${this._folderColor};
-        --qc-tree-line    : ${lineColor};
       }
       li[role="option"] > img,
       li[role="option"] > svg,
@@ -207,7 +224,7 @@ class GasFolders {
         top            : 0;
         bottom         : 0;
         width          : 1px;
-        border-left    : 1px dotted var(--qc-tree-line);
+        border-left    : 1px dotted var(--gt-outline-variant);
         pointer-events : none;
         z-index        : 1;
       }
@@ -222,7 +239,7 @@ class GasFolders {
         top            : 18px;
         width          : 14px;
         height         : 1px;
-        border-top     : 1px dotted var(--qc-tree-line);
+        border-top     : 1px dotted var(--gt-outline-variant);
         pointer-events : none;
         z-index        : 1;
       }
@@ -307,10 +324,17 @@ class GasFolders {
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      body.gc__is-dark-mode .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""])::before,
-      body.ide-dark-mode .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""])::before {
-        color: var(--gm3-sys-color-on-surface, #e8eaed);
-        -webkit-text-fill-color: var(--gm3-sys-color-on-surface, #e8eaed);
+      body.qc__is-dark-mode .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"] div[title][data-name]:not([data-name=""])::before {
+        color: var(--gt-on-surface, #e8eaed);
+        -webkit-text-fill-color: var(--gt-on-surface, #e8eaed);
+      }
+      /* Modo oscuro: --gm3-* vale siempre el claro en GAS; usamos tokens --gt-*. */
+      body.qc__is-dark-mode .${GasFolders.FOLDER_HEADER_CLASS}:hover,
+      body.qc__is-dark-mode .${GasFolders.FOLDER_CHILDREN_CLASS} li[role="option"]:hover {
+        background-color: var(--gt-state-hover);
+      }
+      body.qc__is-dark-mode .${GasFolders.FOLDER_CHEVRON_CLASS} {
+        color: var(--gt-on-surface-variant);
       }
       .${GasFolders.FOLDER_CHILDREN_CLASS} li.qc-renaming div[title]::before {
         display: none !important;
@@ -334,14 +358,62 @@ class GasFolders {
   }
 
   /**
+   * Raíz DOM del panel SPA activo (`c-wiz` visible y no busy). Devuelve
+   * `null` si no hay ninguna identificable.
+   * @returns {HTMLElement|null}
+   * @private
+   */
+  _getActiveRoot_() {
+    const containers = document.querySelectorAll('c-wiz[data-p]');
+    if (containers.length === 1 && containers[0].getAttribute('aria-hidden') !== 'true') {
+      return containers[0];
+    }
+    return document.querySelector('c-wiz[data-p][aria-busy="false"]:not([aria-hidden="true"])')
+      || document.querySelector('c-wiz[data-p]:not([aria-hidden="true"]):not([aria-busy="true"])');
+  }
+
+  /**
+   * Devuelve los `<ul role="listbox">` con ítems del panel activo. Si la
+   * `c-wiz` activa no contiene ninguno (o no existe), cae a `document`.
+   * @returns {HTMLUListElement[]}
+   * @private
+   */
+  _queryValidLists_() {
+    const collect = (scope) => Array.from(scope.querySelectorAll('ul[role="listbox"]'))
+      .filter(ul => ul.querySelector('li[role="option"]'));
+    const root = this._getActiveRoot_();
+    if (root) {
+      const scoped = collect(root);
+      if (scoped.length) return scoped;
+    }
+    return collect(document);
+  }
+
+  /**
+   * Comprueba (throttled) si GAS reemplazó los UL del árbol y, de ser
+   * así, reengancha observers y reconstruye.
+   * @private
+   */
+  _checkListsReplaced_() {
+    this._docCheckTimer = null;
+    if (!this._enabled || this._isRebuilding) return;
+    const currentUls = this._queryValidLists_();
+    const hasChanges = currentUls.length !== this._rootLists.length ||
+                       currentUls.some((ul, i) => ul !== this._rootLists[i]);
+    if (hasChanges) {
+      this._startObserving();
+      this._rebuildFullTree();
+    }
+  }
+
+  /**
    * Localiza los `<ul role="listbox">` y conecta los observers.
    * Reintenta hasta `MAX_RETRY_ATTEMPTS` mientras los UL no tengan ítems.
    * @private
    */
   _startObserving() {
     if (!this._enabled) return;
-    const uls = Array.from(document.querySelectorAll('ul[role="listbox"]'));
-    const validUls = uls.filter(ul => ul.querySelector('li[role="option"]'));
+    const validUls = this._queryValidLists_();
     if (validUls.length === 0) {
       this._retryCount++;
       if (this._retryCount > GasFolders.MAX_RETRY_ATTEMPTS) {
@@ -366,11 +438,6 @@ class GasFolders {
       if (!this._enabled) return;
 
       this._syncRenamingState_(mutations);
-
-      const themeChanged = mutations.some(
-        m => m.target === document.body && m.attributeName === 'class'
-      );
-      if (themeChanged) this._updateStyles_();
 
       // Si el usuario está renombrando, ignoramos cualquier rebuild: el
       // rebuild reescribe el subárbol del li y rompería la edición.
@@ -427,8 +494,7 @@ class GasFolders {
           this._dirtyDuringRebuild = true;
           return;
         }
-        if (this._rebuildTimeout) clearTimeout(this._rebuildTimeout);
-        this._rebuildTimeout = setTimeout(() => this._rebuildFullTree(), 100);
+        this.scheduleRebuild(100);
       }
     });
 
@@ -441,23 +507,25 @@ class GasFolders {
       attributes: true, attributeFilter: ['class']
     });
 
-    // Observador secundario para detectar reemplazos del UL en navegaciones SPA.
+    // Observador secundario para detectar reemplazos del UL en navegaciones
+    // SPA. Observa todo el body (Monaco muta en cada keystroke), así que el
+    // callback es O(1) mientras haya un chequeo pendiente y el trabajo real
+    // (querySelectorAll acotado a la c-wiz activa) corre como mucho una vez
+    // por ventana de throttle.
     this._docObserver = new MutationObserver((mutations) => {
-      if (!this._enabled) return;
+      if (!this._enabled || this._docCheckTimer) return;
       const externalMutation = mutations.some(m => {
         const el = /** @type {Element} */ (m.target);
-        return !el.closest?.(`.${GasFolders.FOLDER_CLASS}`) &&
-               !el.closest?.(`.${GasFolders.FOLDER_CHILDREN_CLASS}`);
+        if (!el.closest) return false;
+        return !el.closest('.monaco-editor') &&
+               !el.closest(`.${GasFolders.FOLDER_CLASS}`) &&
+               !el.closest(`.${GasFolders.FOLDER_CHILDREN_CLASS}`);
       });
       if (!externalMutation) return;
-      const currentUls = Array.from(document.querySelectorAll('ul[role="listbox"]'))
-        .filter(ul => ul.querySelector('li[role="option"]'));
-      const hasChanges = currentUls.length !== this._rootLists.length ||
-                         currentUls.some((ul, i) => ul !== this._rootLists[i]);
-      if (hasChanges) {
-        this._startObserving();
-        this._rebuildFullTree();
-      }
+      this._docCheckTimer = setTimeout(
+        () => this._checkListsReplaced_(),
+        GasFolders.DOC_CHECK_THROTTLE_MS,
+      );
     });
     this._docObserver.observe(document.body, { childList: true, subtree: true });
   }
@@ -472,8 +540,7 @@ class GasFolders {
 
     // Aborta si hay un rename abierto: lo reintenta en 200 ms.
     if (this._isAnyItemRenaming_()) {
-      if (this._rebuildTimeout) clearTimeout(this._rebuildTimeout);
-      this._rebuildTimeout = setTimeout(() => this._rebuildFullTree(), 200);
+      this.scheduleRebuild(200);
       return;
     }
 
@@ -586,8 +653,9 @@ class GasFolders {
     iconWrapper.className = GasFolders.FOLDER_ICON_WRAPPER;
     DomUtils.setHTML(iconWrapper, GasFolders.SVG_FOLDER_OPEN);
 
+    // `name` viene del título del archivo: texto plano, nunca HTML.
     const label = document.createElement('span');
-    DomUtils.setHTML(label, name);
+    label.textContent = name;
     label.style.flex = '1';
 
     header.appendChild(chevron);
@@ -802,6 +870,9 @@ class GasFolders {
   if (typeof window !== 'undefined') window.gasFolders = folders;
 
   let initialConfigApplied = false;
+  // Pausa global propia: los deltas no deben reactivar el servicio en pausa.
+  let paused = false;
+  const isPaused_ = () => paused || window.__gasGloballyDisabled === true;
 
   // Configuración inicial. El guard evita que navegaciones SPA pisen
   // los cambios que el usuario ya hizo en runtime.
@@ -811,7 +882,8 @@ class GasFolders {
     try {
       const data     = JSON.parse(e.detail);
       const settings = data.settings || {};
-      if (settings['gas-folders']) {
+      if (settings['global-enable'] === false) paused = true;
+      if (settings['gas-folders'] && !paused) {
         if (settings['gas-folders-color']) {
           folders.setColor(settings['gas-folders-color']);
         }
@@ -831,15 +903,18 @@ class GasFolders {
   document.addEventListener('GAS_SettingsUpdated', (e) => {
     try {
       const options = JSON.parse(e.detail);
+      if ('global-enable' in options) {
+        paused = !options['global-enable'];
+        if (paused) { folders.disable(); return; }
+      } else if (isPaused_()) {
+        return;
+      }
       if ('gas-folders' in options) {
         options['gas-folders'] ? folders.enable() : folders.disable();
       }
       if ('gas-folders-color' in options) {
         folders.setColor(options['gas-folders-color']);
-        if (folders._enabled && folders._rootLists?.length) {
-          if (folders._rebuildTimeout) clearTimeout(folders._rebuildTimeout);
-          folders._rebuildTimeout = setTimeout(() => folders._rebuildFullTree(), 50);
-        }
+        if (folders.enabled && folders.hasRootLists()) folders.scheduleRebuild(50);
       }
       if (
         'gas-file-gs-color'   in options ||
@@ -852,17 +927,16 @@ class GasFolders {
           json: options['gas-file-json-color'],
         });
       }
-      if ('global-enable' in options && !options['global-enable']) {
-        folders.disable();
-      }
     } catch (err) {
       console.warn('[GasFolders] Error en GAS_SettingsUpdated:', err);
     }
   });
 
   document.addEventListener('GAS_GlobalDisable', () => {
+    paused = true;
     folders.disable();
   });
+  document.addEventListener('GAS_GlobalEnable', () => { paused = false; });
 })();
 
 if (typeof module !== 'undefined' && module.exports) {

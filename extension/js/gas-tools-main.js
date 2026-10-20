@@ -16,6 +16,29 @@
  * este orquestador es simple a propósito para que sea fácil leer el flujo
  * de inicialización de un vistazo.
  */
+
+// Helper puro de settings, fuera del guard para poder testearlo aislado.
+window.GasSettingsDiff = window.GasSettingsDiff || Object.freeze({
+  /**
+   * Devuelve solo las claves de `next` cuyo valor difiere de `prev`.
+   * @param {Object|null} prev Settings vigentes.
+   * @param {Object|null} next Settings nuevos (completos o parciales).
+   * @returns {Object} Delta `{ clave: valorNuevo }`; vacío si no hay cambios.
+   */
+  diffSettings(prev, next) {
+    const before = prev && typeof prev === 'object' ? prev : {};
+    const after  = next && typeof next === 'object' ? next : {};
+    const same = (a, b) => Object.is(a, b)
+      || (typeof a === 'object' && typeof b === 'object' && a !== null && b !== null
+          && JSON.stringify(a) === JSON.stringify(b));
+    const changed = {};
+    Object.keys(after).forEach((key) => {
+      if (!(key in before) || !same(before[key], after[key])) changed[key] = after[key];
+    });
+    return changed;
+  },
+});
+
 ;(() => {
   if (window.__gasToolsInit) return;
   window.__gasToolsInit = true;
@@ -37,6 +60,8 @@
   let G_MONACO_READY       = false;
   /** @type {InstanceType<typeof GasCustomEditor>|null} */
   let G_GAS_TOOLS_INSTANCE = null;
+  // Última copia completa de settings conocida; base para calcular deltas.
+  let G_LAST_SETTINGS = null;
 
   /** Sincroniza la bandera global con el flag expuesto en window. */
   const syncDisabledFlag = (value) => {
@@ -197,6 +222,7 @@
    * @param {Object} data
    */
   function processTransferData_(data) {
+    if (!G_LAST_SETTINGS && data?.settings) G_LAST_SETTINGS = { ...data.settings };
     if (window.__gasToolsBusy) {
       G_PENDING_QUEUE.push(data);
       return;
@@ -280,9 +306,11 @@
       return;
     }
 
-    // Flujo C: primera inicialización.
+    // Flujo C: primera inicialización. G_LAST_SETTINGS incluye los deltas
+    // llegados antes de que Monaco estuviera listo.
     try {
-      G_GAS_TOOLS_INSTANCE = new GasCustomEditor(data);
+      const settings = { ...(data?.settings || {}), ...(G_LAST_SETTINGS || {}) };
+      G_GAS_TOOLS_INSTANCE = new GasCustomEditor({ ...data, settings });
       window._PENDING_GAS_DATA = null;
     } catch (e) {
       console.error('[GASTools] No se pudo construir GasCustomEditor:', e);
@@ -326,9 +354,10 @@
   _listeners.onGlobalDisable = () => syncDisabledFlag(true);
   document.addEventListener(GAS_EVENTS.GLOBAL_DISABLE, _listeners.onGlobalDisable);
 
-  // Cierre de paneles flotantes ante navegación SPA fuera del editor.
+  // Cierre de paneles flotantes ante navegación SPA fuera del editor
+  // (el chat vive en el Side Panel de Chrome y no se cierra desde aquí).
   _listeners.onHidePanels = () => {
-    document.querySelector('gas-chat-panel')?.close?.();
+    DomUtils.closeOtherFloatingPanels();
   };
   document.addEventListener('GAS_HidePanels', _listeners.onHidePanels);
 
@@ -342,21 +371,25 @@
   // dispara `GAS_TransferData` y ese flujo crea la instancia con un
   // pequeño delay). Para no perderlo, marcamos un flag que será leído
   // por `mergeAndReinit` / `init` cuando la instancia esté disponible.
-  _listeners.onReturnToEditor = () => {    
+  //
+  // Antes se recargaba la página siempre (con riesgo de perder cambios sin
+  // guardar). Ahora el reload es solo un respaldo: si tras 4 s la toolbar
+  // no se reinyectó por la vía normal (GAS_TransferData), se recarga.
+  let G_RETURN_CHECK_ID = 0;
+  _listeners.onReturnToEditor = () => {
     window.__gasReturnPending = true;
     G_GAS_TOOLS_INSTANCE?.refreshInitialModel?.();
 
-    // Disparar Ctrl+S para que GAS guarde antes de recargar
-    document.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 's',
-      code: 'KeyS',
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    }));
-
-    // Dar tiempo a GAS para procesar el guardado antes de recargar
-    setTimeout(() => window.location.reload(), 1000);
+    clearTimeout(G_RETURN_CHECK_ID);
+    G_RETURN_CHECK_ID = setTimeout(() => {
+      if (G_GLOBALLY_DISABLED) return;
+      if (location.pathname.indexOf('/edit') === -1) return;
+      const uiPresent = !!document.getElementById('rsBtnChatGas')
+                     || !!document.getElementById('rsBtnCurrentFile');
+      if (uiPresent) return;
+      console.warn('[GASTools] La UI no se reinyectó al volver al editor; recargando.');
+      window.location.reload();
+    }, 4000);
   };
   document.addEventListener('GAS_ReturnToEditor', _listeners.onReturnToEditor);
 
@@ -368,25 +401,36 @@
   };
   document.addEventListener(GAS_EVENTS.TRANSFER_DATA, _listeners.onTransferData);
 
-  // Cambios de settings desde el popup.
+  // Cambios de settings desde el popup (delta o settings completos).
+  // Solo se aplica lo que cambió de verdad: enable()/disable() únicamente
+  // si cambia `global-enable`; el resto, en un solo updateSettings(delta).
   _listeners.onSettingsUpdated = (e) => {
     try {
-      const options = JSON.parse(e.detail);
-      if ('global-enable' in options) {
-        const isEnabled = options['global-enable'];
+      const incoming = JSON.parse(e.detail);
+      if (!incoming || typeof incoming !== 'object') return;
+      const prev = G_LAST_SETTINGS || {};
+      G_LAST_SETTINGS = { ...prev, ...incoming };
+      const changed = window.GasSettingsDiff.diffSettings(prev, G_LAST_SETTINGS);
+      if (!Object.keys(changed).length) return;
+
+      if ('global-enable' in changed) {
+        const isEnabled = changed['global-enable'] === true;
         syncDisabledFlag(!isEnabled);
         if (!isEnabled) {
           G_GAS_TOOLS_INSTANCE?.disable();
           return;
         }
         if (G_GAS_TOOLS_INSTANCE) {
+          // disable() vació el estado interno: enable() reaplica desde options.
+          G_GAS_TOOLS_INSTANCE.options.settings = { ...G_LAST_SETTINGS };
           G_GAS_TOOLS_INSTANCE.enable();
         } else if (window._PENDING_GAS_DATA) {
-          initializeEditor_(window._PENDING_GAS_DATA);
+          initializeEditor_({ ...window._PENDING_GAS_DATA, settings: { ...G_LAST_SETTINGS } });
         }
+        return;
       }
-      if (!G_GAS_TOOLS_INSTANCE) return;
-      G_GAS_TOOLS_INSTANCE.updateSettings(options);
+      if (G_GLOBALLY_DISABLED || !G_GAS_TOOLS_INSTANCE) return;
+      G_GAS_TOOLS_INSTANCE.updateSettings(changed);
     } catch (_) { /* payload inválido; se descarta silenciosamente */ }
   };
   document.addEventListener(GAS_EVENTS.SETTINGS_UPDATED, _listeners.onSettingsUpdated);

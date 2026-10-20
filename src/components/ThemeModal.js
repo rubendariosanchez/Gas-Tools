@@ -1,3 +1,6 @@
+import { tr } from '../js/utils/I18n.js';
+import { icon } from '../js/utils/Icons.js';
+
 /**
  * Componente Web para la creación y edición de temas visuales.
  * Recrea una interfaz de edición estilo Monaco Editor / VS Code.
@@ -222,6 +225,8 @@ export class ThemeModal extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Hoja base de GasUi (clase .gt-icon de los SVG).
+    globalThis.GasUi?.adopt(this.shadowRoot);
     /** @type {string|null} ID del tema en edición (null si es nuevo) */
     this._editingId = null;
     /**
@@ -244,156 +249,183 @@ export class ThemeModal extends HTMLElement {
   /** @private */
   render_() {
     this.shadowRoot.innerHTML = `
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0" />
       <style>
-        * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        * { box-sizing: border-box; font-family: var(--gt-font-plain, Arial, sans-serif); }
         :host {
-          position: fixed; inset: 0; display: none; z-index: 1000;
+          position: fixed; inset: 0; display: none; z-index: var(--gt-z-modal, 2000);
           align-items: center; justify-content: center;
         }
         :host(.qc__active) { display: flex; }
-        .qc__overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(4px); }
+        .qc__overlay { position: absolute; inset: 0; background: var(--gt-scrim, rgba(0, 0, 0, .32)); }
         .qc__modal {
-          position: relative; background: #1e1e1e; width: 95%; max-width: 550px;
-          border-radius: 12px; border: 1px solid #333; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
-          color: #e1e1e1; display: flex; flex-direction: column; max-height: 90vh; overflow: hidden;
+          position: relative; width: 95%; max-width: 550px; max-height: 90vh; overflow: hidden;
+          display: flex; flex-direction: column;
+          background: var(--gt-surface-container-high, #e9eef6);
+          color: var(--gt-on-surface, #1f1f1f);
+          border-radius: var(--gt-shape-xl, 28px);
+          box-shadow: var(--gt-elevation-3, 0 4px 8px rgba(0, 0, 0, .3));
         }
-        .qc__header { padding: 20px; display: flex; justify-content: space-between; align-items: flex-start; }
-        .qc__title { font-size: 18px; font-weight: 600; }
-        .qc__close { background: none; border: none; color: #888; cursor: pointer; padding: 0; }
-        .qc__body { padding: 0 20px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
+        .qc__header { padding: var(--gt-space-5, 24px) var(--gt-space-5, 24px) var(--gt-space-3, 12px); display: flex; justify-content: space-between; align-items: flex-start; }
+        .qc__title { font: var(--gt-type-title-m, 500 16px/24px Arial, sans-serif); }
+        .qc__close {
+          display: flex; padding: 4px; border: none; cursor: pointer;
+          border-radius: var(--gt-shape-full, 9999px);
+          background: none; color: var(--gt-on-surface-variant, #444746);
+        }
+        .qc__close:hover { background: var(--gt-state-hover, rgba(31, 31, 31, .08)); }
+        .qc__body { padding: 0 var(--gt-space-5, 24px) var(--gt-space-5, 24px); overflow-y: auto; display: flex; flex-direction: column; gap: var(--gt-space-5, 24px); }
 
-        .qc__search-container { position: sticky; top: 0; background: #1e1e1e; z-index: 10; padding-bottom: 10px; }
-        .qc__search-input { margin-top: 8px; }
+        .qc__search-container { position: sticky; top: 0; z-index: 10; padding-bottom: 10px; background: var(--gt-surface-container-high, #e9eef6); }
+        .qc__search-input { margin-top: var(--gt-space-2, 8px); }
         .qc__section-label {
-          font-size: 11px; font-weight: 700; color: #555;
-          text-transform: uppercase; margin-bottom: 10px;
           display: flex; justify-content: space-between; align-items: center;
+          margin-bottom: 10px;
+          font: var(--gt-type-label-s, 500 11px/16px Arial, sans-serif);
+          color: var(--gt-on-surface-variant, #444746);
+          text-transform: uppercase;
         }
-        .qc__form-row { display: flex; gap: 12px; width: 100%; align-items: flex-end; }
+        .qc__form-row { display: flex; gap: var(--gt-space-3, 12px); width: 100%; align-items: flex-end; }
         .qc__field { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-        .qc__field label { font-size: 11px; color: #777; font-weight: 600; }
+        .qc__field label { font: var(--gt-type-label-s, 500 11px/16px Arial, sans-serif); color: var(--gt-on-surface-variant, #444746); }
 
         input[type="text"], select {
-          background: #252526; border: 1px solid #333; border-radius: 6px;
-          color: #fff; padding: 8px 12px; font-size: 13px; outline: none; width: 100%;
+          width: 100%; padding: 8px 12px; outline: none;
+          background: var(--gt-surface, #ffffff); color: var(--gt-on-surface, #1f1f1f);
+          border: 1px solid var(--gt-outline, #747775); border-radius: var(--gt-shape-xs, 4px);
+          font: var(--gt-type-body-m, 400 14px/20px Arial, sans-serif);
         }
+        input[type="text"]:focus-visible, select:focus-visible { outline: 2px solid var(--gt-primary, #0b57d0); outline-offset: -1px; }
         .qc__colors-grid {
-          background: #252526; border-radius: 8px; padding: 15px;
           display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
-          max-height: 280px; overflow-y: auto; border: 1px solid #333;
+          max-height: 280px; overflow-y: auto; padding: 15px;
+          background: var(--gt-surface-container, #f0f4f9);
+          border: 1px solid var(--gt-outline-variant, #c4c7c5);
+          border-radius: var(--gt-shape-s, 8px);
         }
 
-        /* Color item ahora con botón de eliminar */
+        /* Color item con botón de eliminar */
         .qc__color-item {
-          display: flex; align-items: center; gap: 6px;
-          font-size: 10px; color: #aaa; background: #1e1e1e;
-          padding: 5px 6px; border-radius: 4px; border: 1px solid #333;
-          position: relative;
+          position: relative; display: flex; align-items: center; gap: 6px;
+          padding: 5px 6px;
+          font-size: 10px; color: var(--gt-on-surface-variant, #444746);
+          background: var(--gt-surface, #ffffff);
+          border: 1px solid var(--gt-outline-variant, #c4c7c5);
+          border-radius: var(--gt-shape-xs, 4px);
         }
-        .qc__color-item:hover .qc__color-remove { opacity: 1; }
+        .qc__color-item:hover .qc__color-remove,
+        .qc__color-remove:focus-visible { opacity: 1; }
         .qc__color-remove {
-          background: none; border: none; color: #ef4444;
-          cursor: pointer; padding: 0; line-height: 1;
-          font-size: 14px; opacity: 0; transition: opacity 0.15s;
-          margin-left: auto; flex-shrink: 0; display: flex; align-items: center;
+          display: flex; align-items: center; flex-shrink: 0; margin-left: auto;
+          padding: 0; border: none; background: none; cursor: pointer; line-height: 1;
+          color: var(--gt-error, #b3261e);
+          opacity: 0; transition: opacity var(--gt-motion-duration, 150ms) var(--gt-motion-standard, ease);
         }
         .qc__color-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
         input[type="color"] {
-          appearance: none; width: 22px; height: 22px; border: none;
-          border-radius: 3px; cursor: pointer; background: none; padding: 0; flex-shrink: 0;
+          appearance: none; width: 22px; height: 22px; padding: 0; flex-shrink: 0;
+          border: none; border-radius: 3px; background: none; cursor: pointer;
         }
 
-        /* Panel de añadir colores */
+        /* Panel de añadir colores (anclado al botón) */
+        .qc__add-color-anchor { position: relative; }
         .qc__add-color-panel {
-          position: absolute;
-          top: calc(100% + 10px);   /* ← anclado al botón, no al fondo del modal */
-          right: 0;                 /* ← alineado a la derecha del botón */
-          width: 322px;
-          background: #252526;
-          border: 1px solid #444;
-          border-radius: 8px;
-          padding: 12px;
-          display: none;
-          flex-direction: column;
-          gap: 8px;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06), 0 0 20px rgba(255,255,255,0.04);
-          z-index: 200;             /* ← más alto para pasar sobre el grid */
-        }
-        .qc__add-color-panel::before {
-          content: '';
-          position: absolute;
-          top: -6px;
-          right: 12px;
-          width: 10px;
-          height: 10px;
-          background: #252526;
-          border-left: 1px solid #444;
-          border-top: 1px solid #444;
-          transform: rotate(45deg);
+          position: absolute; top: calc(100% + 10px); right: 0; z-index: var(--gt-z-popover, 1000);
+          width: 322px; padding: var(--gt-space-3, 12px);
+          display: none; flex-direction: column; gap: var(--gt-space-2, 8px);
+          background: var(--gt-surface-container, #f0f4f9);
+          border-radius: var(--gt-shape-xs, 4px);
+          box-shadow: var(--gt-elevation-2, 0 2px 6px rgba(0, 0, 0, .15));
         }
         .qc__add-color-panel.qc__open { display: flex; }
         .qc__add-color-search {
-          background: #1e1e1e; border: 1px solid #444; border-radius: 4px;
-          color: #fff; padding: 6px 10px; font-size: 12px; outline: none; width: 100%;
+          width: 100%; padding: 6px 10px; outline: none;
+          background: var(--gt-surface, #ffffff); color: var(--gt-on-surface, #1f1f1f);
+          border: 1px solid var(--gt-outline, #747775); border-radius: var(--gt-shape-xs, 4px);
+          font: var(--gt-type-body-s, 400 12px/16px Arial, sans-serif);
         }
-        .qc__add-color-list {
-          max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px;
-        }
+        .qc__add-color-list { max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
         .qc__add-color-option {
-          display: flex; align-items: center; gap: 8px; padding: 5px 8px;
-          border-radius: 4px; cursor: pointer; font-size: 11px; color: #bbb;
-          border: none; background: none; text-align: left; width: 100%;
+          display: flex; align-items: center; gap: var(--gt-space-2, 8px); width: 100%;
+          padding: 5px 8px; border: none; background: none; text-align: left; cursor: pointer;
+          border-radius: var(--gt-shape-xs, 4px);
+          font-size: 11px; color: var(--gt-on-surface, #1f1f1f);
         }
-        .qc__add-color-option:hover { background: #2d2d2d; color: #fff; }
-        .qc__add-color-swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; border: 1px solid #555; }
-        .qc__add-color-option.qc__already-added { opacity: 0.35; cursor: default; pointer-events: none; }
+        .qc__add-color-option:hover { background: var(--gt-state-hover, rgba(31, 31, 31, .08)); }
+        .qc__add-color-swatch { width: 12px; height: 12px; flex-shrink: 0; border-radius: 2px; border: 1px solid var(--gt-outline, #747775); }
+        .qc__add-color-option.qc__already-added { opacity: .38; cursor: default; pointer-events: none; }
+        .qc__add-color-added { margin-left: auto; font-size: 10px; color: var(--gt-on-surface-variant, #444746); }
+        .qc__add-color-empty { padding: var(--gt-space-2, 8px); font-size: 11px; color: var(--gt-on-surface-variant, #444746); }
 
-        /* Botones de acción de la sección de colores */
-        .qc__color-actions { display: flex; gap: 8px; align-items: center; }
-        .qc__btn-add-color {
-          font-size: 10px; font-weight: 700; color: #007ACC;
-          background: none; border: none; cursor: pointer; padding: 0;
-          text-transform: uppercase; letter-spacing: 0.5px;
+        /* Botones de texto de las secciones */
+        .qc__color-actions { display: flex; gap: var(--gt-space-2, 8px); align-items: center; }
+        .qc__btn-add-color,
+        .qc__btn-add-rule {
+          padding: 0; border: none; background: none; cursor: pointer;
+          font: var(--gt-type-label-s, 500 11px/16px Arial, sans-serif);
+          color: var(--gt-primary, #0b57d0);
+          text-transform: uppercase;
         }
         .qc__btn-reset-colors {
-          font-size: 10px; color: #555; background: none;
-          border: none; cursor: pointer; padding: 0;
-          text-transform: uppercase; letter-spacing: 0.5px;
+          padding: 0; border: none; background: none; cursor: pointer;
+          font: var(--gt-type-label-s, 500 11px/16px Arial, sans-serif);
+          color: var(--gt-on-surface-variant, #444746);
+          text-transform: uppercase;
         }
-        .qc__btn-reset-colors:hover { color: #888; }
+        .qc__btn-reset-colors:hover { color: var(--gt-on-surface, #1f1f1f); }
 
-        .qc__rule-row { display: flex; gap: 8px; align-items: center; background: #252526; padding: 6px; border-radius: 6px; }
-        .qc__rule-row input[type="text"] { flex: 1; border: none; background: transparent; padding: 4px; color: white; }
+        .qc__rules-list { display: flex; flex-direction: column; gap: var(--gt-space-2, 8px); margin-bottom: var(--gt-space-3, 12px); }
+        .qc__rule-row {
+          display: flex; gap: var(--gt-space-2, 8px); align-items: center; padding: 6px;
+          background: var(--gt-surface-container, #f0f4f9);
+          border-radius: var(--gt-shape-s, 8px);
+        }
+        .qc__rule-row input[type="text"] { flex: 1; padding: 4px; border: none; background: transparent; }
         .qc__rule-select {
           width: auto; padding: 4px 8px; font-size: 11px;
-          background: #1a1a1a; color: #bbb; border: 1px solid #444; border-radius: 4px;
+          background: var(--gt-surface, #ffffff); color: var(--gt-on-surface, #1f1f1f);
+          border: 1px solid var(--gt-outline-variant, #c4c7c5); border-radius: var(--gt-shape-xs, 4px);
+        }
+        .qc__rule-delete {
+          display: flex; padding: 2px; border: none; background: none; cursor: pointer;
+          color: var(--gt-error, #b3261e);
         }
         .qc__inherit-container {
-          display: flex; align-items: center; justify-content: center; gap: 10px;
-          padding: 10px; background: #252526; border-radius: 8px; border: 1px dashed #444;
+          display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px;
+          border: 1px dashed var(--gt-outline-variant, #c4c7c5);
+          border-radius: var(--gt-shape-s, 8px);
         }
-        .qc__checkbox-field { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 11px; color: #888; font-weight: 700; text-transform: uppercase; }
-        .qc__footer { padding: 16px 20px; border-top: 1px solid #333; display: flex; gap: 12px; }
-        .qc__btn { padding: 10px 20px; border-radius: 6px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; flex: 1; }
-        .qc__btn--primary { background: #007ACC; color: white; }
-        .qc__btn--secondary { background: #333; color: white; }
+        .qc__checkbox-field {
+          display: flex; align-items: center; gap: var(--gt-space-2, 8px); cursor: pointer; user-select: none;
+          font: var(--gt-type-label-s, 500 11px/16px Arial, sans-serif);
+          color: var(--gt-on-surface-variant, #444746);
+          text-transform: uppercase;
+        }
+        .qc__footer { padding: var(--gt-space-4, 16px) var(--gt-space-5, 24px); display: flex; justify-content: flex-end; gap: var(--gt-space-2, 8px); }
+        .qc__btn {
+          height: 36px; padding: 0 var(--gt-space-5, 24px); border: none; cursor: pointer;
+          border-radius: var(--gt-shape-full, 9999px);
+          font: var(--gt-type-title-s, 500 14px/20px Arial, sans-serif);
+        }
+        .qc__btn--primary { background: var(--gt-primary, #0b57d0); color: var(--gt-on-primary, #ffffff); }
+        .qc__btn--secondary { background: transparent; color: var(--gt-primary, #0b57d0); }
+        .qc__btn--secondary:hover { background: var(--gt-state-hover, rgba(31, 31, 31, .08)); }
+        button:focus-visible { outline: 2px solid var(--gt-primary, #0b57d0); outline-offset: 2px; }
       </style>
       <div class="qc__overlay"></div>
-      <div class="qc__modal">
+      <div class="qc__modal" role="dialog" aria-modal="true" aria-labelledby="qc-theme-title">
         <div class="qc__header">
-          <div><div class="qc__title">Edit Theme</div></div>
-          <button class="qc__close"><span class="material-symbols-outlined">close</span></button>
+          <div><div class="qc__title" id="qc-theme-title">${tr('themeModalTitle', 'Edit Theme')}</div></div>
+          <button type="button" class="qc__close" aria-label="${tr('btnCancel', 'Cancel')}">${icon('close', 20)}</button>
         </div>
         <div class="qc__body" id="modal-body">
           <div class="qc__form-row">
             <div class="qc__field">
-              <label>THEME NAME *</label>
-              <input type="text" id="theme-name" placeholder="My Custom Theme" required>
+              <label for="theme-name">${tr('labelThemeName', 'THEME NAME *')}</label>
+              <input type="text" id="theme-name" placeholder="${tr('placeholderThemeName', 'My Custom Theme')}" required>
             </div>
             <div class="qc__field">
-              <label>BASE THEME</label>
+              <label for="base-theme">${tr('labelBaseTheme', 'BASE THEME')}</label>
               <select id="base-theme">
                 <option value="vs-dark">vs-dark (Dark)</option>
                 <option value="vs">vs (Light)</option>
@@ -405,20 +437,20 @@ export class ThemeModal extends HTMLElement {
           <section>
             <div class="qc__search-container">
               <div class="qc__section-label">
-                <span>Editor &amp; UI Colors</span>
+                <span>${tr('themeColorsSection', 'Editor & UI Colors')}</span>
                 <div class="qc__color-actions">
-                  <button class="qc__btn-reset-colors" id="reset-colors" title="Restore default color set">Reset</button>
-                  <div style="position: relative;">
-                    <button class="qc__btn-add-color" id="toggle-add-color">+ Add Color</button>
+                  <button type="button" class="qc__btn-reset-colors" id="reset-colors" title="${tr('resetColorsTooltip', 'Restore default color set')}">${tr('btnResetColors', 'Reset')}</button>
+                  <div class="qc__add-color-anchor">
+                    <button type="button" class="qc__btn-add-color" id="toggle-add-color" aria-expanded="false" aria-controls="add-color-panel">+ ${tr('btnAddColor', 'Add Color')}</button>
                     <!-- Panel para agregar nuevos colores -->
                     <div class="qc__add-color-panel" id="add-color-panel">
-                      <input type="text" class="qc__add-color-search" id="add-color-search" placeholder="Search to add (ex: sidebar, tab)...">
+                      <input type="text" class="qc__add-color-search" id="add-color-search" placeholder="${tr('placeholderAddColorSearch', 'Search to add (ex: sidebar, tab)...')}">
                       <div class="qc__add-color-list" id="add-color-list"></div>
                     </div>
                   </div>
                 </div>
               </div>
-              <input type="text" id="color-search" class="qc__search-input" placeholder="Search color property (ex: activityBar)...">
+              <input type="text" id="color-search" class="qc__search-input" aria-label="${tr('placeholderColorSearch', 'Search color property (ex: activityBar)...')}" placeholder="${tr('placeholderColorSearch', 'Search color property (ex: activityBar)...')}">
             </div>
 
             <div class="qc__colors-grid" id="ui-colors-grid"></div>
@@ -426,21 +458,21 @@ export class ThemeModal extends HTMLElement {
 
           <section>
             <div class="qc__section-label">
-              Syntax Token Rules
-              <span style="color: #007ACC; cursor: pointer; font-size: 10px;" id="add-rule">+ ADD RULE</span>
+              ${tr('themeRulesSection', 'Syntax Token Rules')}
+              <button type="button" class="qc__btn-add-rule" id="add-rule">+ ${tr('btnAddRule', 'ADD RULE')}</button>
             </div>
-            <div id="rules-list" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;"></div>
+            <div id="rules-list" class="qc__rules-list"></div>
             <div class="qc__inherit-container">
               <label class="qc__checkbox-field">
                 <input type="checkbox" id="theme-inherit">
-                <span>Inherit basic rules from base theme</span>
+                <span>${tr('themeInherit', 'Inherit basic rules from base theme')}</span>
               </label>
             </div>
           </section>
         </div>
         <div class="qc__footer">
-          <button class="qc__btn qc__btn--secondary" id="cancel">Cancel</button>
-          <button class="qc__btn qc__btn--primary" id="save">Save Theme</button>
+          <button type="button" class="qc__btn qc__btn--secondary" id="cancel">${tr('btnCancel', 'Cancel')}</button>
+          <button type="button" class="qc__btn qc__btn--primary" id="save">${tr('btnSaveTheme', 'Save Theme')}</button>
         </div>
       </div>
     `;
@@ -460,6 +492,7 @@ export class ThemeModal extends HTMLElement {
     get('toggle-add-color').onclick = () => {
       const panel = get('add-color-panel');
       panel.classList.toggle('qc__open');
+      get('toggle-add-color').setAttribute('aria-expanded', String(panel.classList.contains('qc__open')));
       if (panel.classList.contains('qc__open')) {
         this.renderAddColorList_('');
         get('add-color-search').value = '';
@@ -523,8 +556,8 @@ export class ThemeModal extends HTMLElement {
         item.innerHTML = `
           <input type="color" value="${value}" data-monaco="${colorConfig.id}">
           <span class="qc__color-label" title="${colorConfig.id}">${colorConfig.label}</span>
-          <button class="qc__color-remove" title="Remove" aria-label="Remove ${colorConfig.label}">
-            <span class="material-symbols-outlined" style="font-size:14px">close</span>
+          <button type="button" class="qc__color-remove" title="${tr('btnRemove', 'Remove')}" aria-label="${tr('btnRemove', 'Remove')} ${colorConfig.label}">
+            ${icon('close', 14)}
           </button>
         `;
         item.querySelector('.qc__color-remove').onclick = () => {
@@ -561,7 +594,10 @@ export class ThemeModal extends HTMLElement {
     );
 
     if (filtered.length === 0) {
-      list.innerHTML = `<div style="font-size:11px;color:#555;padding:8px;">No results for "${query}"</div>`;
+      const empty = document.createElement('div');
+      empty.className = 'qc__add-color-empty';
+      empty.textContent = tr('noResultsFor', 'No results for "$1"', [query]);
+      list.appendChild(empty);
       return;
     }
 
@@ -571,9 +607,9 @@ export class ThemeModal extends HTMLElement {
       btn.className = `qc__add-color-option${isActive ? ' qc__already-added' : ''}`;
       const swatchColor = this.cleanColor_(this._colorValues[colorConfig.id] || colorConfig.default);
       btn.innerHTML = `
-        <span class="qc__add-color-swatch" style="background:${swatchColor}"></span>
+        <span class="qc__add-color-swatch" style="background:${swatchColor}" aria-hidden="true"></span>
         <span>${colorConfig.id}</span>
-        ${isActive ? '<span style="margin-left:auto;font-size:10px;color:#555">Added</span>' : ''}
+        ${isActive ? `<span class="qc__add-color-added">${tr('colorAdded', 'Added')}</span>` : ''}
       `;
       if (!isActive) {
         btn.onclick = () => {
@@ -613,14 +649,14 @@ export class ThemeModal extends HTMLElement {
     row.className = 'qc__rule-row';
     const validColor = this.cleanColor_(color);
     row.innerHTML = `
-      <input type="color" value="${validColor}" class="rule-color">
-      <input type="text" value="${token}" placeholder="token.name" class="rule-token" required>
+      <input type="color" value="${validColor}" class="rule-color" aria-label="${tr('labelColor', 'Color')}">
+      <input type="text" value="${token}" placeholder="token.name" class="rule-token" aria-label="token" required>
       <select class="qc__rule-select rule-font">
-        <option value="normal" ${fontStyle === 'normal' ? 'selected' : ''}>Normal</option>
-        <option value="bold" ${fontStyle === 'bold' ? 'selected' : ''}>Bold</option>
-        <option value="italic" ${fontStyle === 'italic' ? 'selected' : ''}>Italic</option>
+        <option value="normal" ${fontStyle === 'normal' ? 'selected' : ''}>${tr('fontStyleNormal', 'Normal')}</option>
+        <option value="bold" ${fontStyle === 'bold' ? 'selected' : ''}>${tr('fontStyleBold', 'Bold')}</option>
+        <option value="italic" ${fontStyle === 'italic' ? 'selected' : ''}>${tr('fontStyleItalic', 'Italic')}</option>
       </select>
-      <span class="material-symbols-outlined delete-rule" style="color: #ef4444; font-size: 18px; cursor: pointer;">delete</span>
+      <button type="button" class="qc__rule-delete delete-rule" aria-label="${tr('btnDelete', 'Delete')}">${icon('trash', 18)}</button>
     `;
     row.querySelector('.delete-rule').onclick = () => row.remove();
     container.appendChild(row);
@@ -779,7 +815,7 @@ export class ThemeModal extends HTMLElement {
   handleSave_() {
     const data = this.getFormData_();
     if (!data.text) {
-      alert("Please enter a Theme Name.");
+      alert(tr('alertThemeNameRequired', 'Please enter a Theme Name.'));
       return;
     }
     this.dispatchEvent(new CustomEvent('save-theme', { detail: data, bubbles: true, composed: true }));

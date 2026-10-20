@@ -12,13 +12,91 @@
  * API pública: `open(anchor)`, `close()`, `toggle(anchor)`, `refresh()`.
  *
  * Convenciones:
- *  - Clases CSS con prefijo `qc__` (Shadow DOM aislado).
- *  - Iconos Material Icons, igual que el resto del IDE.
+ *  - Clases CSS con prefijo `qc__` (Shadow DOM aislado) sobre `GasUi.BASE_CSS`.
+ *  - Iconos SVG del registro compartido (`GasUi.icon`).
  */
 class GasActionsPanel extends HTMLElement {
 
   /** Clave del flag persistente "ocultar árbol de archivos". */
   static STORAGE_KEY_HIDE_TREE = 'qc__hideFileTree';
+
+  /** Selector del botón ancla (la toolbar puede reinyectarse). */
+  static ANCHOR_SELECTOR = '#rsBtnActionsGas';
+
+  /** CSS del popover (sobre `GasUi.BASE_CSS`). */
+  static STYLES = `
+    :host {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: var(--gt-z-popover);
+      pointer-events: none;
+      font-family: var(--gt-font-plain);
+    }
+
+    .qc__popover { pointer-events: auto; }
+    .qc__pop-body { padding: 6px; }
+
+    .qc__group-title {
+      font: var(--gt-type-label-s);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--gt-on-surface-variant);
+      padding: 6px var(--gt-space-2) var(--gt-space-1);
+    }
+
+    .qc__action { gap: 10px; font-size: 12px; }
+    .qc__action-icon {
+      display: inline-flex;
+      flex: 0 0 auto;
+      color: var(--gt-on-surface-variant);
+    }
+    .qc__action-label { flex: 1 1 auto; }
+    .qc__action-meta {
+      flex: 0 0 auto;
+      font-size: 11px;
+      color: var(--gt-on-surface-variant);
+    }
+
+    .qc__pill {
+      display: inline-block;
+      padding: 2px var(--gt-space-2);
+      border-radius: var(--gt-shape-full);
+      font: var(--gt-type-label-s);
+      font-size: 10px;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
+    .qc__pill.qc__on  { background: var(--gt-success-container); color: var(--gt-on-success-container); }
+    .qc__pill.qc__off { background: var(--gt-surface-container); color: var(--gt-on-surface-variant); }
+
+    .qc__action.qc__danger,
+    .qc__action.qc__danger .qc__action-icon { color: var(--gt-error); }
+    .qc__action.qc__danger:hover:not(:disabled) { background: color-mix(in srgb, var(--gt-error) 8%, transparent); }
+
+    /* Fila estática: el Script ID queda oculto; solo se copia. */
+    .qc__row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 2px var(--gt-space-1) 2px var(--gt-space-3);
+      font-size: 12px;
+      color: var(--gt-on-surface);
+    }
+    .qc__row .qc__action-label { flex: 1 1 auto; }
+    .qc__row .gt-icon-btn { color: var(--gt-primary); }
+    .qc__row .gt-icon-btn.qc__copied {
+      background: var(--gt-success-container);
+      color: var(--gt-on-success-container);
+    }
+
+    .qc__divider {
+      height: 1px;
+      background: var(--gt-outline-variant);
+      margin: var(--gt-space-1) 6px;
+    }
+  `;
 
   constructor() {
     super();
@@ -36,7 +114,6 @@ class GasActionsPanel extends HTMLElement {
   }
 
   connectedCallback() {
-    DomUtils.syncHostTheme(this);
     this._render_();
     this._watchSidebar_();
     document.addEventListener('mousedown', this._onDocumentMouseDown, true);
@@ -52,6 +129,9 @@ class GasActionsPanel extends HTMLElement {
     window.removeEventListener('resize',      this._onWindowResize);
     this._sidebarObserver?.disconnect();
     this._sidebarObserver = null;
+    // Overlay de borrado masivo huérfano: se retira si no hay borrado en curso.
+    if (!this._isBulkBusy_()) document.getElementById('qcBulkDeleteOverlay')?.remove();
+    clearTimeout(this._copyTimer);
   }
 
   // ── API pública ────────────────────────────────────────────────────────
@@ -72,7 +152,8 @@ class GasActionsPanel extends HTMLElement {
   /** Cierra el popover. */
   close() {
     this._open = false;
-    this.shadowRoot.getElementById('qcPopover')?.classList.remove('qc__open');
+    const pop = this.shadowRoot.getElementById('qcPopover');
+    if (pop) pop.hidden = true;
   }
 
   /**
@@ -91,241 +172,12 @@ class GasActionsPanel extends HTMLElement {
 
   // ── Render base ────────────────────────────────────────────────────────
 
-  /** Pinta el shadow DOM inicial (estilos + contenedor). @private */
+  /** Pinta el shadow DOM inicial (contenedor) y adopta estilos. @private */
   _render_() {
     DomUtils.setHTML(this.shadowRoot, `
-      <style>
-        /* Design tokens compartidos: ver DomUtils.themeTokensCss(). */
-        ${DomUtils.themeTokensCss()}
-
-        :host {
-          position: fixed;
-          top: 0;
-          left: 0;
-          z-index: 100000;
-          pointer-events: none;
-          font-family: 'Google Sans', 'Roboto', sans-serif;
-        }
-
-        /* Material Icons dentro del Shadow: la fuente la carga GAS, pero
-           el Shadow DOM aisla los estilos, así que repetimos el set de
-           reglas oficial para que las ligaduras funcionen. */
-        .material-icons {
-          font-family: 'Material Icons', 'Material Icons Extended', 'Google Material Icons', sans-serif;
-          font-weight: normal;
-          font-style: normal;
-          font-size: 18px;
-          line-height: 1;
-          letter-spacing: normal;
-          text-transform: none;
-          display: inline-block;
-          white-space: nowrap;
-          direction: ltr;
-          -webkit-font-feature-settings: 'liga';
-          -webkit-font-smoothing: antialiased;
-        }
-
-        .qc__popover {
-          position: fixed;
-          background: var(--gc-bg-elevated);
-          border: 1px solid var(--gc-border);
-          border-radius: 12px;
-          box-shadow: var(--gc-shadow-menu);
-          padding: 0;
-          font-size: 12px;
-          color: var(--gc-text);
-          width: 280px;
-          overflow: visible;
-          display: none;
-          pointer-events: auto;
-        }
-        .qc__popover.qc__open { display: block; }
-
-        /* Flecha conectora apuntando al botón. */
-        .qc__popover::before,
-        .qc__popover::after {
-          content: '';
-          position: absolute;
-          top: -7px;
-          right: var(--qc-arrow-offset, 24px);
-          width: 0;
-          height: 0;
-          border-left: 7px solid transparent;
-          border-right: 7px solid transparent;
-        }
-        .qc__popover::before { border-bottom: 7px solid var(--gc-border); }
-        .qc__popover::after  { top: -6px; border-bottom: 7px solid var(--gc-bg-elevated); }
-
-        .qc__popover.qc__above::before,
-        .qc__popover.qc__above::after {
-          top: auto;
-          bottom: -7px;
-          border-bottom: none;
-          border-top: 7px solid var(--gc-border);
-        }
-        .qc__popover.qc__above::after {
-          bottom: -6px;
-          border-top-color: var(--gc-bg-elevated);
-        }
-
-        .qc__pop-header {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 10px 14px;
-          background: var(--gc-accent-dim);
-          border-bottom: 1px solid var(--gc-border);
-          border-top-left-radius: 12px;
-          border-top-right-radius: 12px;
-        }
-        .qc__pop-icon {
-          flex: 0 0 auto;
-          width: 28px;
-          height: 28px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: var(--gc-bg-elevated);
-          border-radius: 8px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-          color: var(--gc-accent);
-        }
-        .qc__pop-icon .material-icons { font-size: 18px; }
-        .qc__pop-title {
-          font-size: 13px;
-          font-weight: 600;
-          color: var(--gc-accent);
-        }
-
-        .qc__pop-body { padding: 6px; }
-
-        .qc__group-title {
-          font-size: 10px;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          color: var(--gc-text-muted);
-          padding: 6px 8px 4px;
-        }
-
-        .qc__action {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          width: 100%;
-          padding: 8px 10px;
-          background: transparent;
-          border: none;
-          border-radius: 6px;
-          font: inherit;
-          font-size: 12px;
-          color: var(--gc-text);
-          text-align: left;
-          cursor: pointer;
-        }
-        .qc__action:hover { background: var(--gc-bg-raised); }
-        .qc__action:focus-visible {
-          outline: 2px solid var(--gc-accent);
-          outline-offset: -2px;
-        }
-        .qc__action-icon {
-          flex: 0 0 auto;
-          color: var(--gc-text-muted);
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .qc__action-icon .material-icons { font-size: 18px; }
-        .qc__action-label { flex: 1 1 auto; }
-        .qc__action-meta {
-          flex: 0 0 auto;
-          font-size: 11px;
-          color: var(--gc-text-muted);
-        }
-
-        /* Toggle pill al final de la fila. */
-        .qc__pill {
-          display: inline-block;
-          padding: 2px 8px;
-          border-radius: 999px;
-          font-size: 10px;
-          font-weight: 600;
-          letter-spacing: 0.4px;
-          text-transform: uppercase;
-        }
-        .qc__pill.qc__on  { background: var(--gc-green-soft); color: var(--gc-green-text); }
-        .qc__pill.qc__off { background: var(--gc-bg-raised); color: var(--gc-text-muted); }
-
-        .qc__action.qc__danger { color: var(--gc-red-text); }
-        .qc__action.qc__danger .qc__action-icon { color: var(--gc-red-text); }
-        .qc__action.qc__danger:hover { background: var(--gc-red-dim); }
-
-        /* Fila estática (no clicable) con label + botón ícono al final.
-           Usada para "Script ID" donde el ID se mantiene oculto y el
-           usuario interactúa solo con el botón copiar. */
-        .qc__row {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 8px 10px;
-          font-size: 12px;
-          color: var(--gc-text);
-        }
-        .qc__row .qc__action-icon {
-          flex: 0 0 auto;
-          color: var(--gc-text-muted);
-          display: inline-flex;
-        }
-        .qc__row .qc__action-icon .material-icons { font-size: 18px; }
-        .qc__row .qc__action-label { flex: 1 1 auto; }
-
-        /* Botón icónico al final de una fila, solo afecta al icono. */
-        .qc__icon-btn {
-          flex: 0 0 auto;
-          background: transparent;
-          border: 1px solid transparent;
-          border-radius: 6px;
-          width: 28px;
-          height: 28px;
-          padding: 0;
-          margin: 0;
-          box-sizing: border-box;
-          cursor: pointer;
-          color: var(--gc-accent);
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          line-height: 1;
-        }
-        .qc__icon-btn:hover {
-          background: var(--gc-accent-dim);
-          border-color: var(--gc-accent-glow);
-        }
-        .qc__icon-btn:disabled {
-          color: var(--gc-text-faint);
-          cursor: default;
-        }
-        .qc__icon-btn:disabled:hover { background: transparent; border-color: transparent; }
-        .qc__icon-btn .material-icons {
-          font-size: 18px;
-          line-height: 1;
-          display: block;
-        }
-        .qc__icon-btn.qc__copied {
-          color: var(--gc-green-text);
-          background: var(--gc-green-soft);
-          border-color: var(--gc-green-dim);
-        }
-
-        .qc__divider {
-          height: 1px;
-          background: var(--gc-border);
-          margin: 4px 6px;
-        }
-      </style>
-
-      <div class="qc__popover" id="qcPopover" role="dialog" aria-label="Project actions"></div>
+      <div class="gt-popover gt-popover--card qc__popover" id="qcPopover" role="dialog" hidden aria-label="${DomUtils.escapeHtml(DomUtils.t('edActionsTitle', 'Project actions'))}"></div>
     `);
+    GasUi.adopt(this.shadowRoot, GasActionsPanel.STYLES);
   }
 
   // ── Render del popover ────────────────────────────────────────────────
@@ -338,42 +190,41 @@ class GasActionsPanel extends HTMLElement {
     const hideTree = this._readHideTree_();
     const scriptId = this._getScriptId_();
 
+    const esc = (key, fallback) => DomUtils.escapeHtml(DomUtils.t(key, fallback));
+    const copyLabel = esc('edActionsCopyScriptId', 'Copy script ID');
     DomUtils.setHTML(pop, `
-      <div class="qc__pop-header">
-        <span class="qc__pop-icon"><i class="material-icons">tune</i></span>
-        <span class="qc__pop-title">Project actions</span>
+      <div class="gt-popover__header">
+        <span class="gt-popover__icon">${GasUi.icon('sliders', 18)}</span>
+        <span class="gt-popover__title">${esc('edActionsTitle', 'Project actions')}</span>
       </div>
       <div class="qc__pop-body">
-        <div class="qc__group-title">View</div>
-        <button class="qc__action" data-action="toggle-tree">
-          <span class="qc__action-icon"><i class="material-icons">${hideTree ? 'chevron_right' : 'chevron_left'}</i></span>
-          <span class="qc__action-label">${hideTree ? 'Show' : 'Hide'} file tree</span>
-          <span class="qc__pill ${hideTree ? 'qc__off' : 'qc__on'}">${hideTree ? 'Off' : 'On'}</span>
+        <div class="qc__group-title">${esc('edActionsGroupView', 'View')}</div>
+        <button class="gt-menu-item qc__action" data-action="toggle-tree">
+          <span class="qc__action-icon">${GasUi.icon(hideTree ? 'chevronRight' : 'chevronLeft', 18)}</span>
+          <span class="qc__action-label">${hideTree ? esc('edActionsShowFileTree', 'Show file tree') : esc('edActionsHideFileTree', 'Hide file tree')}</span>
+          <span class="qc__pill ${hideTree ? 'qc__off' : 'qc__on'}">${hideTree ? esc('edActionsOff', 'Off') : esc('edActionsOn', 'On')}</span>
         </button>
 
         <div class="qc__divider"></div>
-        <div class="qc__group-title">Project</div>
+        <div class="qc__group-title">${esc('edActionsGroupProject', 'Project')}</div>
 
         <!-- Fila Script ID con botón copiar a la derecha -->
         <div class="qc__row">
-          <span class="qc__action-icon"><i class="material-icons">tag</i></span>
-          <span class="qc__action-label">Script ID</span>
-          <button class="qc__icon-btn" data-action="copy-id"
-                  ${scriptId ? '' : 'disabled'}
-                  title="Copy script ID" aria-label="Copy script ID">
-            <i class="material-icons" id="qcCopyIcon">content_copy</i>
-          </button>
+          <span class="qc__action-icon">${GasUi.icon('tag', 18)}</span>
+          <span class="qc__action-label">${esc('edActionsScriptId', 'Script ID')}</span>
+          <button class="gt-icon-btn" data-action="copy-id" ${scriptId ? '' : 'disabled'}
+                  title="${copyLabel}" aria-label="${copyLabel}">${GasUi.icon('copy', 18)}</button>
         </div>
 
-        <button class="qc__action" data-action="download" ${scriptId ? '' : 'disabled'}>
-          <span class="qc__action-icon"><i class="material-icons">download</i></span>
-          <span class="qc__action-label">Download project</span>
+        <button class="gt-menu-item qc__action" data-action="download" ${scriptId ? '' : 'disabled'}>
+          <span class="qc__action-icon">${GasUi.icon('download', 18)}</span>
+          <span class="qc__action-label">${esc('edActionsDownloadProject', 'Download project')}</span>
           <span class="qc__action-meta" id="qcDownloadStatus"></span>
         </button>
 
-        <button class="qc__action qc__danger" data-action="bulk-delete" ${scriptId ? '' : 'disabled'}>
-          <span class="qc__action-icon"><i class="material-icons">delete_sweep</i></span>
-          <span class="qc__action-label">Bulk delete files…</span>
+        <button class="gt-menu-item qc__action qc__danger" data-action="bulk-delete" ${scriptId ? '' : 'disabled'}>
+          <span class="qc__action-icon">${GasUi.icon('deleteSweep', 18)}</span>
+          <span class="qc__action-label">${esc('edActionsBulkDeleteEllipsis', 'Bulk delete files…')}</span>
         </button>
       </div>
     `);
@@ -382,7 +233,7 @@ class GasActionsPanel extends HTMLElement {
     pop.querySelectorAll('[data-action]').forEach((btn) => {
       btn.addEventListener('click', this._onActionClick);
     });
-    pop.classList.add('qc__open');
+    pop.hidden = false;
   }
 
   // ── Acciones ──────────────────────────────────────────────────────────
@@ -428,13 +279,29 @@ class GasActionsPanel extends HTMLElement {
    * @private
    */
   _applyHideTree_(hidden) {
-    const tree = document.querySelector('[aria-label="File browser"]')
-              || document.querySelector('.Kp2okb.SQyOec'); // fallback selector legado.
+    const tree = this._findFileTree_();
     if (!tree) return;
     tree.style.display = hidden ? 'none' : '';
 
     // Reposicionar tras el reflow causado por el cambio de display.
     if (this._open) requestAnimationFrame(() => this._positionPopover_());
+  }
+
+  /**
+   * Localiza el contenedor del árbol de archivos de GAS.
+   * Orden: `aria-label` estable → clases ofuscadas legadas → lista de
+   * archivos (`ul[role="listbox"]` con `li[data-res-id]`) dentro de la
+   * `c-wiz` activa, por si GAS cambia las dos anteriores.
+   * @returns {HTMLElement|null}
+   * @private
+   */
+  _findFileTree_() {
+    return document.querySelector('[aria-label="File browser"]')
+      || document.querySelector('.Kp2okb.SQyOec') // selector legado (clases ofuscadas).
+      || document
+        .querySelector('c-wiz[data-p][aria-busy="false"] ul[role="listbox"] li[role="option"][data-res-id]')
+        ?.closest('ul[role="listbox"]')
+      || null;
   }
 
   /**
@@ -451,28 +318,26 @@ class GasActionsPanel extends HTMLElement {
       await navigator.clipboard.writeText(id);
       this._flashCopyOk_(btn);
     } catch (_) {
-      this._toast_('Could not copy to clipboard');
+      this._toast_(DomUtils.t('edActionsCopyFailed', 'Could not copy to clipboard'));
     }
   }
 
   /**
-   * Pinta el botón en verde con icono `done` durante 1.4 s y luego lo
-   * restaura.
+   * Feedback de copiado: icono `check` en verde durante 1.4 s.
    * @param {HTMLButtonElement} btn
    * @private
    */
   _flashCopyOk_(btn) {
     if (!btn) return;
-    const icon = btn.querySelector('.material-icons');
-    if (!icon) return;
+    const setIcon_ = (name) => DomUtils.setHTML(btn, GasUi.icon(name, 18));
     btn.classList.add('qc__copied');
-    icon.textContent = 'done';
-    btn.setAttribute('aria-label', 'Copied');
+    setIcon_('check');
+    btn.setAttribute('aria-label', DomUtils.t('edActionsCopied', 'Copied'));
     clearTimeout(this._copyTimer);
     this._copyTimer = setTimeout(() => {
       btn.classList.remove('qc__copied');
-      icon.textContent = 'content_copy';
-      btn.setAttribute('aria-label', 'Copy script ID');
+      setIcon_('copy');
+      btn.setAttribute('aria-label', DomUtils.t('edActionsCopyScriptId', 'Copy script ID'));
     }, 1400);
   }
 
@@ -485,8 +350,7 @@ class GasActionsPanel extends HTMLElement {
    */
   _watchSidebar_() {
     this._sidebarObserver?.disconnect();
-    const sidebar = document.querySelector('[aria-label="File browser"]')
-                || document.querySelector('.Kp2okb.SQyOec');
+    const sidebar = this._findFileTree_();
     if (!sidebar) return;
     this._sidebarObserver = new ResizeObserver(() => {
       if (this._open) this._positionPopover_();
@@ -509,15 +373,15 @@ class GasActionsPanel extends HTMLElement {
     if (!id) return;
     const status = this.shadowRoot.getElementById('qcDownloadStatus');
     const setStatus = (text) => { if (status) status.textContent = text; };
-    setStatus('Fetching…');
+    setStatus(DomUtils.t('edActionsFetching', 'Fetching…'));
     btn.setAttribute('disabled', '');
     try {
       const response = await this._requestDownload_(id);
-      if (!response?.ok) throw new Error(response?.error || 'Unknown error');
+      if (!response?.ok) throw new Error(response?.error || DomUtils.t('edActionsUnknownError', 'Unknown error'));
       const data = response.data;
-      if (!data) throw new Error('Empty response');
+      if (!data) throw new Error(DomUtils.t('edActionsEmptyResponse', 'Empty response'));
 
-      setStatus('Packing…');
+      setStatus(DomUtils.t('edActionsPacking', 'Packing…'));
 
       const zipFiles = [];
       for (const file of data.files || []) {
@@ -540,7 +404,7 @@ class GasActionsPanel extends HTMLElement {
 
       const zipBytes = this._buildZip_(zipFiles);
       const blob     = new Blob([zipBytes], { type: 'application/zip' });
-      setStatus('Saving…');
+      setStatus(DomUtils.t('edActionsSaving', 'Saving…'));
       const dlUrl = URL.createObjectURL(blob);
       const a     = document.createElement('a');
       a.href     = dlUrl;
@@ -550,11 +414,12 @@ class GasActionsPanel extends HTMLElement {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(dlUrl), 2000);
 
-      setStatus('Done ✓');
+      setStatus(DomUtils.t('edActionsDone', 'Done ✓'));
       setTimeout(() => setStatus(''), 2000);
     } catch (err) {
       console.warn('[GASTools] Download failed:', err);
-      setStatus('Failed');
+      setStatus(DomUtils.t('edActionsFailed', 'Failed'));
+      this._toast_(DomUtils.t('edActionsDownloadFailed', 'Download failed: $1', err?.message || err));
       setTimeout(() => setStatus(''), 2400);
     } finally {
       btn.removeAttribute('disabled');
@@ -702,26 +567,24 @@ class GasActionsPanel extends HTMLElement {
 
   /**
    * Solicita al background la descarga del proyecto via CustomEvent.
-   * Resuelve con `{ ok, bytes?, error? }`.
+   * Resuelve con `{ ok, data?, error? }`; si el background no responde en
+   * 60 s resuelve con `{ ok:false, error }` (el listener siempre se elimina).
    *
    * @param {string} scriptId
-   * @returns {Promise<{ok:boolean, bytes?:number[], error?:string}>}
+   * @returns {Promise<{ok:boolean, data?:object, error?:string}>}
    * @private
    */
-  _requestDownload_(scriptId) {
-    return new Promise((resolve) => {
-      const requestId = `dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const handler = (e) => {
-        let detail; try { detail = JSON.parse(e.detail); } catch (_) { return; }
-        if (detail?.requestId !== requestId) return;
-        document.removeEventListener('GAS_DownloadProjectResult', handler);
-        resolve(detail);
-      };
-      document.addEventListener('GAS_DownloadProjectResult', handler);
-      document.dispatchEvent(new CustomEvent('GAS_DownloadProject', {
-        detail: JSON.stringify({ requestId, scriptId }),
-      }));
-    });
+  async _requestDownload_(scriptId) {
+    const detail = await DomUtils.bridgeRequest(
+      'GAS_DownloadProject',
+      'GAS_DownloadProjectResult',
+      { scriptId },
+      {
+        timeoutMs: 60000,
+        requestId: `dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      }
+    );
+    return detail || { ok: false, error: DomUtils.t('edActionsDownloadTimeout', 'Download timed out (no response from extension)') };
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
@@ -751,99 +614,29 @@ class GasActionsPanel extends HTMLElement {
   }
 
   /**
-   * Toast efímero usando un elemento absoluto en el shadow DOM.
+   * Toast compartido (`GasUi.toast`); sigue visible aunque el popover se cierre.
+   * @param {string} text
+   * @param {string} [kind='error']
    * @private
    */
-  _toast_(text) {
-    const pop = this.shadowRoot.getElementById('qcPopover');
-    if (!pop) return;
-    let toast = this.shadowRoot.getElementById('qcToast');
-    if (!toast) {
-      toast = document.createElement('div');
-      toast.id = 'qcToast';
-      toast.style.cssText = [
-        'position:absolute',
-        'left:50%',
-        'bottom:8px',
-        'transform:translateX(-50%)',
-        'background: var(--gc-bg)',
-        'color:#fff',
-        'padding:6px 10px',
-        'border-radius:6px',
-        'font-size:11px',
-        'pointer-events:none',
-        'opacity:0',
-        'transition:opacity 0.2s',
-      ].join(';');
-      pop.appendChild(toast);
-    }
-    toast.textContent = text;
-    requestAnimationFrame(() => { toast.style.opacity = '1'; });
-    clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 1800);
+  _toast_(text, kind = 'error') {
+    GasUi.toast(this.shadowRoot, { text, kind, closeLabel: DomUtils.t('edActionsClose', 'Close') });
   }
 
   // ── Posicionamiento del popover ───────────────────────────────────────
 
   /**
-   * Posiciona el popover relativo al ancla, garantizando que siempre
-   * quede dentro del viewport.
-   *
-   * Estrategia:
-   *  - Borde derecho del popover alineado con el borde derecho del
-   *    ancla (crece hacia la izquierda).
-   *  - Si la altura desbordaría abajo, intentamos arriba; si tampoco
-   *    cabe arriba, usamos la posición que deje más espacio y clampeamos
-   *    al borde superior.
-   *  - El offset de la flecha se calcula sobre el `left` final para
-   *    mantenerla apuntando al centro del ancla.
+   * Alinea el popover al borde derecho del ancla (`GasUi.positionPopover`).
+   * Si la toolbar se reinyectó, re-resuelve el botón; sin ancla cierra
+   * (antes saltaba a (0,0)).
    * @private
    */
   _positionPopover_() {
     const pop = this.shadowRoot.getElementById('qcPopover');
-    if (!pop || !this._anchorEl) return;
-
-    const rect = this._anchorEl.getBoundingClientRect();
-    const popW = pop.offsetWidth || 280;
-    const popH = pop.offsetHeight || 240;
-    const margin = 8;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-
-    // Horizontal: alinear borde derecho al borde derecho del ancla.
-    let left = rect.right - popW;
-    if (left < margin) left = margin;
-    if (left + popW + margin > vw) left = vw - popW - margin;
-
-    // Vertical: preferir abajo; si no cabe, arriba; si tampoco, el lado
-    // con más espacio y clampeado al viewport.
-    const spaceBelow = vh - rect.bottom - margin;
-    const spaceAbove = rect.top - margin;
-    let top;
-    let above = false;
-    if (spaceBelow >= popH + 10) {
-      top = rect.bottom + 10;
-    } else if (spaceAbove >= popH + 10) {
-      top = rect.top - popH - 10;
-      above = true;
-    } else if (spaceAbove >= spaceBelow) {
-      top = Math.max(margin, rect.top - popH - 10);
-      above = true;
-    } else {
-      top = Math.min(vh - popH - margin, rect.bottom + 10);
-    }
-
-    pop.style.left = `${left}px`;
-    pop.style.top  = `${top}px`;
-
-    // Flecha apuntando al centro del ancla.
-    const anchorCenter = rect.left + rect.width / 2;
-    const arrowOffset = Math.max(
-      14,
-      Math.min(popW - 14, left + popW - anchorCenter - 7)
-    );
-    pop.style.setProperty('--qc-arrow-offset', `${arrowOffset}px`);
-    pop.classList.toggle('qc__above', above);
+    if (!pop) return;
+    this._anchorEl = GasUi.liveAnchor(this._anchorEl, GasActionsPanel.ANCHOR_SELECTOR);
+    if (!this._anchorEl) { this.close(); return; }
+    GasUi.positionPopover(pop, this._anchorEl, { align: 'end', gap: 10 });
   }
 
   // ── Listeners globales ────────────────────────────────────────────────
@@ -856,8 +649,22 @@ class GasActionsPanel extends HTMLElement {
     this.close();
   }
 
+  /**
+   * Gestor único de Escape: primero el modal de borrado (salvo en curso o
+   * completado, que son bloqueantes) y luego el popover. `GasUi.confirm`
+   * gestiona su propio Escape y detiene la propagación.
+   * @param {KeyboardEvent} e
+   * @private
+   */
   _onWindowKeyDown(e) {
-    if (this._open && e.key === 'Escape') this.close();
+    if (e.key !== 'Escape') return;
+    const overlay = document.getElementById('qcBulkDeleteOverlay');
+    if (overlay) {
+      e.preventDefault();
+      if (!this._isBulkBusy_() && !overlay.hasAttribute('data-completed')) this._closeBulkOverlay_(overlay);
+      return;
+    }
+    if (this._open) this.close();
   }
 
   _onWindowResize() {
@@ -903,7 +710,7 @@ class GasActionsPanel extends HTMLElement {
       const ms = opts.timeoutMs ?? (interactive ? 16 * 60 * 1000 : 30000);
       const timer = setTimeout(() => {
         events.forEach((ev) => document.removeEventListener(ev, onResult));
-        resolve({ ok: false, error: 'Timeout' });
+        resolve({ ok: false, error: DomUtils.t('edActionsTimeout', 'Timeout') });
       }, ms);
       events.forEach((ev) => document.addEventListener(ev, onResult));
       document.dispatchEvent(new CustomEvent(eventName, {
@@ -930,40 +737,70 @@ class GasActionsPanel extends HTMLElement {
    * @returns {Promise<object|null>}
    * @private
    */
-  async _ensureGoogleAuth_() {
-    const cached = await this._bridgeCall_('GAS_GG_GET_AUTH');
-    if (cached?.user) return cached.user;
-    this._toast_('Opening Google sign-in…');
+  async _ensureGoogleAuth_({ onSignIn } = {}) {
+    // Timeout corto: si el content script no responde (pestaña sin recargar
+    // tras actualizar la extensión) hay que avisarlo, no esperar 16 minutos.
+    const cached = await this._bridgeCall_('GAS_GG_GET_AUTH', {}, { timeoutMs: 10000 });
+    if (cached?.user) return { user: cached.user };
+    if (cached && cached.ok === false) return { user: null, reason: 'no-bridge', error: cached.error };
+    onSignIn?.();
     const res = await this._bridgeCall_('GAS_GG_AUTHENTICATE');
-    return res?.ok ? (res.user || null) : null;
+    if (res?.ok && res.user) return { user: res.user };
+    return { user: null, reason: 'sign-in', error: res?.error || '' };
   }
 
   /**
    * Abre el modal de borrado masivo y carga la lista del proyecto.
+   * El modal se muestra de inmediato y cada paso (sesión de Google, carga)
+   * se informa DENTRO de él: el menú de acciones se cierra al empezar, así
+   * que sus toasts no se verían.
    * @private
    */
   async _openBulkDeleteModal_() {
     const scriptId = this._getScriptId_();
     if (!scriptId) {
-      this._toast_('No script id available.');
+      this._toast_(DomUtils.t('edActionsNoScriptId', 'No script id available.'));
       return;
     }
 
     this.close();
+    const overlay = this._buildBulkDeleteOverlay_();
+    await this._loadBulkDeleteFiles_(overlay, scriptId);
+  }
 
-    const user = await this._ensureGoogleAuth_();
-    if (!user) {
-      this._toast_('Google sign-in is required to use this action.');
+  /**
+   * Conecta con Google y carga los archivos del proyecto en el modal.
+   * Reutilizable desde el botón "Reintentar".
+   * @param {HTMLElement} overlay
+   * @param {string} scriptId
+   * @private
+   */
+  async _loadBulkDeleteFiles_(overlay, scriptId) {
+    const list = this._bulkRoot_(overlay).getElementById('qcBdList');
+    const spinner_ = (text) => list.replaceChildren(this._bulkDeleteSpinner_(text));
+
+    spinner_(DomUtils.t('edActionsConnectingGoogle', 'Connecting to Google…'));
+    const auth = await this._ensureGoogleAuth_({
+      onSignIn: () => spinner_(DomUtils.t('edActionsWaitingSignIn', 'Complete the Google sign-in in the window that opened…')),
+    });
+    if (!overlay.isConnected) return;   // el usuario cerró el modal
+    if (!auth.user) {
+      const message = auth.reason === 'no-bridge'
+        ? DomUtils.t('edActionsNoBridge', 'The extension is not responding in this tab. Reload the Apps Script tab and try again.')
+        : DomUtils.t('edActionsSignInRequired', 'Google sign-in is required to use this action.');
+      list.replaceChildren(this._bulkDeleteError_(overlay, scriptId, message, auth.error));
       return;
     }
 
-    const overlay = this._buildBulkDeleteOverlay_();
-    const list = this._bulkRoot_(overlay).getElementById('qcBdList');
-    list.replaceChildren(this._bulkDeleteSpinner_('Loading project files…'));
-
+    spinner_(DomUtils.t('edActionsLoadingFiles', 'Loading project files…'));
     const res = await this._ggApi_('GET_CONTENT', { scriptId });
+    if (!overlay.isConnected) return;
     if (!res?.ok || !res.data) {
-      list.replaceChildren(this._bulkDeleteEmpty_(res?.error || 'Could not read project'));
+      list.replaceChildren(this._bulkDeleteError_(
+        overlay, scriptId,
+        DomUtils.t('edActionsReadProjectFailed', 'Could not read project'),
+        res?.error || '',
+      ));
       return;
     }
 
@@ -986,15 +823,10 @@ class GasActionsPanel extends HTMLElement {
     return overlay.shadowRoot;
   }
 
-  /** @returns {boolean} si el IDE está en modo oscuro. @private */
-  _isDarkMode_() {
-    const cl = document.body.classList;
-    return cl.contains('gc__is-dark-mode') || cl.contains('ide-dark-mode');
-  }
-
   /**
-   * Construye el shell del modal de borrado masivo en Shadow DOM y
-   * cablea sus listeners. El click sobre el backdrop NO cierra el modal.
+   * Construye el modal de borrado masivo (`gt-scrim` + `gt-dialog`) en Shadow
+   * DOM y cablea sus listeners. El click sobre el scrim NO cierra el modal;
+   * Escape lo gestiona `_onWindowKeyDown`.
    *
    * @returns {HTMLElement} Host del modal.
    * @private
@@ -1004,61 +836,44 @@ class GasActionsPanel extends HTMLElement {
 
     const overlay = document.createElement('div');
     overlay.id = 'qcBulkDeleteOverlay';
-    overlay.setAttribute('theme', this._isDarkMode_() ? 'dark' : 'light');
     document.body.appendChild(overlay);
 
+    const esc = (key, fallback, ...subs) => DomUtils.escapeHtml(DomUtils.t(key, fallback, ...subs));
     const shadow = overlay.attachShadow({ mode: 'open' });
     DomUtils.setHTML(shadow, `
-      <style>${DomUtils.themeTokensCss()}${this._bulkDeleteStyles_()}</style>
-      <div class="qc__bd-backdrop">
-        <div class="qc__bd-modal" role="dialog" aria-modal="true" aria-label="Bulk delete files">
+      <div class="gt-scrim">
+        <div class="gt-dialog qc__bd-modal" role="dialog" aria-modal="true" aria-labelledby="qcBdTitle">
           <div class="qc__bd-head">
-            <i class="material-icons">delete_sweep</i>
-            <span class="qc__bd-title">Bulk delete files</span>
-            <button class="qc__bd-close" id="qcBdClose" aria-label="Close">
-              <i class="material-icons">close</i>
-            </button>
+            <span class="qc__bd-headIcon">${GasUi.icon('deleteSweep', 20)}</span>
+            <h2 class="qc__bd-title" id="qcBdTitle">${esc('edActionsBulkDelete', 'Bulk delete files')}</h2>
+            <button class="gt-icon-btn" id="qcBdClose" aria-label="${esc('edActionsClose', 'Close')}" title="${esc('edActionsClose', 'Close')}">${GasUi.icon('close', 18)}</button>
           </div>
           <div class="qc__bd-search">
-            <i class="material-icons">search</i>
-            <input id="qcBdFilter" type="text" placeholder="Search files…" autocomplete="off">
+            <span class="qc__bd-searchIcon">${GasUi.icon('search', 18)}</span>
+            <input class="gt-input" id="qcBdFilter" type="text" placeholder="${esc('edActionsSearchFiles', 'Search files…')}" aria-label="${esc('edActionsSearchFiles', 'Search files…')}" autocomplete="off">
           </div>
           <div class="qc__bd-toolbar">
             <label class="qc__bd-selectall" for="qcBdSelectAllChk">
               <input type="checkbox" id="qcBdSelectAllChk">
-              <span>Select all (visible)</span>
+              <span>${esc('edActionsSelectAllVisible', 'Select all (visible)')}</span>
             </label>
-            <span class="qc__bd-counter" id="qcBdCounter">0 selected</span>
+            <span class="qc__bd-counter" id="qcBdCounter">${esc('edActionsSelectedCount', 'Selected: $1', 0)}</span>
           </div>
           <div class="qc__bd-list" id="qcBdList"></div>
           <div class="qc__bd-progress" id="qcBdProgress" hidden></div>
           <div class="qc__bd-foot">
             <span class="qc__bd-status" id="qcBdStatus"></span>
-            <button class="qc__bd-btn" id="qcBdCancel">Cancel</button>
-            <button class="qc__bd-btn qc__bd-danger" id="qcBdConfirm" disabled>Delete selected</button>
+            <button class="gt-btn gt-btn--text" id="qcBdCancel">${esc('edActionsCancel', 'Cancel')}</button>
+            <button class="gt-btn gt-btn--filled gt-btn--danger" id="qcBdConfirm" disabled>${esc('edActionsDeleteSelected', 'Delete selected')}</button>
           </div>
         </div>
       </div>
     `);
+    GasUi.adopt(shadow, GasActionsPanel.BULK_STYLES);
 
-    const themeObserver = new MutationObserver(() => {
-      overlay.setAttribute('theme', this._isDarkMode_() ? 'dark' : 'light');
-    });
-    themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
-
-    const onKey = (e) => {
-      if (e.key === 'Escape' && !this._isBulkBusy_()) closeOverlay();
-    };
-    const closeOverlay = () => {
-      if (this._isBulkBusy_()) return;
-      document.removeEventListener('keydown', onKey);
-      themeObserver.disconnect();
-      overlay.remove();
-    };
-
+    const closeOverlay = () => this._closeBulkOverlay_(overlay);
     shadow.getElementById('qcBdClose').addEventListener('click', closeOverlay);
     shadow.getElementById('qcBdCancel').addEventListener('click', closeOverlay);
-    document.addEventListener('keydown', onKey);
 
     shadow.getElementById('qcBdFilter').addEventListener('input', (e) => {
       if (!this._bulkDeleteState || this._isBulkBusy_()) return;
@@ -1083,7 +898,18 @@ class GasActionsPanel extends HTMLElement {
       if (ok) this._showBulkDeleteCompleted_(overlay);
     });
 
+    shadow.getElementById('qcBdFilter').focus();
     return overlay;
+  }
+
+  /**
+   * Cierra el modal de borrado salvo que haya una eliminación en curso.
+   * @param {HTMLElement} overlay
+   * @private
+   */
+  _closeBulkOverlay_(overlay) {
+    if (this._isBulkBusy_()) return;
+    overlay?.remove();
   }
 
   /** `true` si hay una eliminación en curso. @private */
@@ -1092,495 +918,253 @@ class GasActionsPanel extends HTMLElement {
   }
 
   /**
-   * CSS scoped del modal de borrado masivo. Se sirve junto con
-   * `DomUtils.themeTokensCss()` para resolver light/dark via el
-   * atributo `theme` del host.
-   *
-   * @returns {string}
-   * @private
+   * CSS del modal de borrado masivo (sobre `GasUi.BASE_CSS`).
+   * `--qc-folder-color` se hereda de :root (gas-folders): el icono de
+   * carpeta respeta el color elegido en el popup.
    */
-  _bulkDeleteStyles_() {
-    return `
-      /* --qc-folder-color es heredada desde :root (gas-folders),
-         así el icono respeta el color elegido en el popup. */
-      :host {
-        position: fixed; inset: 0;
-        z-index: 2147483646;
-        font-family: var(--gc-font);
-        color: var(--gc-text);
-      }
+  static BULK_STYLES = `
+    :host {
+      position: fixed;
+      inset: 0;
+      z-index: var(--gt-z-modal);
+      font-family: var(--gt-font-plain);
+      color: var(--gt-on-surface);
+    }
 
-      .qc__bd-backdrop {
-        position: fixed; inset: 0;
-        background: rgba(0,0,0,0.55);
-        display: grid; place-items: center;
-      }
+    .qc__bd-modal {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      width: min(560px, 100%);
+      max-height: min(640px, calc(100vh - 64px));
+      padding: 0;
+      overflow: hidden;
+      font-size: 13px;
+    }
+    .qc__bd-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: var(--gt-space-3) var(--gt-space-3) var(--gt-space-3) var(--gt-space-5);
+      border-bottom: 1px solid var(--gt-outline-variant);
+    }
+    .qc__bd-headIcon { display: inline-flex; color: var(--gt-error); }
+    .qc__bd-title {
+      flex: 1;
+      margin: 0;
+      font: var(--gt-type-title-m);
+      color: var(--gt-on-surface);
+    }
 
-      .material-icons {
-        font-family: 'Material Icons', 'Material Icons Extended', 'Google Material Icons', sans-serif;
-        font-weight: normal; font-style: normal;
-        font-size: 18px; line-height: 1;
-        letter-spacing: normal; text-transform: none;
-        display: inline-block; white-space: nowrap;
-        direction: ltr;
-        -webkit-font-feature-settings: 'liga';
-        -webkit-font-smoothing: antialiased;
-      }
+    .qc__bd-search {
+      display: flex;
+      align-items: center;
+      gap: var(--gt-space-2);
+      padding: var(--gt-space-3) var(--gt-space-5);
+      border-bottom: 1px solid var(--gt-outline-variant);
+    }
+    .qc__bd-searchIcon { display: inline-flex; color: var(--gt-on-surface-variant); }
+    .qc__bd-search .gt-input { flex: 1; height: 34px; }
 
-      .qc__bd-modal {
-        width: min(560px, calc(100vw - 32px));
-        max-height: min(640px, calc(100vh - 64px));
-        display: flex; flex-direction: column;
-        background: var(--gc-bg-elevated);
-        border: 1px solid var(--gc-border);
-        border-radius: 14px;
-        box-shadow: var(--gc-shadow-panel);
-        overflow: hidden;
-        position: relative;
-      }
-      .qc__bd-head {
-        display: flex; align-items: center; gap: 10px;
-        padding: 14px 18px;
-        border-bottom: 1px solid var(--gc-border);
-        background: var(--gc-red-dim);
-      }
-      .qc__bd-head .material-icons {
-        color: var(--gc-red-text);
-        font-size: 20px;
-      }
-      .qc__bd-title {
-        flex: 1; font-weight: 600; font-size: 14px;
-        color: var(--gc-red-text);
-      }
-      .qc__bd-close {
-        background: transparent; border: 0;
-        color: var(--gc-text-muted);
-        width: 28px; height: 28px; border-radius: 7px;
-        cursor: pointer; display: grid; place-items: center;
-        transition: background .15s, color .15s;
-      }
-      .qc__bd-close:hover {
-        background: var(--gc-hover-strong);
-        color: var(--gc-text);
-      }
+    .qc__bd-toolbar {
+      display: flex;
+      align-items: center;
+      gap: var(--gt-space-3);
+      padding: var(--gt-space-2) var(--gt-space-5) var(--gt-space-2) calc(var(--gt-space-1) + var(--gt-space-3));
+      border-bottom: 1px solid var(--gt-outline-variant);
+      background: var(--gt-surface-container);
+      font-size: 12px;
+      color: var(--gt-on-surface-variant);
+    }
+    .qc__bd-selectall {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--gt-space-2);
+      color: var(--gt-on-surface);
+      cursor: pointer;
+    }
+    .qc__bd-selectall:hover { color: var(--gt-primary); }
+    .qc__bd-counter { margin-left: auto; }
 
-      .qc__bd-search {
-        padding: 12px 18px;
-        display: flex; align-items: center; gap: 8px;
-        border-bottom: 1px solid var(--gc-border);
-      }
-      .qc__bd-search .material-icons {
-        color: var(--gc-text-muted);
-        font-size: 18px;
-      }
-      .qc__bd-search input {
-        flex: 1; height: 34px;
-        background: var(--gc-bg-input, var(--gc-bg-elevated));
-        color: var(--gc-text);
-        border: 1px solid var(--gc-border);
-        border-radius: 8px; padding: 0 12px;
-        font: inherit; outline: none;
-        transition: border-color .15s, box-shadow .15s;
-      }
-      .qc__bd-search input:focus {
-        border-color: var(--gc-accent);
-        box-shadow: 0 0 0 3px var(--gc-accent-glow);
-      }
-      .qc__bd-search input::placeholder {
-        color: var(--gc-text-faint);
-      }
+    /* Mismo tamaño para todos los checkboxes (toolbar, carpetas y archivos). */
+    input[type="checkbox"] {
+      flex: 0 0 auto;
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: var(--gt-primary);
+      cursor: pointer;
+    }
 
-      .qc__bd-toolbar {
-        padding: 8px 18px;
-        display: flex; align-items: center; gap: 12px;
-        border-bottom: 1px solid var(--gc-border);
-        font-size: 12px; color: var(--gc-text-muted);
-        background: var(--gc-surface-soft);
-      }
-      .qc__bd-selectall {
-        display: inline-flex; align-items: center; gap: 8px;
-        background: transparent;
-        color: var(--gc-text);
-        cursor: pointer;
-        font-family: inherit;
-        transition: color .15s;
-      }
-      .qc__bd-selectall:hover {
-        color: var(--gc-accent);
-      }
-      .qc__bd-counter {
-        margin-left: auto;
-        color: var(--gc-text-muted);
-      }
+    .qc__bd-list,
+    .qc__bd-progressBody {
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--gt-outline-variant) transparent;
+    }
+    .qc__bd-list {
+      flex: 1 1 auto;
+      min-height: 160px;
+      padding: var(--gt-space-1);
+    }
 
-      .qc__bd-list {
-        flex: 1; min-height: 200px; max-height: 340px;
-        overflow-y: auto; padding: 4px;
-        scrollbar-width: thin;
-        scrollbar-color: var(--gc-border) transparent;
-      }
-      .qc__bd-list::-webkit-scrollbar { width: 8px; }
-      .qc__bd-list::-webkit-scrollbar-track { background: transparent; }
-      .qc__bd-list::-webkit-scrollbar-thumb {
-        background: var(--gc-border);
-        border-radius: 8px;
-      }
-      .qc__bd-list::-webkit-scrollbar-thumb:hover {
-        background: var(--gc-text-faint);
-      }
+    .qc__bd-folder { margin: 2px 0; }
+    .qc__bd-folder-header,
+    .qc__bd-row {
+      display: flex;
+      align-items: center;
+      gap: var(--gt-space-2);
+      padding: 6px var(--gt-space-3);
+      border-radius: var(--gt-shape-xs);
+      transition: background-color var(--gt-motion-duration) var(--gt-motion-standard);
+    }
+    .qc__bd-folder-header { font-weight: 500; cursor: pointer; }
+    .qc__bd-folder-header:hover,
+    .qc__bd-row:hover { background: var(--gt-state-hover); }
+    .qc__bd-folder-chevron {
+      display: inline-flex;
+      color: var(--gt-on-surface-variant);
+      transition: transform var(--gt-motion-duration) var(--gt-motion-standard);
+    }
+    .qc__bd-folder.qc__bd-collapsed .qc__bd-folder-chevron { transform: rotate(-90deg); }
+    .qc__bd-folder-icon { display: inline-flex; color: var(--qc-folder-color, var(--gt-primary)); }
+    .qc__bd-folder-name { flex: 1; }
+    .qc__bd-folder-children {
+      margin-left: 20px;
+      padding-left: var(--gt-space-3);
+      border-left: 1px dotted var(--gt-outline-variant);
+    }
+    .qc__bd-folder.qc__bd-collapsed .qc__bd-folder-children { display: none; }
 
-      /* Folder rows — el icono usa --qc-folder-color (lo define gas-folders
-         a partir del color picker del popup). Si no está disponible, cae
-         al accent color. */
-      .qc__bd-folder { margin: 2px 0; }
-      .qc__bd-folder-header {
-        display: flex; align-items: center; gap: 8px;
-        padding: 6px 12px; border-radius: 6px;
-        font-size: 13px; font-weight: 500;
-        cursor: pointer;
-        transition: background .12s;
-      }
-      .qc__bd-folder-header:hover {
-        background: var(--gc-hover-soft);
-      }
-      .qc__bd-folder-chevron {
-        font-size: 18px !important;
-        color: var(--gc-text-muted);
-        transition: transform .15s;
-      }
-      .qc__bd-folder.qc__bd-collapsed .qc__bd-folder-chevron {
-        transform: rotate(-90deg);
-      }
-      .qc__bd-folder-icon {
-        color: var(--qc-folder-color, var(--gc-accent));
-        font-size: 18px !important;
-      }
-      .qc__bd-folder-name {
-        flex: 1;
-        color: var(--gc-text);
-      }
-      .qc__bd-folder-check {
-        margin-left: auto;
-        cursor: pointer;
-        accent-color: var(--gc-accent);
-      }
-      .qc__bd-folder-children {
-        margin-left: 20px;
-        padding-left: 12px;
-        border-left: 1px dotted var(--gc-border);
-      }
-      .qc__bd-folder.qc__bd-collapsed .qc__bd-folder-children {
-        display: none;
-      }
+    .qc__bd-row label {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .qc__bd-type {
+      padding: 2px 6px;
+      border-radius: var(--gt-shape-xs);
+      background: var(--gt-surface-container);
+      color: var(--gt-on-surface-variant);
+      font: 400 11px/1.4 var(--gt-font-mono);
+      text-transform: uppercase;
+    }
 
-      .qc__bd-row {
-        display: flex; align-items: center; gap: 10px;
-        padding: 6px 12px; border-radius: 6px;
-        font-size: 13px;
-        transition: background .12s;
-      }
-      .qc__bd-row:hover {
-        background: var(--gc-hover-soft);
-      }
-      .qc__bd-row input[type="checkbox"] {
-        margin: 0; cursor: pointer;
-        width: 16px; height: 16px;
-        accent-color: var(--gc-accent);
-      }
-      .qc__bd-row label {
-        flex: 1; cursor: pointer;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        color: var(--gc-text);
-      }
-      .qc__bd-row .qc__bd-type {
-        color: var(--gc-text-muted);
-        font-size: 11px;
-        font-family: 'Roboto Mono', Consolas, monospace;
-        text-transform: uppercase;
-        padding: 2px 6px;
-        background: var(--gc-hover-soft);
-        border-radius: 4px;
-      }
+    .qc__bd-empty,
+    .qc__bd-spinner {
+      padding: 36px var(--gt-space-4);
+      text-align: center;
+      color: var(--gt-on-surface-variant);
+    }
+    .qc__bd-spinner::before,
+    .qc__bd-spinnerInline {
+      content: '';
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--gt-outline-variant);
+      border-top-color: var(--gt-primary);
+      border-radius: var(--gt-shape-full);
+      vertical-align: middle;
+      animation: qc__bd-spin .7s linear infinite;
+    }
+    .qc__bd-spinner::before { margin-right: var(--gt-space-2); }
+    @keyframes qc__bd-spin { to { transform: rotate(360deg); } }
+    .qc__bd-error { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .qc__bd-errorTitle { color: var(--gt-on-surface); font-weight: 600; }
+    .qc__bd-errorDetail { max-width: 100%; font-size: 12px; color: var(--gt-error); word-break: break-word; }
+    .qc__bd-errorHint { font-size: 12px; color: var(--gt-primary); }
+    .qc__bd-retry { margin-top: var(--gt-space-1); }
 
-      .qc__bd-empty,
-      .qc__bd-spinner {
-        padding: 36px 16px; text-align: center;
-        color: var(--gc-text-muted); font-size: 13px;
-      }
-      .qc__bd-spinner::before {
-        content: ''; display: inline-block;
-        width: 14px; height: 14px; margin-right: 8px;
-        border: 2px solid var(--gc-border);
-        border-top-color: var(--gc-accent);
-        border-radius: 50%; vertical-align: middle;
-        animation: qc__bd-spin .7s linear infinite;
-      }
-      @keyframes qc__bd-spin { to { transform: rotate(360deg); } }
+    .qc__bd-foot {
+      display: flex;
+      align-items: center;
+      gap: var(--gt-space-2);
+      padding: var(--gt-space-3) var(--gt-space-5);
+      border-top: 1px solid var(--gt-outline-variant);
+    }
+    .qc__bd-status { flex: 1; font-size: 12px; color: var(--gt-on-surface-variant); }
 
-      .qc__bd-foot {
-        display: flex; align-items: center; gap: 10px;
-        padding: 14px 18px;
-        border-top: 1px solid var(--gc-border);
-      }
-      .qc__bd-foot .qc__bd-status {
-        flex: 1; font-size: 12px;
-        color: var(--gc-text-muted);
-      }
+    /* Modo busy: el progreso ocupa el centro del modal. */
+    :host([data-busy]) .qc__bd-search,
+    :host([data-busy]) .qc__bd-toolbar,
+    :host([data-busy]) .qc__bd-list { display: none; }
+    :host([data-busy]) #qcBdClose,
+    :host([data-busy]) .qc__bd-foot { pointer-events: none; opacity: .65; }
+    :host([data-busy]) .qc__bd-progress {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      margin: var(--gt-space-4);
+      pointer-events: auto;
+    }
+    :host([data-busy]) .qc__bd-progressBody { flex: 1 1 auto; max-height: none; }
 
-      button.qc__bd-btn {
-        padding: 8px 16px; border-radius: 8px;
-        border: 1px solid var(--gc-border);
-        background: transparent;
-        color: var(--gc-text);
-        cursor: pointer; font: inherit;
-        transition: background .15s, border-color .15s;
-      }
-      button.qc__bd-btn:hover {
-        background: var(--gc-hover-soft);
-      }
-      button.qc__bd-danger {
-        background: var(--gc-red-strong);
-        border-color: var(--gc-red-strong);
-        color: var(--gc-text-on-accent);
-      }
-      button.qc__bd-danger[disabled] {
-        opacity: .55; cursor: not-allowed;
-      }
-      button.qc__bd-danger:not([disabled]):hover {
-        background: var(--gc-red-text);
-        border-color: var(--gc-red-text);
-      }
-      button.qc__bd-primary {
-        background: var(--gc-accent);
-        border-color: var(--gc-accent);
-        color: var(--gc-text-on-accent);
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      button.qc__bd-primary .material-icons {
-        font-size: 16px;
-      }
-      button.qc__bd-primary:hover {
-        background: var(--gc-accent);
-        border-color: var(--gc-accent);
-        filter: brightness(.92);
-      }
+    .qc__bd-progress {
+      flex: 0 0 auto;
+      margin: 0 14px var(--gt-space-3);
+      overflow: hidden;
+      border: 1px solid var(--gt-outline-variant);
+      border-radius: var(--gt-shape-m);
+      background: var(--gt-surface-container);
+      font-size: 12px;
+    }
+    .qc__bd-progressHead {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: var(--gt-space-3) 14px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .qc__bd-progressHead:hover { background: var(--gt-state-hover); }
+    .qc__bd-progressIcon { display: grid; place-items: center; flex: 0 0 auto; width: 18px; height: 18px; color: var(--gt-primary); }
+    .qc__bd-progressDone .qc__bd-progressIcon { color: var(--gt-success); }
+    .qc__bd-progressError .qc__bd-progressIcon { color: var(--gt-error); }
+    .qc__bd-progressTitle {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .qc__bd-progressMeta { margin-left: var(--gt-space-2); color: var(--gt-on-surface-variant); font-weight: 400; }
+    .qc__bd-progressChevron {
+      display: inline-flex;
+      color: var(--gt-on-surface-variant);
+      transition: transform var(--gt-motion-duration) var(--gt-motion-standard);
+    }
+    .qc__bd-progressOpen .qc__bd-progressChevron { transform: rotate(180deg); }
+    .qc__bd-progressBody {
+      display: none;
+      max-height: 200px;
+      padding: var(--gt-space-2) var(--gt-space-1);
+      border-top: 1px solid var(--gt-outline-variant);
+    }
+    .qc__bd-progressOpen .qc__bd-progressBody { display: block; }
+    .qc__bd-progressFiles { margin: 0; padding: 0 var(--gt-space-2); list-style: none; font: 400 11.5px/1.5 var(--gt-font-mono); }
+    .qc__bd-progressFiles li {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px var(--gt-space-1);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .qc__bd-fileIcon { display: inline-flex; flex: 0 0 auto; }
+    .qc__bd-progressFile-pending { color: var(--gt-on-surface-variant); }
+    .qc__bd-progressFile-pending .qc__bd-fileIcon { color: var(--gt-outline); }
+    .qc__bd-progressFile-done .qc__bd-fileIcon { color: var(--gt-success); }
+    .qc__bd-progressFile-error .qc__bd-fileIcon { color: var(--gt-error); }
 
-      /* Modo busy: oculta search/toolbar/lista y agranda el progress
-         para que ocupe el centro del modal. */
-      :host([data-busy]) .qc__bd-search,
-      :host([data-busy]) .qc__bd-toolbar,
-      :host([data-busy]) .qc__bd-list {
-        display: none;
-      }
-      :host([data-busy]) .qc__bd-close,
-      :host([data-busy]) .qc__bd-foot {
-        pointer-events: none;
-        opacity: .65;
-      }
-      :host([data-busy]) .qc__bd-progress {
-        flex: 1 1 auto;
-        margin: 18px;
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-        pointer-events: auto;
-      }
-      :host([data-busy]) .qc__bd-progressBody {
-        flex: 1 1 auto;
-        max-height: none;
-      }
-
-      /* Status indicator post-éxito */
-      .qc__bd-status-ok {
-        display: inline-flex; align-items: center; gap: 8px;
-        color: var(--gc-green-text);
-        font-size: 12px;
-      }
-      .qc__bd-status-ok .material-icons {
-        font-size: 16px;
-      }
-
-      /* Progress panel */
-      .qc__bd-progress {
-        margin: 0 14px 12px;
-        background: var(--gc-surface-soft);
-        border: 1px solid var(--gc-border);
-        border-radius: 10px;
-        font-size: 12px;
-        color: var(--gc-text);
-        overflow: hidden;
-      }
-      .qc__bd-progressHead {
-        display: flex; align-items: center; gap: 10px;
-        padding: 12px 14px;
-        cursor: pointer;
-        user-select: none;
-      }
-      .qc__bd-progressHead:hover { background: var(--gc-hover-soft); }
-      .qc__bd-progressIcon {
-        width: 18px; height: 18px; flex: 0 0 auto;
-        display: grid; place-items: center;
-      }
-      .qc__bd-progressIcon .material-icons {
-        font-size: 18px;
-        color: var(--gc-accent);
-      }
-      .qc__bd-progress.qc__bd-progressDone .qc__bd-progressIcon .material-icons {
-        color: var(--gc-green-text);
-      }
-      .qc__bd-progress.qc__bd-progressError .qc__bd-progressIcon .material-icons {
-        color: var(--gc-red-text);
-      }
-      .qc__bd-spinnerInline {
-        display: inline-block;
-        width: 14px; height: 14px;
-        border: 2px solid var(--gc-border);
-        border-top-color: var(--gc-accent);
-        border-radius: 50%;
-        animation: qc__bd-spin .7s linear infinite;
-      }
-      .qc__bd-progressTitle {
-        flex: 1; min-width: 0;
-        font-weight: 600;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      }
-      .qc__bd-progressMeta {
-        margin-left: 8px;
-        color: var(--gc-text-muted);
-        font-weight: 400;
-        font-size: 11.5px;
-      }
-      .qc__bd-progressChevron {
-        font-size: 18px !important;
-        color: var(--gc-text-muted);
-        transition: transform .15s;
-      }
-      .qc__bd-progress.qc__bd-progressOpen .qc__bd-progressChevron {
-        transform: rotate(180deg);
-      }
-      .qc__bd-progressBody {
-        display: none;
-        border-top: 1px solid var(--gc-border);
-        max-height: 200px;
-        overflow-y: auto;
-        padding: 8px 4px;
-        scrollbar-width: thin;
-        scrollbar-color: var(--gc-border) transparent;
-      }
-      .qc__bd-progressBody::-webkit-scrollbar { width: 6px; }
-      .qc__bd-progressBody::-webkit-scrollbar-thumb {
-        background: var(--gc-border);
-        border-radius: 6px;
-      }
-      .qc__bd-progress.qc__bd-progressOpen .qc__bd-progressBody {
-        display: block;
-      }
-      .qc__bd-progressFiles {
-        list-style: none;
-        margin: 0;
-        padding: 0 8px;
-        font-family: 'Roboto Mono', Consolas, monospace;
-        font-size: 11.5px;
-      }
-      .qc__bd-progressFiles li {
-        display: flex; align-items: center; gap: 6px;
-        padding: 3px 4px;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        border-radius: 4px;
-      }
-      .qc__bd-progressFiles li .material-icons {
-        font-size: 14px;
-        flex: 0 0 auto;
-      }
-      .qc__bd-progressFile-pending {
-        color: var(--gc-text-muted);
-      }
-      .qc__bd-progressFile-pending .material-icons {
-        color: var(--gc-text-faint);
-      }
-      .qc__bd-progressFile-done {
-        color: var(--gc-text);
-      }
-      .qc__bd-progressFile-done .material-icons {
-        color: var(--gc-green-text);
-      }
-      .qc__bd-progressFile-error .material-icons {
-        color: var(--gc-red-text);
-      }
-
-      /* Confirmation modal interno (overlay sobre el modal principal). */
-      .qc__bd-confirm-overlay {
-        position: absolute; inset: 0;
-        background: rgba(0,0,0,0.7);
-        display: grid; place-items: center;
-        z-index: 10;
-      }
-      .qc__bd-confirm-dialog {
-        background: var(--gc-bg-elevated);
-        border: 1px solid var(--gc-border);
-        border-radius: 12px;
-        box-shadow: var(--gc-shadow-panel);
-        width: min(420px, calc(100% - 32px));
-        overflow: hidden;
-      }
-      .qc__bd-confirm-head {
-        padding: 16px 18px;
-        border-bottom: 1px solid var(--gc-border);
-        background: var(--gc-red-dim);
-      }
-      .qc__bd-confirm-head--ok {
-        background: var(--gc-green-soft);
-      }
-      .qc__bd-confirm-title {
-        font-size: 15px; font-weight: 600;
-        color: var(--gc-red-text);
-        display: flex; align-items: center; gap: 10px;
-      }
-      .qc__bd-confirm-title--ok {
-        color: var(--gc-green-text);
-      }
-      .qc__bd-confirm-title .material-icons { font-size: 22px; }
-      .qc__bd-confirm-body { padding: 18px; }
-      .qc__bd-confirm-message {
-        font-size: 13px; line-height: 1.5;
-        color: var(--gc-text);
-        margin-bottom: 12px;
-      }
-      .qc__bd-confirm-list {
-        max-height: 180px;
-        overflow-y: auto;
-        background: var(--gc-surface-soft);
-        border: 1px solid var(--gc-border);
-        border-radius: 8px;
-        padding: 8px;
-        font-size: 12px;
-        font-family: 'Roboto Mono', Consolas, monospace;
-        color: var(--gc-text-muted);
-        scrollbar-width: thin;
-        scrollbar-color: var(--gc-border) transparent;
-      }
-      .qc__bd-confirm-list::-webkit-scrollbar { width: 6px; }
-      .qc__bd-confirm-list::-webkit-scrollbar-track { background: transparent; }
-      .qc__bd-confirm-list::-webkit-scrollbar-thumb {
-        background: var(--gc-border);
-        border-radius: 6px;
-      }
-      .qc__bd-confirm-list-item {
-        padding: 4px 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .qc__bd-confirm-foot {
-        display: flex; gap: 10px;
-        justify-content: flex-end;
-        padding: 14px 18px;
-        border-top: 1px solid var(--gc-border);
-      }
-    `;
-  }
+    /* Aviso final bloqueante (recargar). */
+    .qc__bd-okTitle { display: flex; align-items: center; gap: 10px; color: var(--gt-success); }
+  `;
 
   /**
    * Devuelve los archivos del state que pasan el filtro actual.
@@ -1614,8 +1198,8 @@ class GasActionsPanel extends HTMLElement {
     const visible = this._getVisibleBulkFiles_();
     if (!visible.length) {
       list.replaceChildren(this._bulkDeleteEmpty_(s.files.length
-        ? 'No files match this filter.'
-        : 'The project has no files.'));
+        ? DomUtils.t('edActionsNoFilterMatch', 'No files match this filter.')
+        : DomUtils.t('edActionsNoFiles', 'The project has no files.')));
     } else {
       const frag = document.createDocumentFragment();
       const tree = this._buildFileTree_(visible);
@@ -1624,7 +1208,7 @@ class GasActionsPanel extends HTMLElement {
     }
 
     // Actualizamos contadores y el checkbox "select all".
-    counter.textContent = `${s.selected.size} selected`;
+    counter.textContent = DomUtils.t('edActionsSelectedCount', 'Selected: $1', s.selected.size);
     confirm.disabled = s.selected.size === 0;
     const allVisibleSelected = visible.length > 0 &&
       visible.every((f) => s.selected.has(f.path));
@@ -1693,11 +1277,12 @@ class GasActionsPanel extends HTMLElement {
       const someSelected = allFilesInFolder.some(f => state.selected.has(f));
 
       DomUtils.setHTML(header, `
-        <i class="material-icons qc__bd-folder-chevron">expand_more</i>
-        <i class="material-icons qc__bd-folder-icon">folder</i>
-        <span class="qc__bd-folder-name">${this._escapeHtml_(folderName)}</span>
         <input type="checkbox" class="qc__bd-folder-check" ${allSelected ? 'checked' : ''}
-               data-folder="${this._escapeAttr_(folderPath)}">
+               data-folder="${DomUtils.escapeHtml(folderPath)}"
+               aria-label="${DomUtils.escapeHtml(folderName)}">
+        <span class="qc__bd-folder-chevron">${GasUi.icon('chevronDown', 18)}</span>
+        <span class="qc__bd-folder-icon">${GasUi.icon('folder', 18)}</span>
+        <span class="qc__bd-folder-name">${DomUtils.escapeHtml(folderName)}</span>
       `);
 
       const checkbox = header.querySelector('input[type="checkbox"]');
@@ -1742,9 +1327,9 @@ class GasActionsPanel extends HTMLElement {
       const checked = state.selected.has(fullPath) ? 'checked' : '';
 
       DomUtils.setHTML(row, `
-        <input type="checkbox" id="${id}" data-path="${this._escapeAttr_(fullPath)}" ${checked}>
-        <label for="${id}">${this._escapeHtml_(displayName)}</label>
-        <span class="qc__bd-type">${this._escapeHtml_(file.type || '')}</span>
+        <input type="checkbox" id="${id}" data-path="${DomUtils.escapeHtml(fullPath)}" ${checked}>
+        <label for="${id}">${DomUtils.escapeHtml(displayName)}</label>
+        <span class="qc__bd-type">${DomUtils.escapeHtml(file.type || '')}</span>
       `);
 
       row.querySelector('input').addEventListener('change', (e) => {
@@ -1789,7 +1374,7 @@ class GasActionsPanel extends HTMLElement {
     const s = this._bulkDeleteState;
     if (!s) return;
     const root = this._bulkRoot_(overlay);
-    root.getElementById('qcBdCounter').textContent = `${s.selected.size} selected`;
+    root.getElementById('qcBdCounter').textContent = DomUtils.t('edActionsSelectedCount', 'Selected: $1', s.selected.size);
     root.getElementById('qcBdConfirm').disabled = s.selected.size === 0;
     const visible = this._getVisibleBulkFiles_();
     const selectChk = root.getElementById('qcBdSelectAllChk');
@@ -1801,70 +1386,22 @@ class GasActionsPanel extends HTMLElement {
   }
 
   /**
-   * Muestra un modal interno de confirmación previo a la eliminación.
+   * Confirmación previa a la eliminación (`GasUi.confirm` con la lista).
    * @param {HTMLElement} overlay
    * @returns {Promise<boolean>}
    * @private
    */
-  async _showDeleteConfirmation_(overlay) {
+  _showDeleteConfirmation_(overlay) {
     const s = this._bulkDeleteState;
-    if (!s || !s.selected.size) return false;
-
-    return new Promise((resolve) => {
-      const confirmOverlay = document.createElement('div');
-      confirmOverlay.className = 'qc__bd-confirm-overlay';
-
-      const selectedFiles = Array.from(s.selected).sort();
-      const fileListHtml = selectedFiles
-        .map(f => `<div class="qc__bd-confirm-list-item">${this._escapeHtml_(f)}</div>`)
-        .join('');
-
-      DomUtils.setHTML(confirmOverlay, `
-        <div class="qc__bd-confirm-dialog">
-          <div class="qc__bd-confirm-head">
-            <div class="qc__bd-confirm-title">
-              <i class="material-icons">warning</i>
-              Confirm deletion
-            </div>
-          </div>
-          <div class="qc__bd-confirm-body">
-            <div class="qc__bd-confirm-message">
-              You are about to permanently delete <strong>${s.selected.size} file(s)</strong>
-              from this project. This action cannot be undone.
-            </div>
-            <div class="qc__bd-confirm-list">${fileListHtml}</div>
-          </div>
-          <div class="qc__bd-confirm-foot">
-            <button class="qc__bd-btn" id="qcBdConfirmCancel">Cancel</button>
-            <button class="qc__bd-btn qc__bd-danger" id="qcBdConfirmOk">Delete ${s.selected.size} file(s)</button>
-          </div>
-        </div>
-      `);
-
-      const modal = this._bulkRoot_(overlay).querySelector('.qc__bd-modal');
-      modal.appendChild(confirmOverlay);
-
-      const onKey = (e) => {
-        if (e.key === 'Escape') {
-          e.stopPropagation();
-          cleanup();
-          resolve(false);
-        }
-      };
-      const cleanup = () => {
-        document.removeEventListener('keydown', onKey, true);
-        confirmOverlay.remove();
-      };
-
-      confirmOverlay.querySelector('#qcBdConfirmCancel').addEventListener('click', () => {
-        cleanup();
-        resolve(false);
-      });
-      confirmOverlay.querySelector('#qcBdConfirmOk').addEventListener('click', () => {
-        cleanup();
-        resolve(true);
-      });
-      document.addEventListener('keydown', onKey, true);
+    if (!s || !s.selected.size) return Promise.resolve(false);
+    const fileCount = this._fileCountLabel_(s.selected.size);
+    return GasUi.confirm(this._bulkRoot_(overlay), {
+      title: DomUtils.t('edActionsConfirmDeletion', 'Confirm deletion'),
+      body: DomUtils.t('edActionsConfirmMessage', 'You are about to permanently delete $1 from this project. This action cannot be undone.', fileCount),
+      items: Array.from(s.selected).sort(),
+      confirmLabel: DomUtils.t('edActionsDeleteFilesBtn', 'Delete $1', fileCount),
+      cancelLabel: DomUtils.t('edActionsCancel', 'Cancel'),
+      danger: true,
     });
   }
 
@@ -1916,21 +1453,21 @@ class GasActionsPanel extends HTMLElement {
       this._markBulkProgress_(overlay, targets, 'error');
       this._finishBulkProgress_(overlay, {
         success: false,
-        message: res?.error || 'Failed to delete files.',
+        message: res?.error || DomUtils.t('edActionsDeleteFailed', 'Failed to delete files.'),
       });
       s.busy = false;
       overlay.removeAttribute('data-busy');
       confirm.disabled = false;
       cancel.disabled  = false;
       closeBt.disabled = false;
-      status.textContent = res?.error || 'Failed to delete files.';
+      status.textContent = res?.error || DomUtils.t('edActionsDeleteFailed', 'Failed to delete files.');
       return false;
     }
 
     this._markBulkProgress_(overlay, targets, 'done');
     this._finishBulkProgress_(overlay, {
       success: true,
-      message: `${targets.length} file(s) deleted.`,
+      message: targets.length === 1 ? DomUtils.t('edActionsDeletedOne', '$1 file deleted.', 1) : DomUtils.t('edActionsDeletedMany', '$1 files deleted.', targets.length),
     });
     return true;
   }
@@ -1943,51 +1480,44 @@ class GasActionsPanel extends HTMLElement {
    */
   _showBulkDeleteCompleted_(overlay) {
     const s = this._bulkDeleteState;
-    if (!s) return;
-    const modal = this._bulkRoot_(overlay).querySelector('.qc__bd-modal');
-    if (!modal) return;
+    const root = this._bulkRoot_(overlay);
+    if (!s || !root) return;
+    overlay.setAttribute('data-completed', '');
 
-    const completedOverlay = document.createElement('div');
-    completedOverlay.className = 'qc__bd-confirm-overlay qc__bd-completed-overlay';
+    const scrim = document.createElement('div');
+    scrim.className = 'gt-scrim';
+    const dialog = document.createElement('div');
+    dialog.className = 'gt-dialog';
+    dialog.setAttribute('role', 'alertdialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'qcBdOkTitle');
 
-    DomUtils.setHTML(completedOverlay, `
-      <div class="qc__bd-confirm-dialog">
-        <div class="qc__bd-confirm-head qc__bd-confirm-head--ok">
-          <div class="qc__bd-confirm-title qc__bd-confirm-title--ok">
-            <i class="material-icons">check_circle</i>
-            Files deleted
-          </div>
-        </div>
-        <div class="qc__bd-confirm-body">
-          <div class="qc__bd-confirm-message">
-            <strong>${s.selected.size} file(s)</strong> were removed from this project.
-            The Apps Script editor needs to reload to refresh its file tree;
-            otherwise you would still see the old files in the sidebar.
-          </div>
-        </div>
-        <div class="qc__bd-confirm-foot">
-          <button class="qc__bd-btn qc__bd-primary" id="qcBdReloadOk">
-            <i class="material-icons">refresh</i>
-            Reload page now
-          </button>
-        </div>
-      </div>
-    `);
+    const title = document.createElement('h2');
+    title.className = 'gt-dialog__title qc__bd-okTitle';
+    title.id = 'qcBdOkTitle';
+    title.append(GasUi.iconNode(document, 'success', 22) || '', DomUtils.t('edActionsFilesDeleted', 'Files deleted'));
 
-    modal.appendChild(completedOverlay);
+    // "$1" en negrita sin parsear HTML.
+    const body = document.createElement('p');
+    body.className = 'gt-dialog__body';
+    const [before, after = ''] = DomUtils.t('edActionsCompletedMessage', '$1 were removed from this project. The Apps Script editor needs to reload to refresh its file tree; otherwise you would still see the old files in the sidebar.').split('$1');
+    const strong = document.createElement('strong');
+    strong.textContent = this._fileCountLabel_(s.selected.size);
+    body.append(before, strong, after);
 
-    const swallowKey = (e) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        e.preventDefault();
-      }
-    };
-    document.addEventListener('keydown', swallowKey, true);
+    const actions = document.createElement('div');
+    actions.className = 'gt-dialog__actions';
+    const reload = document.createElement('button');
+    reload.type = 'button';
+    reload.className = 'gt-btn gt-btn--filled';
+    reload.append(GasUi.iconNode(document, 'refresh', 16) || '', DomUtils.t('edActionsReloadNow', 'Reload page now'));
+    reload.addEventListener('click', () => window.location.reload());
+    actions.appendChild(reload);
 
-    completedOverlay.querySelector('#qcBdReloadOk').addEventListener('click', () => {
-      document.removeEventListener('keydown', swallowKey, true);
-      window.location.reload();
-    });
+    dialog.append(title, body, actions);
+    scrim.appendChild(dialog);
+    root.appendChild(scrim);
+    reload.focus();
   }
 
   /**
@@ -2006,17 +1536,17 @@ class GasActionsPanel extends HTMLElement {
           <span class="qc__bd-spinnerInline" aria-hidden="true"></span>
         </span>
         <span class="qc__bd-progressTitle">
-          Deleting files
+          ${DomUtils.escapeHtml(DomUtils.t('edActionsDeletingFiles', 'Deleting files'))}
           <span class="qc__bd-progressMeta" id="qcBdProgressMeta">0/${files.length}</span>
         </span>
-        <i class="material-icons qc__bd-progressChevron">expand_more</i>
+        <span class="qc__bd-progressChevron">${GasUi.icon('chevronDown', 18)}</span>
       </div>
       <div class="qc__bd-progressBody" id="qcBdProgressBody">
         <ul class="qc__bd-progressFiles" id="qcBdProgressFiles">
           ${files.map((path) => `
-            <li data-path="${this._escapeAttr_(path)}" class="qc__bd-progressFile-pending">
-              <i class="material-icons">radio_button_unchecked</i>
-              <span>${this._escapeHtml_(path)}</span>
+            <li data-path="${DomUtils.escapeHtml(path)}" class="qc__bd-progressFile-pending">
+              <span class="qc__bd-fileIcon">${GasUi.icon('radioUnchecked', 14)}</span>
+              <span>${DomUtils.escapeHtml(path)}</span>
             </li>
           `).join('')}
         </ul>
@@ -2047,8 +1577,8 @@ class GasActionsPanel extends HTMLElement {
     if (!list) return;
 
     const iconByStatus = {
-      pending: 'radio_button_unchecked',
-      done:    'check_circle',
+      pending: 'radioUnchecked',
+      done:    'success',
       error:   'error',
     };
 
@@ -2061,8 +1591,8 @@ class GasActionsPanel extends HTMLElement {
         'qc__bd-progressFile-error',
       );
       li.classList.add(`qc__bd-progressFile-${status}`);
-      const icon = li.querySelector('.material-icons');
-      if (icon) icon.textContent = iconByStatus[status] || 'radio_button_unchecked';
+      const icon = li.querySelector('.qc__bd-fileIcon');
+      if (icon) DomUtils.setHTML(icon, GasUi.icon(iconByStatus[status] || 'radioUnchecked', 14));
     }
 
     if (meta) {
@@ -2070,7 +1600,7 @@ class GasActionsPanel extends HTMLElement {
       const done = list.querySelectorAll('.qc__bd-progressFile-done').length;
       const failed = list.querySelectorAll('.qc__bd-progressFile-error').length;
       meta.textContent = failed
-        ? `${done}/${total} (${failed} failed)`
+        ? DomUtils.t('edActionsProgressFailed', '$1/$2 ($3 failed)', done, total, failed)
         : `${done}/${total}`;
     }
   }
@@ -2087,18 +1617,20 @@ class GasActionsPanel extends HTMLElement {
 
     const iconWrap = panel.querySelector('.qc__bd-progressIcon');
     if (iconWrap) {
-      DomUtils.setHTML(iconWrap, `<i class="material-icons">${result.success ? 'check_circle' : 'error'}</i>`);
+      DomUtils.setHTML(iconWrap, GasUi.icon(result.success ? 'success' : 'error', 18));
     }
 
     panel.classList.toggle('qc__bd-progressDone',  !!result.success);
     panel.classList.toggle('qc__bd-progressError', !result.success);
+    // Con error la lista vuelve a verse: plegamos el log para no apilar dos scrolls.
+    if (!result.success) panel.classList.remove('qc__bd-progressOpen');
 
     const titleNode = panel.querySelector('.qc__bd-progressTitle');
     if (titleNode) {
       const meta = titleNode.querySelector('.qc__bd-progressMeta')?.textContent || '';
       DomUtils.setHTML(titleNode, `
-        ${result.success ? 'Files deleted' : 'Deletion failed'}
-        <span class="qc__bd-progressMeta">${this._escapeHtml_(meta)}</span>
+        ${DomUtils.escapeHtml(result.success ? DomUtils.t('edActionsFilesDeleted', 'Files deleted') : DomUtils.t('edActionsDeletionFailed', 'Deletion failed'))}
+        <span class="qc__bd-progressMeta">${DomUtils.escapeHtml(meta)}</span>
       `);
     }
   }
@@ -2111,6 +1643,53 @@ class GasActionsPanel extends HTMLElement {
     return el;
   }
 
+  /**
+   * Estado de error dentro del modal: mensaje, detalle técnico, pista para
+   * activar la API de Apps Script cuando aplica y botón "Reintentar".
+   * Construido con DOM + textContent (el detalle viene de APIs externas).
+   * @param {HTMLElement} overlay
+   * @param {string} scriptId
+   * @param {string} message
+   * @param {string} [detail]
+   * @returns {HTMLElement}
+   * @private
+   */
+  _bulkDeleteError_(overlay, scriptId, message, detail = '') {
+    const el = document.createElement('div');
+    el.className = 'qc__bd-empty qc__bd-error';
+
+    const title = document.createElement('div');
+    title.className = 'qc__bd-errorTitle';
+    title.textContent = message;
+    el.appendChild(title);
+
+    if (detail) {
+      const det = document.createElement('div');
+      det.className = 'qc__bd-errorDetail';
+      det.textContent = detail;
+      el.appendChild(det);
+    }
+
+    // La causa más común: la API de Apps Script desactivada en la cuenta.
+    if (/apps script api|has not (been )?(used|enabled)|not enabled|disabled|\b403\b/i.test(detail)) {
+      const hint = document.createElement('a');
+      hint.className = 'qc__bd-errorHint';
+      hint.href = 'https://script.google.com/home/usersettings';
+      hint.target = '_blank';
+      hint.rel = 'noopener noreferrer';
+      hint.textContent = DomUtils.t('edActionsEnableApiHint', 'Turn on the Google Apps Script API in your Apps Script settings, wait a minute and retry.');
+      el.appendChild(hint);
+    }
+
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'gt-btn gt-btn--filled qc__bd-retry';
+    retry.textContent = DomUtils.t('edActionsRetry', 'Retry');
+    retry.addEventListener('click', () => this._loadBulkDeleteFiles_(overlay, scriptId));
+    el.appendChild(retry);
+    return el;
+  }
+
   /** Devuelve el placeholder de estado vacío. @private */
   _bulkDeleteEmpty_(text) {
     const el = document.createElement('div');
@@ -2119,16 +1698,11 @@ class GasActionsPanel extends HTMLElement {
     return el;
   }
 
-  /** Escape mínimo HTML para usar en el modal. @private */
-  _escapeHtml_(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  }
-
-  /** Escape para atributos. @private */
-  _escapeAttr_(value) {
-    return this._escapeHtml_(value).replace(/"/g, '&quot;');
+  /** Texto "N file(s)" traducido con singular/plural. @private */
+  _fileCountLabel_(count) {
+    return count === 1
+      ? DomUtils.t('edActionsFileCountOne', '$1 file', count)
+      : DomUtils.t('edActionsFileCountMany', '$1 files', count);
   }
 }
 

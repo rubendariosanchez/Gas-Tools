@@ -15,9 +15,23 @@ import { ConfirmDialog } from '../utils/ConfirmDialog.js';
 import { DB } from '../utils/Storage.js';
 import { notifyEditors } from '../utils/Notify.js';
 import { syncLastUpdated } from '../utils/Functions.js';
+import { tr } from '../utils/I18n.js';
+import { createEmptyState } from '../utils/EmptyState.js';
+import { icon } from '../utils/Icons.js';
+import { escapeHtml, safeColorList } from '../utils/Html.js';
 
 // Estado local del módulo para filtros
 let currentThemeCategory = 'custom'; // 'default' o 'custom'
+
+/**
+ * Lee el id (value) del tema activo guardado en chrome.storage.sync.
+ * @returns {Promise<string>} Id activo; 'vs-dark' si no hay ninguno.
+ * @private
+ */
+async function getActiveThemeId_() {
+    const result = await chrome.storage.sync.get([G_PROPERTY_NAME]);
+    return result?.[G_PROPERTY_NAME]?.themes?.active || 'vs-dark';
+}
 
 /**
  * Orquestador del módulo de temas.
@@ -79,7 +93,7 @@ function initActiveThemeBadge_() {
         }
 
         // 4. Scroll + pulso visual para indicar la posición del tema activo
-        const activeCard = document.querySelector(`theme-card[value="${activeEntry.value}"]`);
+        const activeCard = document.querySelector(`theme-card[value="${CSS.escape(activeEntry.value)}"]`);
         if (activeCard) {
             scrollWhenVisible(activeCard);
             activeCard.classList.add('qc__highlight-pulse');
@@ -141,8 +155,11 @@ function initThemeModal_() {
             // Guardamos en IndexedDB usando el método set, que hará upsert (insertar o actualizar según exista o no el ID)
             await DB.set('themes', themeData);
             await syncLastUpdated();
-            notifyEditors('themes');
-            Toast.show("Theme saved successfully", "success");
+            // Solo afecta al editor si se editó el tema activo.
+            if (themeData?.value && themeData.value === await getActiveThemeId_()) {
+                notifyEditors('themes');
+            }
+            Toast.show(tr('toastThemeSaved', 'Theme saved successfully'), 'success');
             
             // Cambiar tab visual a 'custom' antes de renderizar
             const customTab = document.querySelector('#themes .qc__sub-tab[data-filter="custom"]');
@@ -152,7 +169,7 @@ function initThemeModal_() {
             renderThemes_(false);
         } catch (err) {
             console.error(err);
-            Toast.show("Error saving theme", "error");
+            Toast.show(tr('toastErrorSavingTheme', 'Error saving theme'), 'error');
         }
     })
 }
@@ -245,12 +262,24 @@ export async function renderThemes_(startModule_, filter = '', category = curren
             fragment.appendChild(card);
         });
 
+        // Estado vacío con acción (sin temas propios o sin coincidencias)
+        if (!filtered.length) {
+            fragment.appendChild(createEmptyState({
+                icon: 'palette',
+                message: filter
+                    ? tr('noThemesFound', 'No themes found')
+                    : tr('noCustomThemes', 'No custom themes yet'),
+                actionLabel: tr('btnCreateTheme', 'Create theme'),
+                onAction: () => document.getElementById('themeModal')?.open_(),
+            }));
+        }
+
         grid.innerHTML = ''; // Limpiar antes de insertar el fragment
         grid.appendChild(fragment);
 
         // 5. Scroll hacia la card activa
         if (activeTheme) {
-            const activeCard = grid.querySelector(`theme-card[value="${activeTheme}"]`);
+            const activeCard = grid.querySelector(`theme-card[value="${CSS.escape(activeTheme)}"]`);
             if (activeCard) {
                 scrollWhenVisible(activeCard);
             }
@@ -260,19 +289,19 @@ export async function renderThemes_(startModule_, filter = '', category = curren
         if (activeThemeBadge) {
             const activeEntry  = allThemes.find(t => t.value === activeTheme);
             const colors = activeEntry?.colors
-                ? activeEntry.colors.split(',').slice(0, 4)
+                ? safeColorList(activeEntry.colors).slice(0, 4)
                 : ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b'];
 
             // OPTIMIZACIÓN: construir el HTML de colores con join en lugar de map+join separados
             activeThemeBadge.innerHTML = `
-                <div class="qc__badge-colors">
-                    ${colors.map(c => `<div class="qc__badge-color" style="background:${c}"></div>`).join('')}
-                </div>
-                <span class="material-symbols-outlined qc__badge-icon">palette</span>
-                <div class="qc__badge-info">
-                    <span class="qc__badge-label">Active Theme</span>
-                    <span class="qc__badge-name">${activeEntry?.text ?? activeTheme ?? ''}</span>
-                </div>
+                <span class="qc__badge-colors">
+                    ${colors.map(c => `<span class="qc__badge-color" style="background:${c}"></span>`).join('')}
+                </span>
+                <span class="qc__symbol qc__badge-icon" aria-hidden="true">${icon('palette')}</span>
+                <span class="qc__badge-info">
+                    <span class="qc__badge-label">${tr('activeTheme', 'Active Theme')}</span>
+                    <span class="qc__badge-name">${escapeHtml(activeEntry?.text ?? activeTheme ?? '')}</span>
+                </span>
             `;
         }
 
@@ -370,6 +399,7 @@ async function handleSelectTheme_(selectedValue, themeName) {
         // 1. Persistencia: Actualizamos el storage de Chrome
         const result = await new Promise(res => chrome.storage.sync.get([G_PROPERTY_NAME], res));
         const currentSettings = result[G_PROPERTY_NAME] || {};
+        const previousActive = currentSettings.themes?.active || 'vs-dark';
 
         const updatedSettings = {
             ...currentSettings,
@@ -400,28 +430,28 @@ async function handleSelectTheme_(selectedValue, themeName) {
                 const customThemes = await DB.getAll('themes');
                 themeEntry = customThemes.find(t => t.value === selectedValue);
             }
-            const colors = themeEntry?.colors ? themeEntry.colors.split(',') : ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b'];
+            const colors = themeEntry?.colors ? safeColorList(themeEntry.colors) : ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b'];
             activeThemeBadge.innerHTML = `
-                <div class="qc__badge-colors">
-                    ${colors.slice(0, 4).map(c => `<div class="qc__badge-color" style="background:${c}"></div>`).join('')}
-                </div>
-                <span class="material-symbols-outlined qc__badge-icon">palette</span>
-                <div class="qc__badge-info">
-                    <span class="qc__badge-label">Active Theme</span>
-                    <span class="qc__badge-name">${themeName}</span>
-                </div>
+                <span class="qc__badge-colors">
+                    ${colors.slice(0, 4).map(c => `<span class="qc__badge-color" style="background:${c}"></span>`).join('')}
+                </span>
+                <span class="qc__symbol qc__badge-icon" aria-hidden="true">${icon('palette')}</span>
+                <span class="qc__badge-info">
+                    <span class="qc__badge-label">${tr('activeTheme', 'Active Theme')}</span>
+                    <span class="qc__badge-name">${escapeHtml(themeName)}</span>
+                </span>
             `;
         }
 
-        // 4. Notificación: Avisamos a los content scripts/editores
-        notifyEditors('themes');
+        // 4. Notificación: solo si cambió el tema activo
+        if (previousActive !== selectedValue) notifyEditors('themes');
 
         // 5. Feedback: Toast informativo
-        Toast.show(`Theme "${themeName}" selected and will be applied.`, "success");
+        Toast.show(tr('toastThemeSelected', 'Theme "$1" selected and will be applied.', [themeName]), 'success');
 
     } catch (error) {
         console.error("Error al seleccionar el tema:", error);
-        Toast.show("Could not save theme selection", "error");
+        Toast.show(tr('toastThemeSelectError', 'Could not save theme selection'), 'error');
     }
 }
 
@@ -437,7 +467,7 @@ async function handleEditTheme_(themeValue) {
     if (targetTheme) {
         modal.open_(targetTheme);
     } else {
-        Toast.show("Cannot edit system themes. Try duplicating it first.", "error");
+        Toast.show(tr('toastCannotEditSystemTheme', 'Cannot edit system themes. Try duplicating it first.'), 'error');
     }
 }
 
@@ -460,7 +490,7 @@ async function handleDuplicateTheme_(sourceValue) {
     if (themeBase.protected) {
         themeData = await fetchThemeDefinition_(themeBase.text);
         if (!themeData) {
-            return Toast.show("Error: Base JSON not found", "error");
+            return Toast.show(tr('toastBaseJsonNotFound', 'Error: Base JSON not found'), 'error');
         }
     }
 
@@ -481,8 +511,8 @@ async function handleDuplicateTheme_(sourceValue) {
         // Guardamos en IndexedDB usando el método set, que hará upsert (insertar o actualizar según exista o no el ID)
         await DB.set('themes', newTheme);
         await syncLastUpdated();
-        notifyEditors('themes');
-        Toast.show("Theme duplicated", "success");
+        // La copia nunca es el tema activo: no hay nada que difundir.
+        Toast.show(tr('toastThemeDuplicated', 'Theme duplicated'), 'success');
 
         // Redirigir a pestaña de personalizados ANTES de renderizar
         const customTab = document.querySelector('#themes .qc__sub-tab[data-filter="custom"]');
@@ -494,7 +524,7 @@ async function handleDuplicateTheme_(sourceValue) {
         renderThemes_(false);
     } catch (err) {
         console.error("Error duplicating theme:", err);
-        Toast.show("Failed to duplicate", "error");
+        Toast.show(tr('toastDuplicateFailed', 'Failed to duplicate'), 'error');
     }
 }
 
@@ -503,7 +533,7 @@ async function handleDuplicateTheme_(sourceValue) {
  * @param {string} themeValue - El identificador único (value) del tema.
  */
 async function handleDeleteTheme_(themeValue) {
-    const isConfirmed = await ConfirmDialog("Delete this custom theme?");
+    const isConfirmed = await ConfirmDialog(tr('confirmDeleteTheme', 'Delete this custom theme?'));
     if (!isConfirmed) return;
 
     try {
@@ -533,13 +563,16 @@ async function handleDeleteTheme_(themeValue) {
             // Eliminamos el tema de IndexedDB
             await DB.delete('themes', target.id);
             await syncLastUpdated();
-            notifyEditors('themes');
-            Toast.show(wasActive ? "Theme deleted. Default theme restored." : "Theme deleted", "success");
+            // Borrar un tema inactivo no cambia el editor.
+            if (wasActive) notifyEditors('themes');
+            Toast.show(wasActive
+                ? tr('toastThemeDeletedRestored', 'Theme deleted. Default theme restored.')
+                : tr('toastThemeDeleted', 'Theme deleted'), 'success');
             renderThemes_(true);
         }
     } catch (err) {
         console.error("Error deleting theme:", err);
-        Toast.show("Error deleting theme", "error");
+        Toast.show(tr('toastErrorDeletingTheme', 'Error deleting theme'), 'error');
     }
 }
 

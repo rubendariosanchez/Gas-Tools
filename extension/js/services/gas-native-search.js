@@ -4,16 +4,23 @@
  * @fileoverview gas-native-search.js
  *
  * Extiende el find widget nativo de Monaco con navegación entre archivos:
- *  - Inserta un contador `current/total` y dos botones de navegación
- *    (anterior / siguiente archivo) dentro del propio widget de búsqueda.
+ *  - Inserta una barra (archivo actual, posición `n/m` y botones de
+ *    archivo anterior / siguiente) como fila propia del widget de búsqueda,
+ *    visible aunque "Reemplazar" esté colapsado.
  *  - Registra atajos en el editor: `Ctrl+Alt+F` (siguiente archivo) y
  *    `Ctrl+Shift+F` (anterior archivo).
  *  - Limita la búsqueda a los modelos del proyecto (lee `window.gasFileMap`)
- *    para descartar workers, peek views y diff editors internos.
+ *    para descartar workers, peek views y diff editors internos, y respeta
+ *    el orden de archivos del proyecto.
+ *  - Se refresca con el state del find widget, el cambio de archivo activo,
+ *    las ediciones de cualquier modelo y los cambios de `gasFileMap`.
  *
  * Auto-inicializado: no requiere cableado desde gas-tools.js. Espera a
  * que `window.jsWireMonacoEditor` esté disponible y se engancha solo.
- * Respeta el toggle global de la extensión.
+ * Respeta el toggle global de la extensión. Si Monaco reemplaza la
+ * instancia del editor, se reengancha solo al detectar `onDidDispose`;
+ * además `window.gasNativeSearch.setEditor(editor)` permite forzar el
+ * cambio de forma explícita.
  *
  * Inspirado en "Black edition for google apps script ide"
  * (https://www.swroot.com/black-script): de ahí proviene la idea de
@@ -24,11 +31,21 @@ class GasNativeSearch {
   static BUTTONS_ID  = 'qc__nativeSearchButtons';
   static PREV_ID     = 'qc__nativeSearchPrev';
   static NEXT_ID     = 'qc__nativeSearchNext';
+  static TRIGGER_ID  = 'qc__nativeSearchTrigger';
+  static FILE_ID     = 'qc__nativeSearchFile';
+  static POS_ID      = 'qc__nativeSearchPos';
+  static FILTER_ID   = 'qc__nativeSearchPopoverFilter';
   static ACTION_NEXT  = 'qc__nativeSearch.findNextFile';
   static ACTION_PREV  = 'qc__nativeSearch.findPrevFile';
   static POPOVER_ID   = 'qc__nativeSearchPopover';
   static MATCHES_ID   = 'qc__nativeSearchMatchesPopover';
   static MATCHES_BTN  = 'qc__nativeSearchMatchesBtn';
+  /** Tope de coincidencias entre todos los archivos. */
+  static MAX_RESULTS    = 1000;
+  /** Presupuesto de tiempo (ms) del recorrido multiarchivo. */
+  static TIME_BUDGET_MS = 50;
+  /** Altura máxima de los popovers (px). */
+  static POPOVER_MAX_H  = 260;
 
   constructor() {
     /** @type {boolean} */
@@ -41,10 +58,24 @@ class GasNativeSearch {
     this._stateSub = null;
     /** @type {Array<{dispose:()=>void}>} */
     this._actionDisposables = [];
+    /** @type {Array<{dispose:()=>void}>} Suscripciones del editor y de Monaco. */
+    this._subs = [];
+    /** @type {Map<object,{dispose:()=>void}>} `onDidChangeContent` por modelo. */
+    this._modelSubs = new Map();
+    /** @type {EventTarget|null} gasFileMap al que estamos suscritos. */
+    this._fileMapTarget = null;
+    /** @type {ResizeObserver|null} Observa el widget mientras hay popovers. */
+    this._resizeObserver = null;
     /** @type {ReturnType<typeof setTimeout>|null} */
     this._debounceTimer = null;
     /** @type {ReturnType<typeof setInterval>|null} */
     this._readyTimer = null;
+    /** @type {{dispose:()=>void}|null} Subscripción a `onDidDispose` del editor. */
+    this._editorDisposeSub = null;
+    /** @type {object|null} Editor indicado explícitamente vía `setEditor`. */
+    this._preferredEditor = null;
+    /** Editores ya liberados: nunca se reenganchan. @type {WeakSet<object>} */
+    this._disposedEditors = new WeakSet();
     /** Estado del popover de archivos. */
     this._popoverOpen = false;
     /** @type {Array<{uri:string,name:string,count:number,first:object}>} */
@@ -53,12 +84,9 @@ class GasNativeSearch {
     this._lastQuery = '';
     /** Filtro local del popover. */
     this._popoverFilter = '';
-    /** Query con la que el usuario cerró el popover; evita auto-reabrir. */
-    this._userClosedQuery = '';
-    /** Query para la que ya hicimos el auto-expand del replace-part. */
-    this._autoExpandedFor = '';
     this._onPopoverOutside = this._onPopoverOutside.bind(this);
     this._onPopoverKey     = this._onPopoverKey.bind(this);
+    this._onFileMapChange  = () => this._onStateChange_();
   }
 
   /** Activa el servicio si el editor y Monaco ya están disponibles. */
@@ -76,19 +104,63 @@ class GasNativeSearch {
     this._teardown_();
   }
 
+  /**
+   * Engancha el servicio a una instancia concreta de Monaco. Idempotente:
+   * si ya está enganchado a ese editor no hace nada; si estaba enganchado
+   * a otro, libera listeners/acciones/UI del anterior antes de enganchar
+   * el nuevo. Si el servicio está deshabilitado, recuerda el editor para
+   * usarlo en el próximo `enable()`.
+   * @param {object} editor Instancia `IStandaloneCodeEditor`.
+   * @returns {boolean} `true` si quedó enganchado (o ya lo estaba).
+   */
+  setEditor(editor) {
+    if (!editor || this._disposedEditors.has(editor)) return false;
+    this._preferredEditor = editor;
+    if (!this._enabled) return false;
+    if (this._editor === editor && this._controller) return true;
+    if (this._tryAttach_(editor)) {
+      this._stopReadyTimer_();
+      return true;
+    }
+    // El contribution aún no está listo: el polling lo reintentará.
+    this._waitForEditor_();
+    return false;
+  }
+
   // ── Inicialización ───────────────────────────────────────────────
 
-  /** Polling ligero hasta que `jsWireMonacoEditor` exponga el contribution. @private */
+  /**
+   * Intenta enganchar `editor` (o el candidato actual).
+   * @param {object} [editor]
+   * @returns {boolean} `true` si quedó enganchado.
+   * @private
+   */
+  _tryAttach_(editor = this._candidateEditor_()) {
+    if (!editor || this._disposedEditors.has(editor) || !window.monaco?.KeyCode) return false;
+    const controller = editor.getContribution?.('editor.contrib.findController');
+    if (!controller) return false;
+    this._attach_(editor, controller);
+    return true;
+  }
+
+  /**
+   * Editor a enganchar: el indicado vía `setEditor` o, en su defecto,
+   * `window.jsWireMonacoEditor`. Ignora editores ya liberados.
+   * @returns {object|null}
+   * @private
+   */
+  _candidateEditor_() {
+    const preferred = this._preferredEditor;
+    if (preferred && !this._disposedEditors.has(preferred)) return preferred;
+    const wired = window.jsWireMonacoEditor;
+    if (wired && !this._disposedEditors.has(wired)) return wired;
+    return null;
+  }
+
+  /** Polling ligero hasta que el editor candidato exponga el contribution. @private */
   _waitForEditor_() {
     this._stopReadyTimer_();
-    const tryAttach = () => {
-      const editor = window.jsWireMonacoEditor;
-      if (!editor || !window.monaco?.KeyCode) return false;
-      const controller = editor.getContribution?.('editor.contrib.findController');
-      if (!controller) return false;
-      this._attach_(editor, controller);
-      return true;
-    };
+    const tryAttach = () => this._tryAttach_();
     if (tryAttach()) return;
     this._readyTimer = setInterval(() => {
       if (!this._enabled) { this._stopReadyTimer_(); return; }
@@ -105,9 +177,8 @@ class GasNativeSearch {
   }
 
   /**
-   * Engancha el editor y el controller dados, registra los atajos y la
-   * suscripción al state. Idempotente: si ya estamos enganchados al
-   * mismo controller, no hace nada.
+   * Engancha editor y controller, registra atajos y suscripciones.
+   * Idempotente con el mismo par editor/controller.
    * @private
    */
   _attach_(editor, controller) {
@@ -116,12 +187,81 @@ class GasNativeSearch {
     this._editor     = editor;
     this._controller = controller;
 
+    // Si GAS destruye esta instancia (swap de editor), soltamos todo y
+    // volvemos a esperar al siguiente editor disponible.
+    this._editorDisposeSub = editor.onDidDispose?.(() => {
+      this._disposedEditors.add(editor);
+      if (this._preferredEditor === editor) this._preferredEditor = null;
+      if (this._editor !== editor) return;
+      this._teardown_();
+      if (this._enabled) this._waitForEditor_();
+    }) || null;
+
     const state = controller.getState?.();
     if (state?.onFindReplaceStateChange) {
       this._stateSub = state.onFindReplaceStateChange(() => this._onStateChange_());
     }
 
+    this._subscribeSources_();
     this._registerActions_();
+  }
+
+  /**
+   * Suscribe el refresco a cambio de archivo activo, ediciones de modelos,
+   * alta/baja de modelos y cambios de `gasFileMap` (todo vía debounce).
+   * @private
+   */
+  _subscribeSources_() {
+    const keep = (d) => { if (d && typeof d.dispose === 'function') this._subs.push(d); };
+    keep(this._editor.onDidChangeModel?.(() => this._onStateChange_()));
+
+    const me = window.monaco?.editor;
+    keep(me?.onDidCreateModel?.((model) => {
+      this._watchModel_(model);
+      this._onContentChange_();
+    }));
+    keep(me?.onWillDisposeModel?.((model) => {
+      this._unwatchModel_(model);
+      this._onContentChange_();
+    }));
+    (me?.getModels?.() || []).forEach((model) => this._watchModel_(model));
+
+    this._syncFileMapSub_();
+  }
+
+  /**
+   * Mantiene el listener 'change' sobre el `window.gasFileMap` vigente (puede sustituirse).
+   * @private
+   */
+  _syncFileMapSub_() {
+    const map = window.gasFileMap;
+    if (map === this._fileMapTarget) return;
+    this._fileMapTarget?.removeEventListener?.('change', this._onFileMapChange);
+    this._fileMapTarget = null;
+    if (map && typeof map.addEventListener === 'function') {
+      map.addEventListener('change', this._onFileMapChange);
+      this._fileMapTarget = map;
+    }
+  }
+
+  /**
+   * Escucha las ediciones de un modelo del proyecto (cubre también el activo).
+   * @param {object} model
+   * @private
+   */
+  _watchModel_(model) {
+    if (!model || this._modelSubs.has(model) || model.uri?.scheme === 'gas-preview' || model.uri?.scheme === 'gas-ghdiff') return;
+    if (model.isDisposed?.()) return;
+    const sub = model.onDidChangeContent?.(() => this._onContentChange_());
+    if (sub && typeof sub.dispose === 'function') this._modelSubs.set(model, sub);
+  }
+
+  /** @param {object} model @private */
+  _unwatchModel_(model) {
+    const sub = this._modelSubs.get(model);
+    if (!sub) return;
+    try { sub.dispose(); } catch (_) {}
+    this._modelSubs.delete(model);
   }
 
   /** @private */
@@ -150,12 +290,22 @@ class GasNativeSearch {
   _teardown_() {
     this._closePopover_();
     this._closeMatchesPopover_();
-    this._actionDisposables.forEach((d) => { try { d.dispose?.(); } catch (_) {} });
+    this._disconnectObserver_();
+    const safeDispose = (d) => { try { d?.dispose?.(); } catch (_) {} };
+    this._actionDisposables.forEach(safeDispose);
     this._actionDisposables = [];
-    if (this._stateSub?.dispose) {
-      try { this._stateSub.dispose(); } catch (_) {}
+    this._subs.forEach(safeDispose);
+    this._subs = [];
+    this._modelSubs.forEach(safeDispose);
+    this._modelSubs.clear();
+    if (this._fileMapTarget) {
+      try { this._fileMapTarget.removeEventListener('change', this._onFileMapChange); } catch (_) {}
+      this._fileMapTarget = null;
     }
-    this._stateSub   = null;
+    safeDispose(this._stateSub);
+    this._stateSub = null;
+    safeDispose(this._editorDisposeSub);
+    this._editorDisposeSub = null;
     this._controller = null;
     this._editor     = null;
     this._removeUi_();
@@ -163,23 +313,56 @@ class GasNativeSearch {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
     }
+    this._lastGroups = [];
+    this._lastQuery = '';
+    this._popoverFilter = '';
   }
 
-  // ── Reacción a cambios de estado del find widget ─────────────────
+  // ── Reacción a cambios ───────────────────────────────────────────
 
   /** @private */
   _onStateChange_() {
     if (!this._enabled) return;
+    this._syncFileMapSub_();
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
-    this._debounceTimer = setTimeout(() => this._refreshUi_(), 80);
+    this._debounceTimer = setTimeout(() => {
+      this._debounceTimer = null;
+      this._refreshUi_();
+    }, 80);
+  }
+
+  /** Ediciones de modelos: solo refresca si hay una búsqueda visible. @private */
+  _onContentChange_() {
+    const state = this._controller?.getState?.();
+    if (!state?.searchString || state.isRevealed === false) return;
+    this._onStateChange_();
   }
 
   /**
-   * Sincroniza el UI extra (badge + botones) con el state actual.
+   * URI del modelo activo; cadena vacía si el editor no tiene modelo.
+   * @returns {string}
+   * @private
+   */
+  _currentUri_() {
+    return this._editor?.getModel?.()?.uri?.toString?.() || '';
+  }
+
+  /**
+   * Grupos por archivo para el state dado.
+   * @param {object} state
+   * @returns {Array<{uri:string,name:string,count:number,first:object}>}
+   * @private
+   */
+  _computeGroups_(state) {
+    return this._groupByFile_(this._findAllMatches_(this._buildSearchParams_(state)));
+  }
+
+  /**
+   * Sincroniza la barra y los popovers con el state actual.
    * @private
    */
   _refreshUi_() {
-    if (!this._controller) return;
+    if (!this._controller || !this._editor) return;
     const state = this._controller.getState?.();
     const query = state?.searchString || '';
     if (!query) {
@@ -187,68 +370,46 @@ class GasNativeSearch {
       this._setBadge_('', '', false);
       this._lastGroups = [];
       this._lastQuery  = '';
-      this._userClosedQuery = '';
-      this._autoExpandedFor = '';
+    }
+    if (!query || state?.isRevealed === false) {
       this._closePopover_();
+      this._closeMatchesPopover_();
       return;
     }
     this._ensureUi_();
-    const matches = this._findAllMatches_(this._buildSearchParams_(state));
-    const fileGroups = this._groupByFile_(matches);
+    const fileGroups = this._computeGroups_(state);
     const total = fileGroups.length;
-    const currentUri = this._editor.getModel?.().uri.toString();
+    const currentUri = this._currentUri_();
     const idx = fileGroups.findIndex((g) => g.uri === currentUri);
 
-    const hasOthers = total > 1 || (total === 1 && fileGroups[0].uri !== currentUri);
-    this._setButtonsDisabled_(!hasOthers);
+    this._setButtonsDisabled_(!fileGroups.some((g) => g.uri !== currentUri));
 
-    const fileName = idx >= 0 ? fileGroups[idx].name : '';
-    const position = total ? `${Math.max(idx, 0) + 1}/${total} files` : '';
-    this._setBadge_(fileName, position, total > 0);
-
-    // Mostrar el botón de "matches in this file" solo si el archivo
-    // activo tiene más de una coincidencia: con una sola, no aporta
-    // nada (la flecha siguiente del find widget basta).
-    const currentGroup = idx >= 0 ? fileGroups[idx] : null;
-    const matchesInCurrent = currentGroup?.count || 0;
-    this._setMatchesBtnVisible_(matchesInCurrent > 1);
-    if (matchesInCurrent <= 1) this._closeMatchesPopover_();
+    // Archivo activo sin coincidencias: sin posición, solo el total.
+    let position = '';
+    if (total) {
+      position = idx >= 0
+        ? DomUtils.t('edSearchFilePosition', '$1/$2 files', idx + 1, total)
+        : this._countLabel_(total, 'file');
+    }
+    this._setBadge_(idx >= 0 ? fileGroups[idx].name : '', position, total > 0);
 
     this._lastGroups = fileGroups;
     this._lastQuery  = query;
 
-    // Si la query trae matches y el panel de reemplazo (donde vive el
-    // badge) está colapsado, abrirlo automáticamente la primera vez
-    // para que el usuario vea la info de archivos sin tener que
-    // expandirlo a mano.
-    if (total > 0 && this._autoExpandedFor !== query) {
-      if (this._expandReplacePart_()) {
-        this._autoExpandedFor = query;
-      }
+    // El botón de "coincidencias en este archivo" solo aporta con 2 o más.
+    const matchesInCurrent = idx >= 0 ? fileGroups[idx].count : 0;
+    this._setMatchesBtnVisible_(matchesInCurrent > 1);
+    if (matchesInCurrent <= 1) {
+      this._closeMatchesPopover_();
+    } else if (document.getElementById(GasNativeSearch.MATCHES_ID)) {
+      this._renderMatchesPopover_();
+      this._positionMatchesPopover_();
     }
 
     if (this._popoverOpen) {
-      this._renderPopover_();
+      this._updatePopover_();
       this._positionPopover_();
     }
-  }
-
-  /**
-   * Si el toggle nativo de "alternar reemplazar" está colapsado,
-   * lo expande (un click programático). Devuelve `true` cuando hizo
-   * el click; `false` si ya estaba expandido o si no encontró el
-   * botón aún (el widget no se ha pintado).
-   * @returns {boolean}
-   * @private
-   */
-  _expandReplacePart_() {
-    const root = this._findWidgetRoot_();
-    if (!root) return false;
-    const toggle = root.querySelector('.button.toggle.left');
-    if (!toggle) return false;
-    if (!toggle.classList.contains('codicon-find-collapsed')) return false;
-    toggle.click();
-    return true;
   }
 
   // ── Navegación ────────────────────────────────────────────────────
@@ -261,14 +422,12 @@ class GasNativeSearch {
   _goToAdjacentFile_(dir) {
     if (!this._controller || !this._editor) return;
     const state  = this._controller.getState?.();
-    const params = this._buildSearchParams_(state);
-    if (!params.searchString) return;
+    if (!state?.searchString) return;
 
-    const matches = this._findAllMatches_(params);
-    const groups  = this._groupByFile_(matches);
+    const groups = this._computeGroups_(state);
     if (!groups.length) return;
 
-    const currentUri = this._editor.getModel?.().uri.toString();
+    const currentUri = this._currentUri_();
     const currentIdx = groups.findIndex((g) => g.uri === currentUri);
 
     let nextIdx;
@@ -281,30 +440,26 @@ class GasNativeSearch {
     if (!target) return;
 
     this._jumpToMatch_(target);
-    this._setBadge_(groups[nextIdx].name, `${nextIdx + 1}/${groups.length} files`, true);
+    this._setBadge_(groups[nextIdx].name, DomUtils.t('edSearchFilePosition', '$1/$2 files', nextIdx + 1, groups.length), true);
   }
 
   /**
-   * Cambia (si hace falta) el modelo activo del editor y deja
-   * seleccionado el match dado, sincronizando el findController para
-   * que su contador "n de m" se actualice (evita el "? de m").
-   *
-   * Truco: posicionamos el cursor justo antes del match y disparamos
-   * `nextMatchFindAction`, que es el comando que el widget nativo usa
-   * cuando el usuario pulsa "siguiente".
-   *
+   * Activa el modelo del match y lo selecciona vía `nextMatchFindAction`
+   * para que el contador nativo "n de m" se sincronice.
    * @param {{model:object, range:object}} target
    * @private
    */
   _jumpToMatch_(target) {
     if (!this._editor || !target?.model || !target?.range) return;
-    if (this._editor.getModel() !== target.model) {
+    if (target.model.isDisposed?.()) return;
+    if (this._editor.getModel?.() !== target.model) {
       this._editor.setModel(target.model);
     }
     const range = target.range;
+    // Cursor en el inicio exacto: nextMatch encuentra el match que empieza ahí.
     this._editor.setPosition({
       lineNumber: range.startLineNumber,
-      column:     Math.max(1, range.startColumn - 1),
+      column:     Math.max(1, range.startColumn),
     });
     this._editor.revealRangeInCenter(range);
     this._editor.focus();
@@ -316,9 +471,7 @@ class GasNativeSearch {
   }
 
   /**
-   * Agrupa los matches por archivo, preservando el orden de aparición
-   * de los modelos. Para cada grupo guarda el primer match (para saltar)
-   * y el nombre legible.
+   * Agrupa los matches por archivo preservando su orden de llegada.
    * @param {Array<{model:object, uri:string, range:object}>} matches
    * @returns {Array<{uri:string, name:string, count:number, first:{model:object,uri:string,range:object}}>}
    * @private
@@ -333,11 +486,31 @@ class GasNativeSearch {
       } else {
         const name = (map?.get?.(m.uri))
           || String(m.model?.uri?.path || '').replace(/^\//, '')
-          || 'File';
+          || DomUtils.t('edSearchFileFallback', 'File');
         order.set(m.uri, { uri: m.uri, name, count: 1, first: m });
       }
     }
     return Array.from(order.values());
+  }
+
+  /**
+   * Ordena modelos según el orden de claves de `gasFileMap` (sidebar).
+   * Los no mapeados van al final conservando su orden.
+   * @param {Array<object>} models
+   * @returns {Array<object>}
+   * @private
+   */
+  _sortByProjectOrder_(models) {
+    const map = window.gasFileMap;
+    let keys = [];
+    try {
+      if (typeof map?.keys === 'function') keys = Array.from(map.keys());
+      else if (typeof map?.entries === 'function') keys = Array.from(map.entries(), (e) => e[0]);
+    } catch (_) { keys = []; }
+    if (!keys.length) return models;
+    const rank = new Map(keys.map((k, i) => [k, i]));
+    const rankOf = (m) => rank.get(String(m.uri)) ?? Number.MAX_SAFE_INTEGER;
+    return models.slice().sort((a, b) => rankOf(a) - rankOf(b));
   }
 
   /**
@@ -356,30 +529,44 @@ class GasNativeSearch {
   }
 
   /**
-   * Recorre todos los modelos del proyecto y devuelve los matches
-   * agrupados por archivo. Solo modelos presentes en `window.gasFileMap`
-   * cuentan: descartamos workers, peek views, diff editors, etc.
+   * Recorre los modelos del proyecto (solo los de `gasFileMap` si está
+   * poblado) con tope de resultados y presupuesto de tiempo.
    * @param {object} params
    * @returns {Array<{model:object, uri:string, range:object}>}
    * @private
    */
   _findAllMatches_(params) {
     if (!params.searchString) return [];
-    const allModels = window.monaco?.editor?.getModels?.() || [];
+    // Los modelos de la vista previa de cambios no son archivos del proyecto.
+    const allModels = (window.monaco?.editor?.getModels?.() || [])
+      .filter((m) => m?.uri && m.uri.scheme !== 'gas-preview' && m.uri.scheme !== 'gas-ghdiff' && !m.isDisposed?.());
     const map = window.gasFileMap;
     const hasMap = map && typeof map.has === 'function' && map.size > 0;
-    const models = hasMap
+    const models = this._sortByProjectOrder_(hasMap
       ? allModels.filter((m) => map.has(String(m.uri)))
-      : allModels;
+      : allModels);
 
+    const max = GasNativeSearch.MAX_RESULTS;
+    const startedAt = Date.now();
     const out = [];
     for (const model of models) {
-      const found = model.findMatches(
-        params.searchString, false,
-        params.isRegex, params.matchCase, params.wholeWord, false,
-      );
+      const remaining = max - out.length;
+      if (remaining <= 0) break;
+      // Regex costosa en muchos archivos: cortamos para no congelar el editor.
+      if (Date.now() - startedAt > GasNativeSearch.TIME_BUDGET_MS) break;
+      let found;
+      try {
+        found = model.findMatches(
+          params.searchString, false,
+          params.isRegex, params.matchCase, params.wholeWord, false, remaining,
+        );
+      } catch (_) {
+        continue;
+      }
+      const uri = model.uri.toString();
       for (const m of found || []) {
-        out.push({ model, uri: model.uri.toString(), range: m.range });
+        if (out.length >= max) break;
+        out.push({ model, uri, range: m.range });
       }
     }
     return out;
@@ -387,14 +574,30 @@ class GasNativeSearch {
 
   // ── UI ──────────────────────────────────────────────────────────
 
-  /** @private */
+  /**
+   * Nodo raíz del find widget (campo privado de Monaco o `.find-widget`).
+   * @returns {HTMLElement|null}
+   * @private
+   */
   _findWidgetRoot_() {
-    return this._controller?._widget?._domNode || null;
+    const node = this._controller?._widget?._domNode;
+    if (node instanceof HTMLElement) return node;
+    return this._editor?.getDomNode?.()?.querySelector('.find-widget') || null;
   }
 
   /**
-   * Inserta el badge como una fila adicional dentro de `.replace-part`
-   * del widget, con flex-wrap para que aparezca debajo de los inputs.
+   * Busca un elemento por id dentro de la raíz del widget.
+   * @param {string} id
+   * @returns {HTMLElement|null}
+   * @private
+   */
+  _q_(id) {
+    return this._findWidgetRoot_()?.querySelector?.(`#${id}`) || null;
+  }
+
+  /**
+   * Inserta la barra como fila propia del find widget, justo después de
+   * `.replace-part` (no dentro): así se ve con Reemplazar colapsado.
    * @private
    */
   _ensureUi_() {
@@ -402,37 +605,37 @@ class GasNativeSearch {
     if (!root) return;
     if (root.querySelector(`#${GasNativeSearch.BUTTONS_ID}`)) return;
 
-    const replacePart = root.querySelector('.replace-part');
-    if (!replacePart) return;
-
     const wrap = document.createElement('div');
     wrap.id = GasNativeSearch.BUTTONS_ID;
     wrap.className = 'qc__nativeSearchBar';
 
+    const esc = (k, fb) => DomUtils.escapeHtml(DomUtils.t(k, fb));
     DomUtils.setHTML(wrap, `
       <span class="qc__nativeSearchInfo">
         <span class="qc__nativeSearchIcon" aria-hidden="true"></span>
-        <span class="qc__nativeSearchLabel">In file</span>
-        <button id="qc__nativeSearchTrigger" type="button"
+        <span class="qc__nativeSearchLabel">${esc('edSearchInFile', 'In file')}</span>
+        <button id="${GasNativeSearch.TRIGGER_ID}" type="button"
                 class="qc__nativeSearchTrigger"
-                aria-haspopup="listbox" aria-expanded="false"
-                title="Show files with matches">
-          <span id="qc__nativeSearchFile" class="qc__nativeSearchFile" title=""></span>
+                aria-haspopup="dialog" aria-expanded="false"
+                aria-controls="${GasNativeSearch.POPOVER_ID}"
+                title="${esc('edSearchShowFiles', 'Show files with matches')}">
+          <span id="${GasNativeSearch.FILE_ID}" class="qc__nativeSearchFile" title=""></span>
           <span class="qc__nativeSearchTriggerCaret" aria-hidden="true"></span>
         </button>
-        <span id="qc__nativeSearchPos"  class="qc__nativeSearchPos"></span>
+        <span id="${GasNativeSearch.POS_ID}" class="qc__nativeSearchPos"></span>
       </span>
       <span class="qc__nativeSearchActions">
         <button id="${GasNativeSearch.MATCHES_BTN}" type="button"
                 class="qc__nativeSearchBtn"
-                title="Show matches in this file" aria-label="Show matches"
-                aria-haspopup="listbox" aria-expanded="false"></button>
+                title="${esc('edSearchShowMatchesInFile', 'Show matches in this file')}" aria-label="${esc('edSearchShowMatches', 'Show matches')}"
+                aria-haspopup="dialog" aria-expanded="false"
+                aria-controls="${GasNativeSearch.MATCHES_ID}"></button>
         <button id="${GasNativeSearch.PREV_ID}" type="button"
                 class="qc__nativeSearchBtn"
-                title="Previous file (Ctrl+Shift+F)" aria-label="Previous file"></button>
+                title="${esc('edSearchPrevFile', 'Previous file')} (Ctrl+Shift+F)" aria-label="${esc('edSearchPrevFile', 'Previous file')}"></button>
         <button id="${GasNativeSearch.NEXT_ID}" type="button"
                 class="qc__nativeSearchBtn"
-                title="Next file (Ctrl+Alt+F)" aria-label="Next file"></button>
+                title="${esc('edSearchNextFile', 'Next file')} (Ctrl+Alt+F)" aria-label="${esc('edSearchNextFile', 'Next file')}"></button>
       </span>
     `);
 
@@ -444,7 +647,7 @@ class GasNativeSearch {
     DomUtils.setHTML(next, this._chevronRightSvg_());
     DomUtils.setHTML(list, this._listSvg_());
 
-    const trigger = wrap.querySelector('#qc__nativeSearchTrigger');
+    const trigger = wrap.querySelector(`#${GasNativeSearch.TRIGGER_ID}`);
     DomUtils.setHTML(wrap.querySelector('.qc__nativeSearchTriggerCaret'), this._chevronDownSvg_());
     trigger.addEventListener('click', (e) => {
       e.preventDefault();
@@ -460,9 +663,12 @@ class GasNativeSearch {
       this._toggleMatchesPopover_();
     });
 
-    // Lo metemos en el contenedor de replace para que herede el flujo
-    // del widget; el CSS lo fuerza a su propia fila vía flex-wrap.
-    replacePart.appendChild(wrap);
+    const replacePart = root.querySelector('.replace-part');
+    if (replacePart && replacePart.parentNode === root && typeof replacePart.insertAdjacentElement === 'function') {
+      replacePart.insertAdjacentElement('afterend', wrap);
+    } else {
+      root.appendChild(wrap);
+    }
     this._injectStyles_();
   }
 
@@ -474,10 +680,8 @@ class GasNativeSearch {
 
   /** @private */
   _setButtonsDisabled_(disabled) {
-    const root = this._findWidgetRoot_();
-    if (!root) return;
     [GasNativeSearch.PREV_ID, GasNativeSearch.NEXT_ID].forEach((id) => {
-      const btn = root.querySelector(`#${id}`);
+      const btn = this._q_(id);
       if (!btn) return;
       btn.toggleAttribute('disabled', !!disabled);
       btn.setAttribute('aria-disabled', disabled ? 'true' : 'false');
@@ -486,26 +690,27 @@ class GasNativeSearch {
 
   /** @private */
   _setMatchesBtnVisible_(visible) {
-    const btn = document.getElementById(GasNativeSearch.MATCHES_BTN);
+    const btn = this._q_(GasNativeSearch.MATCHES_BTN);
     if (!btn) return;
     btn.style.display = visible ? '' : 'none';
   }
 
   /**
-   * Pinta el nombre del archivo actual y la posición `n/m files`.
+   * Pinta el nombre base del archivo actual (ruta completa en `title`)
+   * y la posición.
    * @param {string} fileName
    * @param {string} position
    * @param {boolean} visible
    * @private
    */
   _setBadge_(fileName, position, visible) {
-    const wrap = document.getElementById(GasNativeSearch.BUTTONS_ID);
+    const wrap = this._q_(GasNativeSearch.BUTTONS_ID);
     if (!wrap) return;
     wrap.classList.toggle('qc__nativeSearchBar--hidden', !visible);
-    const fileEl = wrap.querySelector('#qc__nativeSearchFile');
-    const posEl  = wrap.querySelector('#qc__nativeSearchPos');
+    const fileEl = wrap.querySelector(`#${GasNativeSearch.FILE_ID}`);
+    const posEl  = wrap.querySelector(`#${GasNativeSearch.POS_ID}`);
     if (fileEl) {
-      fileEl.textContent = fileName || '—';
+      fileEl.textContent = this._splitPath_(fileName).base || '—';
       fileEl.title = fileName || '';
     }
     if (posEl) posEl.textContent = position || '';
@@ -517,23 +722,26 @@ class GasNativeSearch {
     const style = document.createElement('style');
     style.id = 'qc__nativeSearchStyles';
     style.textContent = `
-      /* Permitir que la barra extra fluya a una nueva línea dentro
-         del replace-part del find widget, sin afectar a otros widgets. */
-      .monaco-editor .find-widget .replace-part {
-        flex-wrap: wrap;
-      }
+      /* El widget crece para alojar la barra como fila propia. */
       .monaco-editor .find-widget:has(#qc__nativeSearchButtons) {
         height: auto !important;
       }
 
+      /* Barra dentro del widget: hereda los colores --vscode-* del editor. */
       .qc__nativeSearchBar {
         display: flex;
-        flex: 0 0 100%;
+        box-sizing: border-box;
+        flex: 1 0 100%;
+        min-width: 0;
+        max-width: 100%;
+        height: auto;
+        min-height: 28px;
         align-items: center;
         gap: 8px;
-        margin: 8px 4px 4px;
-        padding: 4px 10px;
-        height: 26px;
+        margin: 4px 25px 4px 17px;
+        padding: 2px 4px 2px 8px;
+        overflow: hidden;
+        container-type: inline-size;
         background: rgba(127,127,127,.10);
         border: 1px solid rgba(127,127,127,.22);
         border-radius: 4px;
@@ -559,13 +767,17 @@ class GasNativeSearch {
       .qc__nativeSearchIcon svg { width: 13px; height: 13px; display: block; }
       .qc__nativeSearchLabel {
         flex: 0 0 auto;
-        color: var(--vscode-descriptionForeground, #888);
+        color: var(--vscode-editorWidget-foreground, #616161);
         text-transform: uppercase;
         letter-spacing: .04em;
-        font-size: 10px;
+        font-size: 11px;
+      }
+      @container (max-width: 340px) {
+        .qc__nativeSearchLabel { display: none; }
       }
       .qc__nativeSearchFile {
         flex: 0 1 auto;
+        min-width: 0;
         font-weight: 600;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -576,6 +788,7 @@ class GasNativeSearch {
         display: inline-flex;
         align-items: center;
         gap: 4px;
+        flex: 0 1 auto;
         background: transparent;
         border: 0;
         border-radius: 4px;
@@ -583,7 +796,7 @@ class GasNativeSearch {
         font: inherit;
         cursor: pointer;
         padding: 2px 6px;
-        max-width: 198px;
+        max-width: none;
         min-width: 0;
       }
       .qc__nativeSearchTrigger:hover {
@@ -601,10 +814,14 @@ class GasNativeSearch {
       .qc__nativeSearchTrigger[aria-expanded="true"] .qc__nativeSearchTriggerCaret {
         transform: rotate(180deg);
       }
+      @media (prefers-reduced-motion: reduce) {
+        .qc__nativeSearchTriggerCaret { transition: none; }
+      }
       .qc__nativeSearchTriggerCaret svg { width: 11px; height: 11px; display: block; }
       .qc__nativeSearchPos {
         flex: 0 0 auto;
-        color: var(--vscode-descriptionForeground, #888);
+        color: var(--vscode-editorWidget-foreground, #616161);
+        font-size: 11px;
         font-weight: 400;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
@@ -640,132 +857,149 @@ class GasNativeSearch {
         display: block;
       }
 
-      /* Popover de archivos con matches */
+      /* Popovers: cuelgan de body, por eso usan tokens --gt-* (claro/oscuro). */
       .qc__nativeSearchPopover {
         position: fixed;
-        z-index: 2147483647;
+        z-index: var(--gt-z-popover);
+        box-sizing: border-box;
         width: 240px;
-        max-height: 260px;
+        max-width: calc(100vw - 12px);
+        max-height: ${GasNativeSearch.POPOVER_MAX_H}px;
         display: flex;
         flex-direction: column;
-        background: var(--vscode-editorWidget-background, var(--vscode-editor-background, #252526));
-        color: var(--vscode-foreground, #cccccc);
-        border: 1px solid var(--vscode-editorWidget-border, rgba(127,127,127,.30));
-        border-radius: 4px;
-        box-shadow: 0 6px 20px rgba(0,0,0,.45);
-        font-size: 12px;
-        line-height: 1.4;
+        background: var(--gt-surface);
+        color: var(--gt-on-surface);
+        border: 1px solid var(--gt-outline-variant);
+        border-radius: var(--gt-shape-s);
+        box-shadow: var(--gt-elevation-2);
+        font: var(--gt-type-body-s);
         overflow: visible;
       }
-      /* Flecha tipo "tooltip": cuadrado rotado 45° con dos bordes
-         visibles (los lados diagonales del triángulo). El fondo
-         replica el stack del header: overlay rgba(127,127,127,.10)
-         sobre var(--vscode-editorWidget-background). */
+      /* Flecha: cuadrado rotado 45° con dos bordes visibles. */
       .qc__nativeSearchPopover-arrow {
         position: absolute;
         width: 12px;
         height: 12px;
         margin-left: -6px;
         pointer-events: none;
-        background:
-          linear-gradient(rgba(127,127,127,.10), rgba(127,127,127,.10)),
-          var(--vscode-editorWidget-background, var(--vscode-editor-background, #252526));
+        background: var(--gt-surface-container);
         background-clip: padding-box;
-        border: 1px solid var(--vscode-editorWidget-border, rgba(127,127,127,.30));
+        border: 1px solid var(--gt-outline-variant);
         transform: rotate(45deg);
       }
-      /* Popover DEBAJO del trigger: flecha apunta arriba; mostramos
-         los bordes top+left, el resto se oculta detrás del popover. */
       .qc__nativeSearchPopover[data-placement="bottom"] .qc__nativeSearchPopover-arrow {
         top: -7px;
         border-right: 0;
         border-bottom: 0;
       }
-      /* Popover ARRIBA: flecha apunta abajo; mostramos bottom+right. */
       .qc__nativeSearchPopover[data-placement="top"] .qc__nativeSearchPopover-arrow {
         bottom: -7px;
         border-top: 0;
         border-left: 0;
-        background:
-          var(--vscode-editorWidget-background, var(--vscode-editor-background, #252526));
+        background: var(--gt-surface);
       }
       .qc__nativeSearchPopover-head {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        flex: 0 0 auto;
         padding: 6px 10px;
-        background: rgba(127,127,127,.10);
-        border-bottom: 1px solid var(--vscode-editorWidget-border, rgba(127,127,127,.25));
+        background: var(--gt-surface-container);
+        border-bottom: 1px solid var(--gt-outline-variant);
         font-size: 11px;
-        color: var(--vscode-descriptionForeground, #9d9d9d);
-        border-top-left-radius: 4px;
-        border-top-right-radius: 4px;
+        color: var(--gt-on-surface-variant);
+        border-top-left-radius: var(--gt-shape-s);
+        border-top-right-radius: var(--gt-shape-s);
+      }
+      .qc__nativeSearchPopover-stat {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
       }
       .qc__nativeSearchPopover-stat strong {
-        color: var(--vscode-foreground, #cccccc);
+        color: var(--gt-on-surface);
         font-weight: 600;
       }
       .qc__nativeSearchPopover-sep {
-        margin: 0 4px;
-        opacity: .6;
+        flex: 0 0 auto;
       }
       .qc__nativeSearchPopover-search {
+        flex: 0 0 auto;
         padding: 6px 8px;
         display: flex;
         align-items: center;
         gap: 6px;
-        border-bottom: 1px solid var(--vscode-editorWidget-border, rgba(127,127,127,.25));
+        border-bottom: 1px solid var(--gt-outline-variant);
       }
       .qc__nativeSearchPopover-searchIcon {
         display: inline-flex;
         flex: 0 0 auto;
-        color: var(--vscode-descriptionForeground, #9d9d9d);
+        color: var(--gt-on-surface-variant);
       }
       .qc__nativeSearchPopover-searchIcon svg {
         width: 13px; height: 13px; display: block;
       }
       .qc__nativeSearchPopover-input {
         flex: 1 1 auto;
-        background: var(--vscode-input-background, rgba(255,255,255,.04));
-        color: var(--vscode-input-foreground, var(--vscode-foreground, #cccccc));
-        border: 1px solid var(--vscode-input-border, rgba(127,127,127,.25));
-        border-radius: 3px;
+        min-width: 0;
+        background: var(--gt-surface-container);
+        color: var(--gt-on-surface);
+        border: 1px solid var(--gt-outline);
+        border-radius: var(--gt-shape-xs, 4px);
         padding: 3px 6px;
         font: inherit;
         outline: none;
       }
+      .qc__nativeSearchPopover-input::placeholder {
+        color: var(--gt-on-surface-variant);
+        opacity: 1;
+      }
       .qc__nativeSearchPopover-input:focus {
-        border-color: var(--vscode-focusBorder, #007fd4);
+        border-color: var(--gt-primary);
+        box-shadow: 0 0 0 1px var(--gt-primary);
       }
       .qc__nativeSearchPopover-list {
         flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
         padding: 4px;
         scrollbar-width: thin;
-        scrollbar-color: rgba(127,127,127,.40) transparent;
+        scrollbar-color: var(--gt-outline-variant) transparent;
       }
-      .qc__nativeSearchPopover-list::-webkit-scrollbar { width: 8px; }
-      .qc__nativeSearchPopover-list::-webkit-scrollbar-thumb {
-        background: rgba(127,127,127,.40);
-        border-radius: 8px;
-      }
-      .qc__nativeSearchPopover-item {
+      .qc__nativeSearchPopover-item,
+      .qc__nativeSearchMatch-item {
         display: flex;
         align-items: center;
         gap: 8px;
         width: 100%;
+        min-width: 0;
         padding: 4px 8px;
         background: transparent;
         border: 0;
-        border-radius: 3px;
-        color: var(--vscode-foreground, #cccccc);
+        border-radius: var(--gt-shape-xs, 4px);
+        color: var(--gt-on-surface);
         font: inherit;
         cursor: pointer;
         text-align: left;
       }
-      .qc__nativeSearchPopover-item:hover {
-        background: var(--vscode-list-hoverBackground, rgba(127,127,127,.18));
+      .qc__nativeSearchPopover-item:hover,
+      .qc__nativeSearchMatch-item:hover {
+        background: var(--gt-state-hover);
+      }
+      .qc__nativeSearchPopover-item:focus-visible,
+      .qc__nativeSearchMatch-item:focus-visible {
+        outline: 2px solid var(--gt-primary);
+        outline-offset: -2px;
       }
       .qc__nativeSearchPopover-item--active {
-        background: var(--vscode-list-activeSelectionBackground, rgba(14,99,156,.6));
-        color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground, #ffffff));
+        background: var(--gt-secondary-container);
+        color: var(--gt-on-secondary-container);
+      }
+      .qc__nativeSearchPopover-item--active:hover {
+        background: var(--gt-secondary-container);
       }
       .qc__nativeSearchPopover-icon {
         flex: 0 0 auto;
@@ -775,16 +1009,43 @@ class GasNativeSearch {
         justify-content: center;
       }
       .qc__nativeSearchPopover-icon svg { width: 14px; height: 14px; display: block; }
+      /* Sobre la selección el color fijo del icono no contrasta: usa el del texto. */
+      .qc__nativeSearchPopover-item--active .qc__nativeSearchPopover-icon svg [fill]:not([fill="none"]) { fill: currentColor; }
+      .qc__nativeSearchPopover-item--active .qc__nativeSearchPopover-icon svg [stroke]:not([stroke="none"]) { stroke: currentColor; }
       .qc__nativeSearchPopover-name {
+        display: flex;
         flex: 1 1 auto;
+        min-width: 0;
         overflow: hidden;
-        text-overflow: ellipsis;
         white-space: nowrap;
         color: inherit;
       }
-      .qc__nativeSearchPopover-name mark {
-        background: var(--vscode-editor-findMatchHighlightBackground, rgba(234,92,0,.33));
-        color: inherit;
+      /* Rutas largas: la carpeta se trunca por el inicio (…tas/) y el nombre base se conserva. */
+      .qc__nativeSearchPath-dir {
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 60%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        direction: rtl;
+        text-align: left;
+        color: var(--gt-on-surface-variant);
+      }
+      .qc__nativeSearchPath-dir > bdi { direction: ltr; unicode-bidi: isolate; }
+      .qc__nativeSearchPath-base {
+        flex: 0 0 auto;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .qc__nativeSearchPopover-head .qc__nativeSearchPopover-name {
+        flex: 0 1 auto;
+        color: var(--gt-on-surface);
+      }
+      .qc__nativeSearchPopover-name mark,
+      .qc__nativeSearchMatch-snippet mark {
+        background: var(--gt-warning-container);
+        color: var(--gt-on-warning-container);
         padding: 0 1px;
         border-radius: 2px;
       }
@@ -795,75 +1056,151 @@ class GasNativeSearch {
         height: 16px;
         line-height: 16px;
         text-align: center;
-        border-radius: 999px;
-        background: var(--vscode-badge-background, rgba(127,127,127,.30));
-        color: var(--vscode-badge-foreground, var(--vscode-foreground, #cccccc));
+        border-radius: var(--gt-shape-full, 999px);
+        background: var(--gt-surface-container-high);
+        color: var(--gt-on-surface);
         font-size: 10.5px;
         font-variant-numeric: tabular-nums;
-      }
-      .qc__nativeSearchPopover-item--active .qc__nativeSearchPopover-count {
-        background: rgba(255,255,255,.22);
-        color: inherit;
       }
       .qc__nativeSearchPopover-empty {
         padding: 16px;
         text-align: center;
-        color: var(--vscode-descriptionForeground, #9d9d9d);
+        color: var(--gt-on-surface-variant);
       }
 
-      /* Match list (popover de matches del archivo actual). */
+      /* Lista de coincidencias del archivo actual. */
       .qc__nativeSearchMatchesPopover { width: 300px; }
-      .qc__nativeSearchMatch-item {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        width: 100%;
-        padding: 4px 8px;
-        background: transparent;
-        border: 0;
-        border-radius: 3px;
-        color: var(--vscode-foreground, #cccccc);
-        font: inherit;
-        cursor: pointer;
-        text-align: left;
-      }
-      .qc__nativeSearchMatch-item:hover {
-        background: var(--vscode-list-hoverBackground, rgba(127,127,127,.18));
-      }
+      .qc__nativeSearchMatch-item { gap: 10px; }
       .qc__nativeSearchMatch-line {
         flex: 0 0 auto;
         min-width: 32px;
         padding: 1px 6px;
         text-align: right;
-        color: var(--vscode-descriptionForeground, #9d9d9d);
-        font-family: var(--vscode-editor-font-family, monospace);
+        color: var(--gt-on-surface-variant);
+        font-family: var(--gt-font-mono, monospace);
         font-size: 10.5px;
         font-variant-numeric: tabular-nums;
       }
       .qc__nativeSearchMatch-snippet {
         flex: 1 1 auto;
+        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
-        font-family: var(--vscode-editor-font-family, monospace);
+        white-space: pre;
+        font-family: var(--gt-font-mono, monospace);
         font-size: 11.5px;
-      }
-      .qc__nativeSearchMatch-snippet mark {
-        background: var(--vscode-editor-findMatchHighlightBackground, rgba(234,92,0,.33));
-        color: inherit;
-        padding: 0 1px;
-        border-radius: 2px;
+        font-variant-ligatures: none;
       }
     `;
     document.head.appendChild(style);
+  }
+
+  // ── Utilidades de popovers ───────────────────────────────────────
+
+  /**
+   * Coloca un popover bajo la barra (o encima si no cabe), con la flecha
+   * centrada en `anchor` y `max-height` limitado al viewport.
+   * @param {HTMLElement} popover
+   * @param {HTMLElement} anchor Trigger al que apunta la flecha.
+   * @param {'start'|'end'} align Alineación horizontal respecto al anchor.
+   * @private
+   */
+  _placePopover_(popover, anchor, align) {
+    const bar = this._q_(GasNativeSearch.BUTTONS_ID) || anchor;
+    const rect = anchor.getBoundingClientRect();
+    const barRect = bar.getBoundingClientRect();
+    const margin = 6;
+    const arrowSize = 7;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const cap = GasNativeSearch.POPOVER_MAX_H;
+
+    const below = vh - barRect.bottom - arrowSize - margin;
+    const above = barRect.top - arrowSize - margin;
+    popover.style.maxHeight = '';
+    const natural = Math.min(popover.offsetHeight || cap, cap);
+    const placement = (below >= natural || below >= above) ? 'bottom' : 'top';
+    const space = Math.max(120, placement === 'bottom' ? below : above);
+    const maxH = Math.min(cap, space);
+    popover.style.maxHeight = `${maxH}px`;
+    const h = Math.min(natural, maxH);
+    const w = popover.offsetWidth || 240;
+
+    let left = align === 'end' ? rect.right - w : rect.left;
+    if (left + w + margin > vw) left = vw - w - margin;
+    if (left < margin) left = margin;
+    const top = placement === 'bottom' ? barRect.bottom + arrowSize : barRect.top - arrowSize - h;
+
+    popover.style.left = `${left}px`;
+    popover.style.top  = `${Math.max(margin, top)}px`;
+    popover.dataset.placement = placement;
+
+    const arrow = popover.querySelector('.qc__nativeSearchPopover-arrow');
+    if (arrow) {
+      const center = rect.left + rect.width / 2;
+      arrow.style.left = `${Math.max(14, Math.min(w - 14, center - left))}px`;
+    }
+  }
+
+  /**
+   * Gestiona ↑/↓/Inicio/Fin entre los items de una lista.
+   * @param {KeyboardEvent} e
+   * @param {Array<HTMLElement>} items
+   * @returns {boolean} `true` si consumió la tecla.
+   * @private
+   */
+  _moveFocus_(e, items) {
+    if (!items.length) return false;
+    const cur = items.indexOf(document.activeElement);
+    let next;
+    if (e.key === 'ArrowDown')      next = cur < 0 ? 0 : Math.min(items.length - 1, cur + 1);
+    else if (e.key === 'ArrowUp')   next = cur <= 0 ? 0 : cur - 1;
+    else if (e.key === 'Home')      next = 0;
+    else if (e.key === 'End')       next = items.length - 1;
+    else return false;
+    e.preventDefault?.();
+    e.stopPropagation?.();
+    items[next]?.focus?.();
+    return true;
+  }
+
+  /** Observa el widget para recolocar popovers abiertos. @private */
+  _observeRoot_() {
+    if (this._resizeObserver || typeof ResizeObserver === 'undefined') return;
+    const root = this._findWidgetRoot_();
+    if (!root) return;
+    const reposition = () => {
+      this._positionPopover_();
+      this._positionMatchesPopover_();
+    };
+    this._resizeObserver = new ResizeObserver(reposition);
+    this._resizeObserver.observe(root);
+    // La entrada del widget es un transform: ResizeObserver no la detecta.
+    this._observedRoot = root;
+    this._onRootTransition = reposition;
+    root.addEventListener('transitionend', reposition);
+  }
+
+  /** Desconecta el observer si ya no queda ningún popover abierto. @private */
+  _releaseObserver_() {
+    if (this._popoverOpen || document.getElementById(GasNativeSearch.MATCHES_ID)) return;
+    this._disconnectObserver_();
+  }
+
+  /** @private */
+  _disconnectObserver_() {
+    try { this._resizeObserver?.disconnect(); } catch (_) {}
+    this._resizeObserver = null;
+    this._observedRoot?.removeEventListener('transitionend', this._onRootTransition);
+    this._observedRoot = null;
+    this._onRootTransition = null;
   }
 
   // ── Popover de matches en el archivo actual ──────────────────────
 
   /** @private */
   _toggleMatchesPopover_() {
-    const exists = document.getElementById(GasNativeSearch.MATCHES_ID);
-    if (exists) {
+    if (document.getElementById(GasNativeSearch.MATCHES_ID)) {
       this._closeMatchesPopover_();
     } else {
       this._openMatchesPopover_();
@@ -872,44 +1209,57 @@ class GasNativeSearch {
 
   /** @private */
   _openMatchesPopover_() {
-    const matches = this._currentFileMatches_();
-    if (!matches.length) return;
+    if (!this._currentFileMatches_().length) return;
+    this._closePopover_();
 
     const popover = document.createElement('div');
     popover.id = GasNativeSearch.MATCHES_ID;
     popover.className = 'qc__nativeSearchPopover qc__nativeSearchMatchesPopover';
-    popover.setAttribute('role', 'listbox');
+    popover.setAttribute('role', 'dialog');
+    popover.setAttribute('aria-label', DomUtils.t('edSearchMatchesDialog', 'Matches in this file'));
     document.body.appendChild(popover);
 
     this._renderMatchesPopover_();
     this._positionMatchesPopover_();
 
-    const btn = document.getElementById(GasNativeSearch.MATCHES_BTN);
+    const btn = this._q_(GasNativeSearch.MATCHES_BTN);
     btn?.setAttribute('aria-expanded', 'true');
 
     this._onMatchesOutside = (e) => {
       const path = e.composedPath?.() || [];
       if (path.includes(popover)) return;
-      if (btn && path.includes(btn)) return;
+      const b = this._q_(GasNativeSearch.MATCHES_BTN);
+      if (b && path.includes(b)) return;
       this._closeMatchesPopover_();
     };
     this._onMatchesKey = (e) => {
-      if (e.type === 'keydown' && e.key === 'Escape') {
+      if (e.type === 'resize') { this._positionMatchesPopover_(); return; }
+      if (e.type !== 'keydown') return;
+      const pop = document.getElementById(GasNativeSearch.MATCHES_ID);
+      const inside = !!pop && (e.composedPath?.() || []).includes(pop);
+      if (e.key === 'Escape') {
         e.stopPropagation();
         this._closeMatchesPopover_();
+        if (inside) this._q_(GasNativeSearch.MATCHES_BTN)?.focus?.();
         return;
       }
-      if (e.type === 'resize') this._positionMatchesPopover_();
+      if (inside) this._moveFocus_(e, Array.from(pop.querySelectorAll('.qc__nativeSearchMatch-item')));
     };
     document.addEventListener('mousedown', this._onMatchesOutside, true);
     document.addEventListener('keydown', this._onMatchesKey, true);
     window.addEventListener('resize', this._onMatchesKey);
+    this._observeRoot_();
+
+    requestAnimationFrame(() => {
+      document.getElementById(GasNativeSearch.MATCHES_ID)
+        ?.querySelector('.qc__nativeSearchMatch-item')?.focus?.();
+    });
   }
 
   /** @private */
   _closeMatchesPopover_() {
     document.getElementById(GasNativeSearch.MATCHES_ID)?.remove();
-    document.getElementById(GasNativeSearch.MATCHES_BTN)?.setAttribute('aria-expanded', 'false');
+    this._q_(GasNativeSearch.MATCHES_BTN)?.setAttribute('aria-expanded', 'false');
     if (this._onMatchesOutside) {
       document.removeEventListener('mousedown', this._onMatchesOutside, true);
       this._onMatchesOutside = null;
@@ -919,52 +1269,55 @@ class GasNativeSearch {
       window.removeEventListener('resize', this._onMatchesKey);
       this._onMatchesKey = null;
     }
+    this._releaseObserver_();
   }
 
   /** @private */
   _renderMatchesPopover_() {
     const popover = document.getElementById(GasNativeSearch.MATCHES_ID);
     if (!popover) return;
+    // Modelo para el que se pinta: si cambia antes del clic, no saltamos.
+    const model = this._editor?.getModel?.() || null;
     const matches = this._currentFileMatches_();
-    const fileName = this._editor?.getModel?.()
-      ? (window.gasFileMap?.get?.(this._editor.getModel().uri.toString()) || '')
-      : '';
+    const fileName = model ? (window.gasFileMap?.get?.(this._currentUri_()) || '') : '';
 
     if (!matches.length) {
       DomUtils.setHTML(popover, `
         <div class="qc__nativeSearchPopover-arrow" aria-hidden="true"></div>
-        <div class="qc__nativeSearchPopover-empty">No matches in this file</div>
+        <div class="qc__nativeSearchPopover-empty">${DomUtils.escapeHtml(DomUtils.t('edSearchNoMatchesInFile', 'No matches in this file'))}</div>
       `);
       return;
     }
 
-    const itemsHtml = matches.map((m, i) => {
-      return `
-        <button class="qc__nativeSearchMatch-item" data-idx="${i}" type="button" role="option"
-                title="Line ${m.line}, column ${m.column}">
+    const itemsHtml = matches.map((m, i) => `
+        <button class="qc__nativeSearchMatch-item" data-idx="${i}" type="button"
+                title="${DomUtils.escapeHtml(DomUtils.t('edSearchLineColumn', 'Line $1, column $2', m.line, m.column))}">
           <span class="qc__nativeSearchMatch-line">${m.line}</span>
-          <span class="qc__nativeSearchMatch-snippet">${this._renderSnippet_(m.text, m.matchText)}</span>
+          <span class="qc__nativeSearchMatch-snippet">${this._renderSnippet_(m.text, m.matchText, m.column)}</span>
         </button>
-      `;
-    }).join('');
+      `).join('');
 
+    const nameHtml = fileName
+      ? `<span class="qc__nativeSearchPopover-sep" aria-hidden="true">·</span><span class="qc__nativeSearchPopover-name" title="${DomUtils.escapeHtml(fileName)}">${this._pathHtml_(fileName)}</span>`
+      : '';
     DomUtils.setHTML(popover, `
       <div class="qc__nativeSearchPopover-arrow" aria-hidden="true"></div>
       <div class="qc__nativeSearchPopover-head">
-        <span class="qc__nativeSearchPopover-stat">
-          <strong>${matches.length}</strong> match(es)${fileName ? ` · <span class="qc__nativeSearchPopover-name" title="${this._escapeAttr_(fileName)}">${this._escapeHtml_(fileName)}</span>` : ''}
-        </span>
+        <span class="qc__nativeSearchPopover-stat">${this._countHtml_(matches.length, 'match')}${nameHtml}</span>
       </div>
-      <div class="qc__nativeSearchPopover-list">${itemsHtml}</div>
+      <div class="qc__nativeSearchPopover-list" role="group">${itemsHtml}</div>
     `);
 
     popover.querySelectorAll('.qc__nativeSearchMatch-item').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        const idx = Number(btn.dataset.idx);
-        const target = matches[idx];
+        if (!model || this._editor?.getModel?.() !== model) {
+          this._closeMatchesPopover_();
+          return;
+        }
+        const target = matches[Number(btn.dataset.idx)];
         if (!target) return;
-        this._jumpToMatch_({ model: this._editor.getModel(), range: target.range });
+        this._jumpToMatch_({ model, range: target.range });
         this._closeMatchesPopover_();
       });
     });
@@ -973,95 +1326,89 @@ class GasNativeSearch {
   /** @private */
   _positionMatchesPopover_() {
     const popover = document.getElementById(GasNativeSearch.MATCHES_ID);
-    const trigger = document.getElementById(GasNativeSearch.MATCHES_BTN);
+    const trigger = this._q_(GasNativeSearch.MATCHES_BTN);
     if (!popover || !trigger) return;
-
-    const rect = trigger.getBoundingClientRect();
-    const arrowSize = 6;
-    const margin = 6;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const w  = popover.offsetWidth  || 300;
-    const h  = popover.offsetHeight || 240;
-
-    // Alinear el borde derecho del popover con el botón.
-    let left = rect.right - w;
-    if (left < margin) left = margin;
-    if (left + w + margin > vw) left = vw - w - margin;
-
-    let top = rect.bottom + arrowSize;
-    let placement = 'bottom';
-    if (top + h + margin > vh && rect.top - h - arrowSize > margin) {
-      top = rect.top - h - arrowSize;
-      placement = 'top';
-    }
-
-    popover.style.left = `${left}px`;
-    popover.style.top  = `${top}px`;
-    popover.dataset.placement = placement;
-
-    const arrow = popover.querySelector('.qc__nativeSearchPopover-arrow');
-    if (arrow) {
-      const triggerCenter = rect.left + rect.width / 2;
-      const arrowLeft = Math.max(14, Math.min(w - 14, triggerCenter - left));
-      arrow.style.left = `${arrowLeft}px`;
-    }
+    this._placePopover_(popover, trigger, 'end');
   }
 
   /**
-   * Devuelve los matches en el modelo activo con la línea ya recortada
-   * para mostrar en el popover.
+   * Matches del modelo activo con el texto de su línea inicial.
    * @returns {Array<{line:number, column:number, text:string, matchText:string, range:object}>}
    * @private
    */
   _currentFileMatches_() {
     const model = this._editor?.getModel?.();
-    if (!model || !this._controller) return [];
+    if (!model || !this._controller || model.isDisposed?.()) return [];
     const params = this._buildSearchParams_(this._controller.getState?.());
     if (!params.searchString) return [];
 
-    const found = model.findMatches(
-      params.searchString, false,
-      params.isRegex, params.matchCase, params.wholeWord, true,
-    ) || [];
+    let found;
+    try {
+      found = model.findMatches(
+        params.searchString, false,
+        params.isRegex, params.matchCase, params.wholeWord, false,
+        GasNativeSearch.MAX_RESULTS,
+      ) || [];
+    } catch (_) {
+      return [];
+    }
 
     return found.map((m) => {
-      const lineText = model.getLineContent(m.range.startLineNumber);
-      const matchText = lineText.slice(m.range.startColumn - 1, m.range.endColumn - 1);
+      const r = m.range;
+      const lineText = model.getLineContent(r.startLineNumber) || '';
+      // Multilínea: el resaltado cubre hasta el fin de la línea inicial.
+      const end = r.endLineNumber === r.startLineNumber ? r.endColumn - 1 : lineText.length;
       return {
-        line: m.range.startLineNumber,
-        column: m.range.startColumn,
+        line: r.startLineNumber,
+        column: r.startColumn,
         text: lineText,
-        matchText,
-        range: m.range,
+        matchText: lineText.slice(r.startColumn - 1, end),
+        range: r,
       };
     });
   }
 
   /**
-   * Recorta la línea alrededor del match y resalta la coincidencia.
+   * Recorta la línea alrededor del match real y lo resalta. Parte el texto
+   * crudo y escapa cada trozo.
    * @param {string} lineText
    * @param {string} matchText
-   * @returns {string}
+   * @param {number} [column] Columna (1-based) del match; sin ella usa la primera aparición.
+   * @returns {string} HTML seguro.
    * @private
    */
-  _renderSnippet_(lineText, matchText) {
+  _renderSnippet_(lineText, matchText, column) {
     if (!lineText) return '';
-    const trimmed = lineText.replace(/^\s+/, '');
-    const idx = matchText ? trimmed.toLowerCase().indexOf(matchText.toLowerCase()) : -1;
-    const max = 80;
-    let snippet = trimmed;
-    if (snippet.length > max) {
-      const start = Math.max(0, (idx >= 0 ? idx : 0) - 20);
-      snippet = (start > 0 ? '…' : '') + snippet.slice(start, start + max) + (start + max < trimmed.length ? '…' : '');
+    const esc = DomUtils.escapeHtml;
+    const lead = lineText.length - lineText.replace(/^\s+/, '').length;
+    let at = Number.isFinite(column)
+      ? column - 1
+      : (matchText ? lineText.toLowerCase().indexOf(matchText.toLowerCase(), lead) : -1);
+    const len = matchText ? matchText.length : 0;
+    // Si el match cae dentro de la sangría no la recortamos.
+    const base = at >= 0 && at < lead ? 0 : lead;
+    let text = lineText.slice(base);
+    if (at >= 0) at -= base;
+
+    const context = 12;
+    const threshold = 20;
+    const maxTail = 160;
+    let prefix = '';
+    if (at > threshold) {
+      text = text.slice(at - context);
+      at = context;
+      prefix = '…';
     }
-    if (!matchText) return this._escapeHtml_(snippet);
-    const lower = snippet.toLowerCase();
-    const at = lower.indexOf(matchText.toLowerCase());
-    if (at < 0) return this._escapeHtml_(snippet);
-    return this._escapeHtml_(snippet.slice(0, at))
-      + `<mark>${this._escapeHtml_(snippet.slice(at, at + matchText.length))}</mark>`
-      + this._escapeHtml_(snippet.slice(at + matchText.length));
+    let suffix = '';
+    const limit = Math.max(maxTail, at + len + context);
+    if (text.length > limit) {
+      text = text.slice(0, limit);
+      suffix = '…';
+    }
+    if (at < 0 || !len) return esc(prefix + text + suffix);
+    return esc(prefix + text.slice(0, at))
+      + `<mark>${esc(text.slice(at, at + len))}</mark>`
+      + esc(text.slice(at + len) + suffix);
   }
 
   // ── Popover de archivos ──────────────────────────────────────────
@@ -1073,38 +1420,41 @@ class GasNativeSearch {
   }
 
   /**
-   * Abre el popover. Si `autoFocusFilter` es true (apertura manual por
-   * click) damos foco al input del filtro; si es false (auto-apertura
-   * al tipear en el find widget nativo) NO robamos el foco al usuario.
-   * @param {{autoFocusFilter?:boolean}} [opts]
+   * Abre el popover con los grupos recalculados en el momento.
+   * @param {{autoFocusFilter?:boolean}} [opts] `autoFocusFilter` enfoca el filtro.
    * @private
    */
   _openPopover_(opts = {}) {
-    if (!this._lastGroups.length) return;
+    const state = this._controller?.getState?.();
+    if (!state?.searchString) return;
+    this._lastGroups = this._computeGroups_(state);
+    this._lastQuery = state.searchString;
     const autoFocusFilter = opts.autoFocusFilter !== false;
+    this._closeMatchesPopover_();
     this._popoverOpen = true;
     this._popoverFilter = '';
-    this._userClosedQuery = '';
 
     const popover = document.createElement('div');
     popover.id = GasNativeSearch.POPOVER_ID;
     popover.className = 'qc__nativeSearchPopover';
     popover.setAttribute('role', 'dialog');
+    popover.setAttribute('aria-label', DomUtils.t('edSearchFilesDialog', 'Files with matches'));
     document.body.appendChild(popover);
 
     this._renderPopover_();
     this._positionPopover_();
 
-    const trigger = document.getElementById('qc__nativeSearchTrigger');
-    trigger?.setAttribute('aria-expanded', 'true');
+    this._q_(GasNativeSearch.TRIGGER_ID)?.setAttribute('aria-expanded', 'true');
 
     document.addEventListener('mousedown', this._onPopoverOutside, true);
     document.addEventListener('keydown', this._onPopoverKey, true);
     window.addEventListener('resize', this._onPopoverKey);
+    this._observeRoot_();
 
     if (autoFocusFilter) {
       requestAnimationFrame(() => {
-        popover.querySelector('#qc__nativeSearchPopoverFilter')?.focus();
+        document.getElementById(GasNativeSearch.POPOVER_ID)
+          ?.querySelector(`#${GasNativeSearch.FILTER_ID}`)?.focus?.();
       });
     }
   }
@@ -1113,90 +1463,67 @@ class GasNativeSearch {
   _closePopover_() {
     if (!this._popoverOpen) return;
     this._popoverOpen = false;
-    // Recordamos qué query tenía el usuario al cerrar para no
-    // re-abrirlo automáticamente sin que cambie la búsqueda.
-    this._userClosedQuery = this._lastQuery;
     document.getElementById(GasNativeSearch.POPOVER_ID)?.remove();
     document.removeEventListener('mousedown', this._onPopoverOutside, true);
     document.removeEventListener('keydown', this._onPopoverKey, true);
     window.removeEventListener('resize', this._onPopoverKey);
-    document.getElementById('qc__nativeSearchTrigger')?.setAttribute('aria-expanded', 'false');
+    this._q_(GasNativeSearch.TRIGGER_ID)?.setAttribute('aria-expanded', 'false');
+    this._releaseObserver_();
   }
 
-  /** @private */
-  _renderPopover_() {
-    const popover = document.getElementById(GasNativeSearch.POPOVER_ID);
-    if (!popover) return;
-    const currentUri = this._editor?.getModel?.().uri.toString();
+  /** HTML de la cabecera (archivos · coincidencias). @private */
+  _popoverHeadHtml_() {
     const groups = this._lastGroups;
+    const totalMatches = groups.reduce((acc, g) => acc + g.count, 0);
+    return `
+      <span class="qc__nativeSearchPopover-stat">
+        ${this._countHtml_(groups.length, 'file')}
+        <span class="qc__nativeSearchPopover-sep" aria-hidden="true">·</span>
+        ${this._countHtml_(totalMatches, 'match')}
+      </span>`;
+  }
 
+  /** HTML de la lista de archivos, con filtro aplicado. @private */
+  _popoverItemsHtml_() {
+    const groups = this._lastGroups;
+    const currentUri = this._currentUri_();
     const filter = this._popoverFilter.toLowerCase();
     const visible = filter
       ? groups.filter((g) => g.name.toLowerCase().includes(filter))
       : groups;
 
-    const totalMatches = groups.reduce((acc, g) => acc + g.count, 0);
+    if (!visible.length) {
+      const msg = !groups.length
+        ? DomUtils.t('edSearchNoMatches', 'No matches in the project')
+        : DomUtils.t('edSearchNoFilterMatch', 'No files match this filter');
+      return `<div class="qc__nativeSearchPopover-empty">${DomUtils.escapeHtml(msg)}</div>`;
+    }
 
-    const itemsHtml = visible.map((g) => {
+    return visible.map((g) => {
       const realIdx = groups.indexOf(g);
       const isActive = g.uri === currentUri;
       return `
-        <button class="qc__nativeSearchPopover-item ${isActive ? 'qc__nativeSearchPopover-item--active' : ''}"
-                data-idx="${realIdx}" type="button" role="option" aria-selected="${isActive}"
-                title="${this._escapeAttr_(g.name)}">
+        <button class="qc__nativeSearchPopover-item${isActive ? ' qc__nativeSearchPopover-item--active' : ''}" data-idx="${realIdx}" type="button"${isActive ? ' aria-current="true"' : ''}
+                title="${DomUtils.escapeHtml(g.name)}">
           <span class="qc__nativeSearchPopover-icon" aria-hidden="true">${this._iconForFile_(g.name)}</span>
-          <span class="qc__nativeSearchPopover-name">${this._highlightFilter_(g.name, this._popoverFilter)}</span>
-          <span class="qc__nativeSearchPopover-count" title="${g.count} match(es)">${g.count}</span>
+          <span class="qc__nativeSearchPopover-name">${this._pathHtml_(g.name, this._popoverFilter)}</span>
+          <span class="qc__nativeSearchPopover-count" title="${DomUtils.escapeHtml(this._countLabel_(g.count, 'match'))}">${g.count}</span>
         </button>
       `;
     }).join('');
+  }
 
-    DomUtils.setHTML(popover, `
-      <div class="qc__nativeSearchPopover-arrow" aria-hidden="true"></div>
-      <div class="qc__nativeSearchPopover-head">
-        <span class="qc__nativeSearchPopover-stat">
-          <strong>${groups.length}</strong> file(s)
-          <span class="qc__nativeSearchPopover-sep">·</span>
-          <strong>${totalMatches}</strong> match(es)
-        </span>
-      </div>
-      <div class="qc__nativeSearchPopover-search">
-        <span class="qc__nativeSearchPopover-searchIcon" aria-hidden="true"></span>
-        <input id="qc__nativeSearchPopoverFilter" type="text"
-               class="qc__nativeSearchPopover-input"
-               placeholder="Filter files…"
-               autocomplete="off" spellcheck="false"
-               value="${this._escapeAttr_(this._popoverFilter)}">
-      </div>
-      <div class="qc__nativeSearchPopover-list" role="listbox">${itemsHtml || `<div class="qc__nativeSearchPopover-empty">No files match this filter</div>`}</div>
-    `);
-
-    DomUtils.setHTML(
-      popover.querySelector('.qc__nativeSearchPopover-searchIcon'),
-      this._magnifierSvg_(),
-    );
-
-    const input = popover.querySelector('#qc__nativeSearchPopoverFilter');
-    input.addEventListener('input', (e) => {
-      this._popoverFilter = String(e.target.value || '');
-      this._renderPopover_();
-      // Reposicionamos por si el alto del popover cambió.
-      this._positionPopover_();
-      // Mantener foco tras el re-render.
-      requestAnimationFrame(() => {
-        const next = document.getElementById('qc__nativeSearchPopoverFilter');
-        if (next && document.activeElement !== next) {
-          next.focus();
-          next.setSelectionRange(this._popoverFilter.length, this._popoverFilter.length);
-        }
-      });
-    });
-
-    popover.querySelectorAll('.qc__nativeSearchPopover-item').forEach((btn) => {
+  /**
+   * Enlaza el clic de los items de archivo dentro de `scope`.
+   * @param {HTMLElement} scope
+   * @private
+   */
+  _bindPopoverItems_(scope) {
+    const groups = this._lastGroups;
+    scope.querySelectorAll('.qc__nativeSearchPopover-item').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        const idx = Number(btn.dataset.idx);
-        const target = this._lastGroups[idx];
+        const target = groups[Number(btn.dataset.idx)];
         if (!target?.first) return;
         this._jumpToMatch_(target.first);
         this._closePopover_();
@@ -1204,86 +1531,156 @@ class GasNativeSearch {
     });
   }
 
+  /** Pinta el popover completo (cabecera, filtro y lista). @private */
+  _renderPopover_() {
+    const popover = document.getElementById(GasNativeSearch.POPOVER_ID);
+    if (!popover) return;
+
+    DomUtils.setHTML(popover, `
+      <div class="qc__nativeSearchPopover-arrow" aria-hidden="true"></div>
+      <div class="qc__nativeSearchPopover-head">${this._popoverHeadHtml_()}</div>
+      <div class="qc__nativeSearchPopover-search">
+        <span class="qc__nativeSearchPopover-searchIcon" aria-hidden="true"></span>
+        <input id="${GasNativeSearch.FILTER_ID}" type="text"
+               class="qc__nativeSearchPopover-input"
+               placeholder="${DomUtils.escapeHtml(DomUtils.t('edSearchFilterFiles', 'Filter files…'))}"
+               aria-label="${DomUtils.escapeHtml(DomUtils.t('edSearchFilterFiles', 'Filter files…'))}"
+               autocomplete="off" spellcheck="false"
+               value="${DomUtils.escapeHtml(this._popoverFilter)}">
+      </div>
+      <div class="qc__nativeSearchPopover-list" role="group">${this._popoverItemsHtml_()}</div>
+    `);
+
+    DomUtils.setHTML(
+      popover.querySelector('.qc__nativeSearchPopover-searchIcon'),
+      this._magnifierSvg_(),
+    );
+
+    const input = popover.querySelector(`#${GasNativeSearch.FILTER_ID}`);
+    // Composición IME (tildes, CJK): esperamos a `compositionend`.
+    input?.addEventListener('input', (e) => {
+      if (e.isComposing) return;
+      this._applyFilter_(e.target?.value);
+    });
+    input?.addEventListener('compositionend', (e) => this._applyFilter_(e.target?.value));
+
+    this._bindPopoverItems_(popover);
+  }
+
+  /** Refresca cabecera y lista sin tocar el filtro (conserva foco). @private */
+  _updatePopover_() {
+    const popover = document.getElementById(GasNativeSearch.POPOVER_ID);
+    if (!popover) return;
+    const head = popover.querySelector('.qc__nativeSearchPopover-head');
+    if (head) DomUtils.setHTML(head, this._popoverHeadHtml_());
+    this._renderPopoverList_();
+  }
+
+  /** Re-renderiza solo la lista de archivos. @private */
+  _renderPopoverList_() {
+    const popover = document.getElementById(GasNativeSearch.POPOVER_ID);
+    const list = popover?.querySelector('.qc__nativeSearchPopover-list');
+    if (!list) return;
+    DomUtils.setHTML(list, this._popoverItemsHtml_());
+    this._bindPopoverItems_(list);
+  }
+
   /**
-   * Devuelve el SVG del icono usando la instancia compartida
-   * `window.gasFolders` (la misma que pinta el árbol de archivos).
+   * Aplica el filtro del popover y repinta solo la lista.
+   * @param {string} value
+   * @private
+   */
+  _applyFilter_(value) {
+    const next = String(value || '');
+    if (next === this._popoverFilter) return;
+    this._popoverFilter = next;
+    this._renderPopoverList_();
+    this._positionPopover_();
+  }
+
+  /**
+   * SVG del icono vía `window.gasFolders`; solo se acepta si es un `<svg>`.
    * @param {string} fileName
    * @returns {string}
    * @private
    */
   _iconForFile_(fileName) {
     const folders = window.gasFolders;
-    if (folders?._renderFileSvg_) {
+    if (typeof folders?._renderFileSvg_ === 'function') {
       const ext = String(fileName || '').split('.').pop().toLowerCase();
       const type = (ext === 'gs' || ext === 'html' || ext === 'json') ? ext : 'generic';
-      try { return folders._renderFileSvg_(type); }
-      catch (_) { /* noop */ }
+      try {
+        const svg = folders._renderFileSvg_(type);
+        if (typeof svg === 'string' && svg.trim().startsWith('<svg')
+            && !/<script|<foreignObject|\son\w+\s*=|javascript:/i.test(svg)) return svg;
+      } catch (_) { /* noop */ }
     }
     return this._fileSvg_();
   }
 
   /**
-   * Devuelve el nombre con el filtro resaltado como `<mark>` para
-   * dar retroalimentación visual al usuario que está filtrando.
+   * Separa una ruta `carpeta/nombre`.
    * @param {string} name
-   * @param {string} filter
+   * @returns {{dir:string, base:string}}
+   * @private
+   */
+  _splitPath_(name) {
+    const s = String(name || '');
+    const cut = s.lastIndexOf('/') + 1;
+    return { dir: s.slice(0, cut), base: s.slice(cut) };
+  }
+
+  /**
+   * HTML seguro de una ruta: carpeta truncable + nombre base, con el
+   * filtro resaltado como `<mark>`.
+   * @param {string} name
+   * @param {string} [filter]
    * @returns {string}
    * @private
    */
-  _highlightFilter_(name, filter) {
-    if (!filter) return this._escapeHtml_(name);
-    const lower = name.toLowerCase();
-    const idx = lower.indexOf(filter.toLowerCase());
-    if (idx < 0) return this._escapeHtml_(name);
-    const before = name.slice(0, idx);
-    const match  = name.slice(idx, idx + filter.length);
-    const after  = name.slice(idx + filter.length);
-    return `${this._escapeHtml_(before)}<mark>${this._escapeHtml_(match)}</mark>${this._escapeHtml_(after)}`;
+  _pathHtml_(name, filter = '') {
+    const { dir, base } = this._splitPath_(name);
+    let hs = -1;
+    let he = -1;
+    if (filter) {
+      hs = String(name).toLowerCase().indexOf(filter.toLowerCase());
+      if (hs >= 0) he = hs + filter.length;
+    }
+    const dirHtml = dir
+      ? `<span class="qc__nativeSearchPath-dir"><bdi>${this._markRange_(dir, hs, he)}</bdi></span>`
+      : '';
+    return `${dirHtml}<span class="qc__nativeSearchPath-base">${this._markRange_(base, hs - dir.length, he - dir.length)}</span>`;
+  }
+
+  /**
+   * Escapa `text` envolviendo `[start, end)` en `<mark>` si hay solape.
+   * @param {string} text
+   * @param {number} start
+   * @param {number} end
+   * @returns {string}
+   * @private
+   */
+  _markRange_(text, start, end) {
+    const esc = DomUtils.escapeHtml;
+    const s = Math.max(0, start);
+    const e = Math.min(text.length, end);
+    if (e <= s) return esc(text);
+    return `${esc(text.slice(0, s))}<mark>${esc(text.slice(s, e))}</mark>${esc(text.slice(e))}`;
   }
 
   /** @private */
   _positionPopover_() {
     const popover = document.getElementById(GasNativeSearch.POPOVER_ID);
-    const trigger = document.getElementById('qc__nativeSearchTrigger');
+    const trigger = this._q_(GasNativeSearch.TRIGGER_ID);
     if (!popover || !trigger) return;
-
-    const rect = trigger.getBoundingClientRect();
-    const margin = 6;
-    const arrowSize = 6;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const w  = popover.offsetWidth  || 240;
-    const h  = popover.offsetHeight || 240;
-
-    let left = rect.left;
-    if (left + w + margin > vw) left = vw - w - margin;
-    if (left < margin) left = margin;
-
-    let top = rect.bottom + arrowSize;
-    let placement = 'bottom';
-    if (top + h + margin > vh && rect.top - h - arrowSize > margin) {
-      top = rect.top - h - arrowSize;
-      placement = 'top';
-    }
-
-    popover.style.left = `${left}px`;
-    popover.style.top  = `${top}px`;
-    popover.dataset.placement = placement;
-
-    // Posicionar la flecha apuntando al centro del trigger.
-    const arrow = popover.querySelector('.qc__nativeSearchPopover-arrow');
-    if (arrow) {
-      const triggerCenter = rect.left + rect.width / 2;
-      const arrowLeft = Math.max(14, Math.min(w - 14, triggerCenter - left));
-      arrow.style.left = `${arrowLeft}px`;
-    }
+    this._placePopover_(popover, trigger, 'start');
   }
 
   /** @private */
   _onPopoverOutside(e) {
     if (!this._popoverOpen) return;
     const popover = document.getElementById(GasNativeSearch.POPOVER_ID);
-    const trigger = document.getElementById('qc__nativeSearchTrigger');
+    const trigger = this._q_(GasNativeSearch.TRIGGER_ID);
     const path = e.composedPath?.() || [];
     if (popover && path.includes(popover)) return;
     if (trigger && path.includes(trigger)) return;
@@ -1293,12 +1690,69 @@ class GasNativeSearch {
   /** @private */
   _onPopoverKey(e) {
     if (!this._popoverOpen) return;
-    if (e.type === 'keydown' && e.key === 'Escape') {
+    if (e.type === 'resize') { this._positionPopover_(); return; }
+    if (e.type !== 'keydown') return;
+    const popover = document.getElementById(GasNativeSearch.POPOVER_ID);
+    const path = e.composedPath?.() || [];
+    const inside = !!popover && path.includes(popover);
+    if (e.key === 'Escape') {
       e.stopPropagation();
       this._closePopover_();
+      if (inside) this._q_(GasNativeSearch.TRIGGER_ID)?.focus?.();
       return;
     }
-    if (e.type === 'resize') this._positionPopover_();
+    if (!inside || e.isComposing) return;
+    const items = Array.from(popover.querySelectorAll('.qc__nativeSearchPopover-item'));
+    const isFilter = e.target?.id === GasNativeSearch.FILTER_ID;
+    if (isFilter) {
+      if (e.key === 'ArrowDown' && items.length) {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        items[0].focus?.();
+      } else if (e.key === 'Enter' && items.length) {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        items[0].click?.();
+      }
+      return;
+    }
+    this._moveFocus_(e, items);
+  }
+
+  /**
+   * Texto traducido "N match(es)" / "N file(s)" con singular/plural.
+   * @param {number} count
+   * @param {'match'|'file'} kind
+   * @returns {string}
+   * @private
+   */
+  _countLabel_(count, kind) {
+    if (kind === 'file') {
+      return count === 1
+        ? DomUtils.t('edSearchFileOne', '$1 file', count)
+        : DomUtils.t('edSearchFileMany', '$1 files', count);
+    }
+    return count === 1
+      ? DomUtils.t('edSearchMatchOne', '$1 match', count)
+      : DomUtils.t('edSearchMatchMany', '$1 matches', count);
+  }
+
+  /**
+   * Igual que `_countLabel_` pero con el número en `<strong>`: parte el
+   * texto crudo y escapa cada trozo.
+   * @param {number} count
+   * @param {'match'|'file'} kind
+   * @returns {string} HTML seguro.
+   * @private
+   */
+  _countHtml_(count, kind) {
+    const label = String(this._countLabel_(count, kind));
+    const num = String(count);
+    const at = label.indexOf(num);
+    if (at < 0) return DomUtils.escapeHtml(label);
+    return DomUtils.escapeHtml(label.slice(0, at))
+      + `<strong>${DomUtils.escapeHtml(num)}</strong>`
+      + DomUtils.escapeHtml(label.slice(at + num.length));
   }
 
   /** @private */
@@ -1329,19 +1783,6 @@ class GasNativeSearch {
   /** @private */
   _listSvg_() {
     return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h8M5 8h8M5 12h8"/><circle cx="2.5" cy="4" r=".75" fill="currentColor"/><circle cx="2.5" cy="8" r=".75" fill="currentColor"/><circle cx="2.5" cy="12" r=".75" fill="currentColor"/></svg>`;
-  }
-
-  /** @private */
-  _escapeHtml_(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  }
-
-  /** @private */
-  _escapeAttr_(value) {
-    return this._escapeHtml_(value).replace(/"/g, '&quot;');
   }
 }
 

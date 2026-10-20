@@ -10,6 +10,7 @@ export const Toast = {
 
     const toast = document.createElement('div');
     toast.className = `qc__toast qc__toast--${type}`;
+    toast.setAttribute('role', 'status');
     toast.textContent = message;
 
     container.appendChild(toast);

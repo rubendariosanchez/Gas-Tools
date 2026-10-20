@@ -19,8 +19,11 @@
  */
 
 import { DB } from '../src/js/utils/Storage.js';
-import { G_PROPERTY_NAME, DEFAULT_SNIPPETS, DEFAULT_SETTINGS_OPTIONS } from '../src/js/utils/Variables.js';
-import { getActiveTheme, callLlmProvider } from './js/services/llm-providers.js';
+import { G_PROPERTY_NAME, DEFAULT_SNIPPETS, SETTINGS_SCHEMA_VERSION, normalizeSettings } from '../src/js/utils/Variables.js';
+import { callLlmProvider, fetchProviderModels } from './js/services/llm-providers.js';
+import { callLlmWithTools } from './js/services/llm-tools.js';
+import { getActiveTheme } from './js/services/theme-service.js';
+import { AI_PROVIDER_ORIGINS } from '../src/js/utils/Providers.js';
 import { callGithubApi, startDeviceFlow, pollDeviceToken, getAuthenticatedUser } from './js/services/github-api.js';
 import { callGoogleApi, getGoogleUser } from './js/services/google-api.js';
 
@@ -30,8 +33,39 @@ import { callGoogleApi, getGoogleUser } from './js/services/google-api.js';
 // Token y perfil del usuario son globales (una sola cuenta por extensión).
 // El mapping de proyecto→repo se guarda por scriptId para soportar varios
 // proyectos GAS desde la misma sesión sin re-configurar.
-const GH_TOKEN_KEY    = 'gasToolsGithubAuth';      // { token, user }
-const GH_PROJECTS_KEY = 'gasToolsGithubProjects';  // { [scriptId]: { repo, branch, basePath } }
+const GH_TOKEN_KEY    = 'gasToolsGithubAuth';      // { token, user } — storage.local
+// Legacy: un único objeto { [scriptId]: config } en sync (límite 8 KB por
+// clave). Ahora cada proyecto vive en su propia clave `GH_PROJECT_PREFIX + id`.
+const GH_PROJECTS_KEY   = 'gasToolsGithubProjects';
+const GH_PROJECT_PREFIX = 'gasToolsGhProject:';     // { repo, branch, basePath }
+
+// ─────────────────────────────────────────────
+// CLAVES DE STORAGE PARA LLM
+// ─────────────────────────────────────────────
+// La config no sensible (provider, modelo, prompts) sigue en sync. Las
+// API keys viven SOLO en storage.local y nunca salen del background:
+// el MAIN world recibe `apiKeysSet` (booleanos) y el background inyecta
+// la key en cada LLM_CHAT_REQUEST.
+const LLM_CONFIG_KEY  = 'gasToolsLlmConfig';
+const LLM_SECRETS_KEY = 'gasToolsLlmSecrets';      // { [providerId]: apiKey } — storage.local
+
+// Peticiones LLM en curso, para poder abortarlas con LLM_CANCEL.
+// Clave: `${tabId}:${requestId}`.
+const G_LLM_INFLIGHT = new Map();
+
+// Página del Side Panel (chat). Global deshabilitado: solo se habilita por
+// pestaña al abrirlo desde el editor (ver OPEN_SIDE_PANEL).
+const SIDE_PANEL_PATH = 'extension/html/sidepanel.html';
+
+/** Deshabilita el panel global para que no aparezca en pestañas ajenas a GAS. */
+function _disableGlobalSidePanel() {
+  try {
+    chrome.sidePanel?.setOptions?.({ path: SIDE_PANEL_PATH, enabled: false })?.catch?.(() => {});
+  } catch (_) { /* API no disponible */ }
+}
+
+// Los mensajes desde pestañas solo se aceptan del IDE de Apps Script.
+const ALLOWED_TAB_ORIGIN = 'https://script.google.com/';
 
 // Client ID de la OAuth App pública usada por la extensión. Es público
 // por diseño (Device Flow no usa client_secret) y va embebido en el
@@ -47,18 +81,373 @@ const GH_CLIENT_ID = 'Ov23liwkN4OIewqxXF7m';
 // revoca/refresca cuando es necesario.
 const GG_USER_KEY = 'gasToolsGoogleUser';
 
-/** Lee la auth global de GitHub desde chrome.storage.sync. */
-function _getGithubAuth() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get([GH_TOKEN_KEY], (r) => resolve(r?.[GH_TOKEN_KEY] || null));
-  });
+/**
+ * Lee la auth global de GitHub desde chrome.storage.local. Si encuentra
+ * la versión antigua en sync (antes se guardaba ahí), la migra a local
+ * y la borra de sync para que el token deje de replicarse entre equipos.
+ */
+async function _getGithubAuth() {
+  const local = await chrome.storage.local.get([GH_TOKEN_KEY]);
+  if (local?.[GH_TOKEN_KEY]) return local[GH_TOKEN_KEY];
+
+  const legacy = await chrome.storage.sync.get([GH_TOKEN_KEY]);
+  const value  = legacy?.[GH_TOKEN_KEY] || null;
+  if (value) {
+    await chrome.storage.local.set({ [GH_TOKEN_KEY]: value });
+    await chrome.storage.sync.remove(GH_TOKEN_KEY);
+  }
+  return value;
 }
 
-/** Guarda la auth global de GitHub. */
-function _setGithubAuth(value) {
-  return new Promise((resolve) => {
-    chrome.storage.sync.set({ [GH_TOKEN_KEY]: value || null }, () => resolve(!chrome.runtime.lastError));
-  });
+/** Guarda (o borra con `null`) la auth global de GitHub en storage.local. */
+async function _setGithubAuth(value) {
+  try {
+    if (value) await chrome.storage.local.set({ [GH_TOKEN_KEY]: value });
+    else       await chrome.storage.local.remove(GH_TOKEN_KEY);
+    // Limpieza defensiva de la copia legacy en sync.
+    await chrome.storage.sync.remove(GH_TOKEN_KEY);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────
+// HELPERS DE LLM (config pública + secretos)
+// ─────────────────────────────────────────────
+
+/**
+ * Lee las API keys desde storage.local. Migra el formato legacy en el que
+ * `gasToolsLlmConfig.apiKeys` vivía en sync junto al resto de la config.
+ * @returns {Promise<Object<string,string>>}
+ */
+async function _getLlmSecrets() {
+  const local   = await chrome.storage.local.get([LLM_SECRETS_KEY]);
+  const secrets = { ...(local?.[LLM_SECRETS_KEY] || {}) };
+
+  const syncRes = await chrome.storage.sync.get([LLM_CONFIG_KEY]);
+  const cfg     = syncRes?.[LLM_CONFIG_KEY];
+  if (cfg?.apiKeys && typeof cfg.apiKeys === 'object') {
+    for (const [provider, key] of Object.entries(cfg.apiKeys)) {
+      if (key && !secrets[provider]) secrets[provider] = key;
+    }
+    const { apiKeys: _legacy, ...publicCfg } = cfg;
+    await chrome.storage.local.set({ [LLM_SECRETS_KEY]: secrets });
+    await chrome.storage.sync.set({ [LLM_CONFIG_KEY]: publicCfg });
+  }
+  return secrets;
+}
+
+/** Devuelve la config pública + `apiKeysSet` (sin secretos). */
+async function _getPublicLlmConfig() {
+  const secrets = await _getLlmSecrets();   // también migra el legacy
+  const r   = await chrome.storage.sync.get([LLM_CONFIG_KEY]);
+  const cfg = r?.[LLM_CONFIG_KEY] || null;
+  const apiKeysSet = Object.fromEntries(
+    Object.entries(secrets).filter(([, v]) => !!v).map(([k]) => [k, true])
+  );
+  if (!cfg && !Object.keys(apiKeysSet).length) return null;
+  const { apiKeys: _drop, apiKeysSet: _drop2, ...publicCfg } = cfg || {};
+  return { ...publicCfg, apiKeysSet };
+}
+
+/**
+ * Persiste la config pública en sync y aplica `apiKeyUpdates` sobre los
+ * secretos locales (string no vacío = guardar, null/'' = borrar).
+ * Acepta también el formato legacy `apiKeys` (solo valores no vacíos).
+ */
+async function _saveLlmConfig(payload) {
+  const {
+    apiKeys, apiKeyUpdates, apiKeysSet: _ignored, aiContext: _ctx, requestId: _rid,
+    ...publicCfg
+  } = payload || {};
+
+  const updates = { ...(apiKeyUpdates || {}) };
+  if (apiKeys && typeof apiKeys === 'object') {
+    for (const [provider, key] of Object.entries(apiKeys)) {
+      if (key && !(provider in updates)) updates[provider] = key;
+    }
+  }
+
+  const secrets = await _getLlmSecrets();
+  for (const [provider, key] of Object.entries(updates)) {
+    if (typeof key === 'string' && key.trim()) secrets[provider] = key.trim();
+    else delete secrets[provider];
+  }
+
+  await chrome.storage.local.set({ [LLM_SECRETS_KEY]: secrets });
+  await chrome.storage.sync.set({ [LLM_CONFIG_KEY]: publicCfg });
+  return true;
+}
+
+// Idioma de respuesta de la IA (pestaña AI Context del popup). 'auto' = no forzar.
+const AI_LANGUAGE_KEY = 'gasToolsAiLanguage';
+const AI_LANGUAGE_NAMES = {
+  es: 'Spanish',
+  en: 'English',
+  pt: 'Portuguese',
+  fr: 'French',
+  de: 'German',
+  it: 'Italian',
+};
+
+/** Lee el código de idioma configurado (o 'auto'). */
+async function _getAiLanguage() {
+  let chosen = 'auto';
+  try {
+    const r = await chrome.storage.sync.get([AI_LANGUAGE_KEY]);
+    chosen = r?.[AI_LANGUAGE_KEY] || 'auto';
+  } catch (_) { /* sin storage: auto */ }
+  if (chosen !== 'auto') return chosen;
+
+  // "Auto" sigue el idioma de la interfaz (selector EN/ES del popup): con la
+  // UI en español, las respuestas también salen en español. Con la UI en
+  // inglés no se fuerza nada (el modelo responde en el idioma del usuario).
+  try {
+    const settings = await DB.get('settings', G_PROPERTY_NAME);
+    return settings?.options?.['ui-language'] === 'es' ? 'es' : 'auto';
+  } catch (_) {
+    return 'auto';
+  }
+}
+
+/**
+ * Añade al mensaje `system` la instrucción de idioma. Se aplica en el
+ * background para cubrir chat y autocompletado con una sola regla. Solo
+ * afecta al lenguaje natural (explicaciones, comentarios), nunca a los
+ * identificadores ni al código.
+ * @param {Array<{role:string, content:string}>} messages
+ * @param {string} language
+ * @returns {Array}
+ */
+function _applyResponseLanguage(messages, language) {
+  const name = AI_LANGUAGE_NAMES[language];
+  if (!name || !Array.isArray(messages)) return messages;
+
+  const rule = `Language rule (overrides any previous language instruction): write all natural-language text — explanations, answers and code comments — in ${name}. Do not translate code, identifiers, API names or string literals that already exist.`;
+  const idx = messages.findIndex((m) => m.role === 'system');
+  if (idx === -1) return [{ role: 'system', content: rule }, ...messages];
+
+  const copy = messages.slice();
+  copy[idx] = { ...copy[idx], content: `${copy[idx].content || ''}\n\n${rule}` };
+  return copy;
+}
+
+// ─────────────────────────────────────────────
+// I18N DE LA UI INYECTADA
+// ─────────────────────────────────────────────
+
+// Cache en memoria mientras viva el SW: el JSON no cambia sin recargar la extensión.
+const G_EDITOR_I18N_CACHE = new Map();
+
+/**
+ * Devuelve `{lang, messages}` con las claves `ed*` del idioma pedido, o
+ * `null` para inglés (los componentes ya traen el inglés como fallback).
+ * Resuelve placeholders con nombre (`$NAME$` → `$1`).
+ * @param {string} lang
+ */
+async function _getEditorI18n(lang) {
+  if (lang !== 'es') return null;
+  if (G_EDITOR_I18N_CACHE.has(lang)) return G_EDITOR_I18N_CACHE.get(lang);
+  const res = await fetch(chrome.runtime.getURL(`_locales/${lang}/messages.json`));
+  if (!res.ok) return null;
+  const raw = await res.json();
+  const messages = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!key.startsWith('ed') || typeof value?.message !== 'string') continue;
+    const placeholders = value.placeholders || {};
+    messages[key] = value.message.replace(/\$([A-Za-z_][A-Za-z0-9_]*)\$/g,
+      (m, name) => placeholders[name.toLowerCase()]?.content ?? m);
+  }
+  const dict = { lang, messages };
+  G_EDITOR_I18N_CACHE.set(lang, dict);
+  return dict;
+}
+
+// ─────────────────────────────────────────────
+// PERMISOS OPCIONALES DE PROVEEDORES LLM
+// ─────────────────────────────────────────────
+
+/**
+ * Error con `permissionOrigin` para que el panel indique al usuario qué
+ * acceso debe conceder desde el popup (AI Context → Provider access).
+ */
+class MissingPermissionError extends Error {
+  constructor(origin) {
+    super(`Missing access to ${origin}. Grant it in the extension popup → AI Context → Provider access.`);
+    this.name = 'MissingPermissionError';
+    this.permissionOrigin = origin;
+  }
+}
+
+/**
+ * Devuelve los orígenes que necesita una petición. Para `custom` se deriva
+ * del Endpoint URL, con puerto (solo localhost/127.0.0.1 son opcionales).
+ * Falla en cerrado: proveedor desconocido o URL inválida lanzan error.
+ * @returns {string[]}
+ */
+function _requiredOrigins(provider, endpointUrl) {
+  if (provider === 'custom') {
+    let u;
+    try { u = new URL(endpointUrl || ''); } catch (_) { throw new Error('Invalid Endpoint URL for the Custom provider.'); }
+    if (!/^https?:$/.test(u.protocol)) throw new Error('The Endpoint URL must be http(s).');
+    return [`${u.protocol}//${u.host}/*`];
+  }
+  const origins = AI_PROVIDER_ORIGINS[provider]?.origins;
+  if (!origins?.length) throw new Error(`Unknown AI provider: ${provider}`);
+  return origins;
+}
+
+/**
+ * Endpoint efectivo: para `custom` sale de la config guardada (sync); si el
+ * payload trae otro distinto, se rechaza. El resto no usa endpoint.
+ * @returns {Promise<string|undefined>}
+ */
+async function _resolveEndpointUrl(provider, payloadUrl) {
+  if (provider !== 'custom') return undefined;
+  const r = await chrome.storage.sync.get([LLM_CONFIG_KEY]);
+  const cfg = r?.[LLM_CONFIG_KEY] || {};
+  const saved = String(cfg.providerSettings?.custom?.endpointUrl || cfg.endpointUrl || '').trim();
+  if (!saved) throw new Error('Save the Endpoint URL for the Custom provider first.');
+  if (payloadUrl && String(payloadUrl).trim() !== saved) {
+    throw new Error('The Endpoint URL does not match the saved configuration. Save it first.');
+  }
+  return saved;
+}
+
+/** Lanza MissingPermissionError si falta algún origen requerido. */
+async function _assertProviderPermission(provider, endpointUrl) {
+  for (const origin of _requiredOrigins(provider, endpointUrl)) {
+    const granted = await chrome.permissions.contains({ origins: [origin] }).catch(() => false);
+    if (!granted) throw new MissingPermissionError(origin);
+  }
+}
+
+/**
+ * Pipeline común de una petición LLM: permisos → secretos → idioma → fetch.
+ * @param {Object} payload  Sin `apiKey` (se ignora si viene).
+ * @param {{signal:AbortSignal, onDelta?:(text:string)=>void}} opts
+ * @returns {Promise<string>}
+ */
+async function _runLlmRequest(payload, { signal, onDelta } = {}) {
+  const { apiKey: _ignored, requestId: _rid, ...cfg } = payload || {};
+  const endpointUrl = await _resolveEndpointUrl(cfg.provider, cfg.endpointUrl);
+  await _assertProviderPermission(cfg.provider, endpointUrl);
+  const [secrets, language] = await Promise.all([_getLlmSecrets(), _getAiLanguage()]);
+  const apiKey = secrets[cfg.provider] || '';
+  const request = {
+    ...cfg,
+    endpointUrl,
+    messages: _applyResponseLanguage(cfg.messages, language),
+    apiKey,
+    signal,
+  };
+  // Modo agente: con `tools` se hace una vuelta sin streaming y se devuelve
+  // `{content, toolCalls, providerData}`; sin `tools`, texto (string).
+  if (Array.isArray(cfg.tools) && cfg.tools.length) return callLlmWithTools(request);
+  return callLlmProvider({ ...request, onDelta });
+}
+
+/**
+ * Oculta secretos en un texto de error: `Bearer …` y las API keys indicadas.
+ * @param {string} text
+ * @param {string[]} [secrets]
+ */
+function _redactSecrets(text, secrets = []) {
+  let out = String(text ?? '').replace(/Bearer\s+[^\s"',;}]+/gi, 'Bearer ***');
+  for (const secret of secrets) {
+    if (typeof secret === 'string' && secret.length >= 4) out = out.split(secret).join('***');
+  }
+  return out;
+}
+
+/** Normaliza un error de LLM para enviarlo al MAIN world (sin secretos). */
+async function _llmErrorPayload(err) {
+  const aborted = err?.name === 'AbortError';
+  const secrets = aborted ? [] : Object.values(await _getLlmSecrets().catch(() => ({})));
+  return {
+    aborted,
+    error: aborted ? 'Cancelled.' : _redactSecrets(err?.message || err, secrets),
+    permissionOrigin: err?.permissionOrigin || null,
+  };
+}
+
+// ─────────────────────────────────────────────
+// MAPPING GITHUB POR PROYECTO
+// ─────────────────────────────────────────────
+
+/** Migra el objeto legacy a claves por proyecto (una sola vez). */
+async function _migrateGithubProjects() {
+  const r = await chrome.storage.sync.get([GH_PROJECTS_KEY]);
+  const legacy = r?.[GH_PROJECTS_KEY];
+  if (!legacy || typeof legacy !== 'object') return;
+  const entries = Object.fromEntries(
+    Object.entries(legacy).filter(([, v]) => v).map(([id, v]) => [GH_PROJECT_PREFIX + id, v])
+  );
+  if (Object.keys(entries).length) await chrome.storage.sync.set(entries);
+  await chrome.storage.sync.remove(GH_PROJECTS_KEY);
+}
+
+async function _getGithubProject(scriptId) {
+  if (!scriptId) return null;
+  await _migrateGithubProjects();
+  const key = GH_PROJECT_PREFIX + scriptId;
+  const r = await chrome.storage.sync.get([key]);
+  return r?.[key] || null;
+}
+
+const GH_SCRIPT_ID_RE = /^[A-Za-z0-9_-]{20,120}$/;
+const GH_REPO_RE = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
+const GH_BRANCH_RE = /^[^\s~^:?*[\\]{1,255}$/;
+const GH_CONTROL_RE = /[\u0000-\u001f\u007f]/;
+
+/**
+ * Normaliza la config de proyecto a la lista blanca `{repo, branch, basePath, baseSha?}`.
+ * @param {object} config Config recibida del MAIN world.
+ * @returns {{repo:string, branch:string, basePath:string, baseSha?:string}}
+ * @throws {Error} Si algún campo obligatorio no es válido.
+ */
+function _cleanGithubProject(config) {
+  if (!config || typeof config !== 'object') throw new Error('Invalid project config.');
+  const { repo, branch, basePath = '', baseSha } = config;
+  const repoName = typeof repo === 'string' ? repo.split('/')[1] : '';
+  if (typeof repo !== 'string' || !GH_REPO_RE.test(repo) || repoName === '.' || repoName === '..') {
+    throw new Error('Invalid repository.');
+  }
+  if (typeof branch !== 'string' || !GH_BRANCH_RE.test(branch) || branch.includes('..') || GH_CONTROL_RE.test(branch)) {
+    throw new Error('Invalid branch.');
+  }
+  const path = typeof basePath === 'string' ? basePath : '';
+  if (path.length > 512 || path.includes('..') || path.includes('\\') || GH_CONTROL_RE.test(path)) {
+    throw new Error('Invalid base path.');
+  }
+  const clean = { repo, branch, basePath: path };
+  if (typeof baseSha === 'string' && /^[0-9a-f]{40}$/.test(baseSha)) clean.baseSha = baseSha;
+  return clean;
+}
+
+/**
+ * Guarda la config del proyecto (lista blanca validada; `baseSha` solo si es un SHA válido).
+ * @param {string} scriptId
+ * @param {{repo:string,branch:string,basePath?:string,baseSha?:string}|null} config
+ * @throws {Error} Si el scriptId o la config no son válidos.
+ */
+async function _saveGithubProject(scriptId, config) {
+  if (typeof scriptId !== 'string' || !GH_SCRIPT_ID_RE.test(scriptId)) throw new Error('Invalid scriptId.');
+  await _migrateGithubProjects();
+  const key = GH_PROJECT_PREFIX + scriptId;
+  if (!config) { await chrome.storage.sync.remove(key); return; }
+  await chrome.storage.sync.set({ [key]: _cleanGithubProject(config) });
+}
+
+/**
+ * Valida el origen de un mensaje: debe venir de esta extensión y, si viene
+ * de una pestaña, del IDE en script.google.com (content script).
+ */
+function _isTrustedSender(sender) {
+  if (sender?.id !== chrome.runtime.id) return false;
+  if (!sender.tab) return true;   // popup / páginas de la extensión
+  return typeof sender.url === 'string' && sender.url.startsWith(ALLOWED_TAB_ORIGIN);
 }
 
 // ─────────────────────────────────────────────
@@ -282,12 +671,55 @@ async function _buildSnippets() {
 }
 
 /**
- * Envía un payload a todos los tabs del editor GAS abiertos.
+ * Envía un mensaje a las páginas abiertas de la extensión (Side Panel,
+ * popup). Si no hay ninguna, Chrome rechaza con "Receiving end does not
+ * exist": es lo normal y se ignora.
+ * @param {Object} message
+ */
+function _sendToExtensionPages(message) {
+  try {
+    chrome.runtime.sendMessage(message)?.catch?.(() => { /* sin receptores */ });
+  } catch (_) { /* sin receptores */ }
+}
+
+// Respaldo si el manifest no declara content_scripts (no debería ocurrir).
+const EDITOR_URL_FALLBACK = ['https://script.google.com/home/projects/*/edit'];
+
+/**
+ * Patrones de URL del editor, tomados de los content_scripts del manifest (única fuente de verdad).
+ * @returns {string[]}
+ */
+function _editorUrlPatterns() {
+  try {
+    const patterns = (chrome.runtime.getManifest?.()?.content_scripts || [])
+      .flatMap((cs) => cs?.matches || []);
+    return patterns.length ? [...new Set(patterns)] : EDITOR_URL_FALLBACK;
+  } catch (_) {
+    return EDITOR_URL_FALLBACK;
+  }
+}
+
+/**
+ * Notifica que cambió la config LLM: el autocompletado de cada pestaña de
+ * GAS recarga su copia (vía content script) y el Side Panel puede refrescar.
+ */
+function _broadcastLlmConfigUpdated() {
+  _sendToExtensionPages({ type: 'LLM_CONFIG_UPDATED' });
+  chrome.tabs.query({ url: _editorUrlPatterns() }, (tabs) => {
+    (tabs || []).forEach((tab) => {
+      chrome.tabs.sendMessage(tab.id, { type: 'LLM_CONFIG_UPDATED' }).catch(() => { /* tab sin content script */ });
+    });
+  });
+}
+
+/**
+ * Envía un payload a las páginas de la extensión y a las pestañas del editor GAS.
  * @param {Object} payload
  */
 function _sendToTabs(payload) {
-  chrome.tabs.query({ url: 'https://script.google.com/*' }, (tabs) => {
-    tabs.forEach(tab => {
+  _sendToExtensionPages({ type: 'SETTINGS_UPDATED', payload });
+  chrome.tabs.query({ url: _editorUrlPatterns() }, (tabs) => {
+    (tabs || []).forEach(tab => {
       chrome.tabs.sendMessage(tab.id, {
         type: 'SETTINGS_UPDATED',
         payload,
@@ -306,12 +738,17 @@ function _sendToTabs(payload) {
 // MANEJADORES DE MENSAJES
 // ─────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || typeof msg.type !== 'string') return false;
+  if (!_isTrustedSender(sender)) {
+    console.warn('[Background] Mensaje rechazado de origen no confiable:', sender?.url);
+    return false;
+  }
 
   // ── GET_SETTINGS ──────────────────────────────────────────────────
   if (msg.type === 'GET_SETTINGS') {
     DB.get('settings', G_PROPERTY_NAME)
-      .then(data => sendResponse(data?.options ?? DEFAULT_SETTINGS_OPTIONS))
-      .catch(() => sendResponse(DEFAULT_SETTINGS_OPTIONS));
+      .then(data => sendResponse(normalizeSettings(data?.options)))
+      .catch(() => sendResponse(normalizeSettings(null)));
     return true;
   }
 
@@ -320,6 +757,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     _buildSnippets()
       .then(snippets => sendResponse(snippets))
       .catch(err => { console.error('[BG] Error al obtener snippets:', err); sendResponse([]); });
+    return true;
+  }
+
+  // ── OPEN_SIDE_PANEL ───────────────────────────────────────────────
+  // Botón IA / atajos del editor. `sidePanel.open` exige gesto del usuario:
+  // se invoca de inmediato (sin awaits previos) dentro del mensaje.
+  //
+  // Panel POR PESTAÑA: se habilita solo en la pestaña de GAS que lo pide
+  // (con su tabId en la URL), así Chrome lo oculta al cambiar a otra
+  // pestaña y lo vuelve a mostrar —con su conversación— al regresar.
+  // `setOptions` no se espera: un await antes de `open` perdería el gesto.
+  if (msg.type === 'OPEN_SIDE_PANEL') {
+    const tabId = sender?.tab?.id;
+    if (tabId == null || !chrome.sidePanel?.open) {
+      sendResponse({ ok: false, error: 'Side panel not available.' });
+      return true;
+    }
+    chrome.sidePanel.setOptions({ tabId, path: `${SIDE_PANEL_PATH}?tabId=${tabId}`, enabled: true })
+      ?.catch?.(() => { /* se reporta vía open() */ });
+    chrome.sidePanel.open({ tabId })
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+
+  // ── GET_EDITOR_I18N ───────────────────────────────────────────────
+  // Diccionario de la UI inyectada (claves `ed*`) para el idioma pedido.
+  // Lo lee el background porque el content script no puede hacer fetch de
+  // `_locales/` (Chrome lo bloquea si no es web_accessible_resource, y no
+  // queremos exponerlo a la página).
+  if (msg.type === 'GET_EDITOR_I18N') {
+    _getEditorI18n(msg.payload?.lang)
+      .then((dict) => sendResponse(dict))
+      .catch(() => sendResponse(null));
     return true;
   }
 
@@ -334,12 +805,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // ── NOTIFY_UPDATE ─────────────────────────────────────────────────
   if (msg.type === 'NOTIFY_UPDATE') {
     const { updateType } = msg;
+    // Solo las páginas de la extensión (popup) pueden aportar el delta; una
+    // pestaña no puede inyectar settings en las demás.
+    const fromExtensionPage = !sender?.tab;
+    const changed = fromExtensionPage && _isPlainObject(msg.changed) ? msg.changed : null;
+    const sentOptions = fromExtensionPage && _isPlainObject(msg.options) ? msg.options : null;
 
     (async () => {
       try {
         if (updateType === 'settings') {
-          const settingsData = await DB.get('settings', G_PROPERTY_NAME);
-          _sendToTabs({ options: settingsData?.options ?? {}, updateType });
+          // Con `changed` + `options` del popup no hace falta releer IndexedDB.
+          const options = sentOptions
+            ? normalizeSettings(sentOptions)
+            : normalizeSettings((await DB.get('settings', G_PROPERTY_NAME))?.options);
+          _sendToTabs(changed ? { options, changed, updateType } : { options, updateType });
 
         } else if (updateType === 'snippets') {
           const finalSnippets = await _buildSnippets();
@@ -359,18 +838,57 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // ── LLM_GET_CONFIG ────────────────────────────────────────────────
+  // Nunca incluye API keys: solo `apiKeysSet` con booleanos.
   if (msg.type === 'LLM_GET_CONFIG') {
-    chrome.storage.sync.get(['gasToolsLlmConfig'], (result) => {
-      sendResponse(result?.gasToolsLlmConfig || null);
-    });
+    _getPublicLlmConfig()
+      .then((cfg) => sendResponse(cfg))
+      .catch((err) => { console.error('[Background] LLM_GET_CONFIG:', err); sendResponse(null); });
     return true;
   }
 
   // ── LLM_SAVE_CONFIG ───────────────────────────────────────────────
+  // Guardar config y listar modelos: solo páginas de la extensión (Side
+  // Panel, popup), nunca una pestaña.
+  if ((msg.type === 'LLM_SAVE_CONFIG' || msg.type === 'LLM_FETCH_MODELS') && sender?.tab) {
+    sendResponse({ ok: false, error: 'Not allowed from a tab.' });
+    return false;
+  }
+
   if (msg.type === 'LLM_SAVE_CONFIG') {
-    chrome.storage.sync.set({ gasToolsLlmConfig: msg.payload || {} }, () => {
-      sendResponse({ ok: !chrome.runtime.lastError });
-    });
+    _saveLlmConfig(msg.payload)
+      .then(() => { sendResponse({ ok: true }); _broadcastLlmConfigUpdated(); })
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+    return true;
+  }
+
+  // ── LLM_FETCH_MODELS ──────────────────────────────────────────────
+  if (msg.type === 'LLM_FETCH_MODELS') {
+    (async () => {
+      try {
+        const { provider, endpointUrl: requested } = msg.payload || {};
+        if (!provider) throw new Error('Provider no especificado.');
+        const endpointUrl = await _resolveEndpointUrl(provider, requested);
+        await _assertProviderPermission(provider, endpointUrl);
+        const secrets = await _getLlmSecrets();
+        const apiKey = secrets[provider] || '';
+        const models = await fetchProviderModels({ provider, apiKey, endpointUrl });
+        sendResponse({ ok: true, models });
+      } catch (err) {
+        const { error, permissionOrigin } = await _llmErrorPayload(err);
+        sendResponse({ ok: false, error, permissionOrigin });
+      }
+    })();
+    return true;
+  }
+
+  // ── LLM_CANCEL ────────────────────────────────────────────────────
+  // Aborta el fetch real hacia el proveedor (evita pagar tokens de
+  // peticiones que el editor ya descartó).
+  if (msg.type === 'LLM_CANCEL') {
+    const key  = `${sender?.tab?.id ?? 'ext'}:${msg.payload?.requestId}`;
+    const ctrl = G_LLM_INFLIGHT.get(key);
+    if (ctrl) { ctrl.abort(); G_LLM_INFLIGHT.delete(key); }
+    sendResponse({ ok: !!ctrl });
     return true;
   }
 
@@ -383,17 +901,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // ── LLM_CHAT_REQUEST ──────────────────────────────────────────────
+  // La API key se resuelve aquí desde storage.local; cualquier `apiKey`
+  // que venga en el payload se ignora.
   if (msg.type === 'LLM_CHAT_REQUEST') {
-    callLlmProvider(msg.payload || {})
-      .then(content => sendResponse({ ok: true, content }))
-      .catch(err => sendResponse({ ok: false, error: String(err?.message || err) }));
+    const requestId = msg.payload?.requestId;
+    const key  = `${sender?.tab?.id ?? 'ext'}:${requestId}`;
+    const ctrl = new AbortController();
+    if (requestId) G_LLM_INFLIGHT.set(key, ctrl);
+
+    (async () => {
+      try {
+        const result = await _runLlmRequest(msg.payload, { signal: ctrl.signal });
+        if (result && typeof result === 'object') {
+          sendResponse({ ok: true, content: result.content || '', toolCalls: result.toolCalls || [], providerData: result.providerData || null });
+        } else {
+          sendResponse({ ok: true, content: result });
+        }
+      } catch (err) {
+        sendResponse({ ok: false, ...(await _llmErrorPayload(err)) });
+      } finally {
+        if (G_LLM_INFLIGHT.get(key) === ctrl) G_LLM_INFLIGHT.delete(key);
+      }
+    })();
     return true;
   }
 
   // ── GITHUB_GET_AUTH ───────────────────────────────────────────────
-  // Devuelve `{ token, user }` o `null` si aún no se ha autenticado.
+  // Devuelve `{ user }` o `null`. El token NUNCA sale del background.
   if (msg.type === 'GITHUB_GET_AUTH') {
-    _getGithubAuth().then((auth) => sendResponse(auth));
+    _getGithubAuth()
+      .then((auth) => sendResponse(auth?.token && auth?.user ? { user: auth.user } : null))
+      .catch(() => sendResponse(null));
     return true;
   }
 
@@ -471,11 +1009,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // ── GITHUB_GET_PROJECT_CONFIG ─────────────────────────────────────
   // Devuelve la config del proyecto identificado por scriptId, o null.
   if (msg.type === 'GITHUB_GET_PROJECT_CONFIG') {
-    const scriptId = msg.payload?.scriptId;
-    chrome.storage.sync.get([GH_PROJECTS_KEY], (r) => {
-      const map = r?.[GH_PROJECTS_KEY] || {};
-      sendResponse(scriptId ? (map[scriptId] || null) : null);
-    });
+    _getGithubProject(msg.payload?.scriptId)
+      .then((cfg) => sendResponse(cfg))
+      .catch(() => sendResponse(null));
     return true;
   }
 
@@ -483,14 +1019,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'GITHUB_SAVE_PROJECT_CONFIG') {
     const { scriptId, config } = msg.payload || {};
     if (!scriptId) { sendResponse({ ok: false, error: 'scriptId requerido' }); return true; }
-    chrome.storage.sync.get([GH_PROJECTS_KEY], (r) => {
-      const map = { ...(r?.[GH_PROJECTS_KEY] || {}) };
-      if (config) map[scriptId] = config;
-      else        delete map[scriptId];
-      chrome.storage.sync.set({ [GH_PROJECTS_KEY]: map }, () => {
-        sendResponse({ ok: !chrome.runtime.lastError });
-      });
-    });
+    _saveGithubProject(scriptId, config)
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
     return true;
   }
 
@@ -506,12 +1037,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     const onProgress = (action === 'PUSH_FILES' && tabId)
       ? (evt) => {
-          try {
-            chrome.tabs.sendMessage(tabId, {
-              type:    'GH_PUSH_PROGRESS',
-              payload: { requestId, ...evt },
-            });
-          } catch (_) {}
+          chrome.tabs.sendMessage(tabId, {
+            type:    'GH_PUSH_PROGRESS',
+            payload: { requestId, ...evt },
+          }).catch(() => { /* tab cerrada o recargada */ });
         }
       : null;
 
@@ -522,9 +1051,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const data = await callGithubApi(action, auth.token, payload || {}, { onProgress });
         sendResponse({ ok: true, data });
       } catch (err) {
+        // El mensaje puede citar cabeceras o URLs: nunca el token.
+        const auth = await _getGithubAuth().catch(() => null);
         sendResponse({
           ok: false,
-          error: String(err?.message || err),
+          error: _redactSecrets(err?.message || err, [auth?.token]),
           uploadedBlobs: err?.uploadedBlobs || null,
         });
       }
@@ -672,9 +1203,70 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // ─────────────────────────────────────────────
+// STREAMING LLM (chrome.runtime.Port 'llm-stream')
+// ─────────────────────────────────────────────
+// Un puerto por petición. El content script envía `{type:'start', payload}`
+// y opcionalmente `{type:'cancel'}`; el background responde con
+// `{type:'delta', text}`, `{type:'done', content}` o `{type:'error', ...}`.
+// Cerrar el puerto (pestaña cerrada, recarga) también aborta el fetch.
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'llm-stream') return;
+  if (!_isTrustedSender(port.sender)) { port.disconnect(); return; }
+
+  const ctrl = new AbortController();
+  let closed = false;
+  const post_ = (message) => {
+    if (closed) return;
+    try { port.postMessage(message); } catch (_) { closed = true; }
+  };
+
+  port.onDisconnect.addListener(() => { closed = true; ctrl.abort(); });
+  port.onMessage.addListener(async (msg) => {
+    if (msg?.type === 'cancel') { ctrl.abort(); return; }
+    if (msg?.type !== 'start') return;
+    try {
+      const content = await _runLlmRequest(msg.payload, {
+        signal: ctrl.signal,
+        onDelta: (text) => post_({ type: 'delta', text }),
+      });
+      post_({ type: 'done', content });
+    } catch (err) {
+      post_({ type: 'error', ...(await _llmErrorPayload(err)) });
+    } finally {
+      if (!closed) { closed = true; port.disconnect(); }
+    }
+  });
+});
+
+// ─────────────────────────────────────────────
 // INICIALIZACIÓN
 // ─────────────────────────────────────────────
-chrome.runtime.onInstalled.addListener(() => {
+
+/**
+ * Indica si el valor es un objeto plano (no null ni array).
+ * @param {*} value
+ * @returns {boolean}
+ */
+function _isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Migra los settings guardados al esquema actual; no escribe si ya están al día.
+ * @returns {Promise<boolean>} true si se reescribieron.
+ */
+async function _migrateSettingsSchema() {
+  const data = await DB.get('settings', G_PROPERTY_NAME);
+  if (!data?.options || data.options.schemaVersion >= SETTINGS_SCHEMA_VERSION) return false;
+  await DB.set('settings', { ...data, id: G_PROPERTY_NAME, options: normalizeSettings(data.options) });
+  return true;
+}
+
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details?.reason === 'update') {
+    _migrateSettingsSchema().catch((err) => console.error('[Background] Error migrando settings:', err));
+  }
+
   chrome.declarativeContent.onPageChanged.removeRules(undefined, () => {
     chrome.declarativeContent.onPageChanged.addRules([{
       conditions: [
@@ -686,5 +1278,11 @@ chrome.runtime.onInstalled.addListener(() => {
     }]);
   });
 
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  // El icono de la extensión abre el popup de configuración; el Side Panel
+  // (chat) se abre desde el botón IA del editor (OPEN_SIDE_PANEL).
+  chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: false })?.catch?.(() => {});
+  _disableGlobalSidePanel();
 });
+
+// Las opciones globales del panel pueden perderse al reiniciar el navegador.
+chrome.runtime.onStartup?.addListener?.(_disableGlobalSidePanel);

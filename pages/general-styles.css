@@ -2,9 +2,6 @@
    GENERAL STYLES - GAS Tools
    ======================================== */
 
-/* FONTS */
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap');
-
 /* VARIABLES */
 :root {
   --bg: #0a0b0e;
@@ -16,8 +13,8 @@
   --muted: #8a8f9a;
   --accent: #4ade80;
   --accent2: #22d3ee;
-  --font-main: 'Roboto', sans-serif;
-  --font-mono: 'Roboto Mono', monospace;
+  --font-main: 'Roboto', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Roboto Mono', ui-monospace, Consolas, monospace;
 }
 
 /* RESET */

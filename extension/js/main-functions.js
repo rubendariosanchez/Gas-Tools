@@ -55,12 +55,6 @@ const GAS_EVENTS = {
   DATA_UPDATED:     'GAS_DataUpdated',
   GLOBAL_DISABLE:   'GAS_GlobalDisable',
   GLOBAL_ENABLE:    'GAS_GlobalEnable',
-  LLM_REQUEST:      'GAS_LLM_REQUEST',
-  LLM_RESPONSE:     'GAS_LLM_RESPONSE',
-  LLM_GET_CONFIG:    'GAS_LLM_GET_CONFIG',
-  LLM_CONFIG_RESULT: 'GAS_LLM_CONFIG_RESULT',
-  LLM_GET_GLOBAL_AI_CONTEXT: 'GAS_LLM_GET_GLOBAL_AI_CONTEXT',
-  LLM_SAVE_CONFIG:  'GAS_LLM_SAVE_CONFIG',
   DOWNLOAD_PROJECT: 'GAS_DownloadProject',
   DOWNLOAD_RESULT:  'GAS_DownloadProjectResult',
   GH_GET_AUTH:        'GAS_GH_GET_AUTH',
@@ -199,6 +193,23 @@ function createNavigationDetector(callbacks) {
 // CARGA DE RECURSOS
 // ─────────────────────────────────────────────
 
+/**
+ * Diccionario de la UI inyectada para el idioma elegido en el popup
+ * (`ui-language`). Con inglés (default) devuelve `null`: los componentes
+ * usan sus textos en inglés como fallback y no hay ningún coste extra.
+ * Solo se envían las claves `ed*` (las del popup no hacen falta aquí).
+ * @param {string} lang
+ * @returns {Promise<{lang:string, messages:Object<string,string>}|null>}
+ */
+async function loadEditorI18n(lang) {
+  if (lang !== 'es') return null;
+  // El background lee `_locales/`: un fetch desde el content script lo
+  // bloquea Chrome (usa el origen de la página).
+  const dict = await sendToBackground({ type: 'GET_EDITOR_I18N', payload: { lang } }, null);
+  if (!dict?.messages) console.warn('[GASTools] No se pudo cargar el idioma del editor; se usa inglés.');
+  return dict?.messages ? dict : null;
+}
+
 async function loadResources() {
   const urls = {
     chatButton:   'extension/html/chatButton.html',
@@ -216,6 +227,18 @@ async function loadResources() {
 }
 
 /**
+ * URL base de los recursos web-accesibles para el MAIN world (que no tiene
+ * `chrome.runtime`). Con `use_dynamic_url`, `getURL('')` devuelve el id
+ * estático (bloqueado para la página): se deriva del id dinámico de un
+ * recurso web-accesible.
+ * @returns {string} `chrome-extension://<id-dinámico>/`.
+ */
+function assetsBaseUrl_() {
+  const probe = 'extension/js/gas-tools-main.js';
+  return chrome.runtime.getURL(probe).slice(0, -probe.length);
+}
+
+/**
  * Inyecta los scripts en MAIN de forma SECUENCIAL y garantizada.
  * Usamos async=false para orden de ejecución en el DOM, pero esperamos
  * cada script individualmente antes de insertar el siguiente.
@@ -223,17 +246,27 @@ async function loadResources() {
 async function injectScripts() {
   const scriptPaths = [
     'extension/js/services/dom-utils.js',
+    'extension/js/shared/gas-ui.js',
     'extension/js/services/gas-file-map.js',
     'extension/js/services/gas-ai-autocomplete.js',
     'extension/js/services/gas-folders.js',
+    'extension/js/services/gas-file-tabs.js',
     'extension/js/services/gas-error-lens.js',
     'extension/js/services/gas-native-search.js',
     'src/vendor/diff/diff.min.js',
-    'src/vendor/diff2html/diff2html-ui.min.js',
-    'extension/js/components/gas-chat-panel.js',
     'extension/js/components/gas-current-file.js',
     'extension/js/components/gas-actions-panel.js',
+    'extension/js/components/gas-github-panel-styles.js',
+    'extension/js/components/gas-github-panel-auth.js',
+    'extension/js/components/gas-github-panel-sync.js',
+    'extension/js/components/gas-github-panel-diff.js',
+    'extension/js/components/gas-github-panel-modals.js',
+    'extension/js/components/gas-github-panel-progress.js',
     'extension/js/components/gas-github-panel.js',
+    'extension/js/shared/line-diff.js',
+    'extension/js/shared/edit-applier.js',
+    'extension/js/services/gas-diff-preview.js',
+    'extension/js/services/gas-diff-viewer.js',
     'extension/js/gas-tools.js',
     'extension/js/gas-tools-main.js',
   ];
@@ -341,6 +374,12 @@ const getSavedSnippets = () => sendToBackground({ type: 'GET_SNIPPETS'     }, []
 // OBSERVADOR DE EDITORES
 // ─────────────────────────────────────────────
 
+/**
+ * Observa la aparición de editores Monaco y emite `GAS_TransferData` una
+ * vez por instancia. Devuelve `stop()` para liberar observer e intervalo.
+ * @param {Object} payload
+ * @returns {Function}
+ */
 function watchForEditors(payload) {
   let _editorsWerePresent = false;
 
@@ -363,33 +402,25 @@ function watchForEditors(payload) {
   document.querySelectorAll('.monaco-editor').forEach(dispatchEditorData);
   _editorsWerePresent = document.querySelectorAll('.monaco-editor').length > 0;
 
+  // Solo childList: observar `class` en todo el body se disparaba con cada
+  // parpadeo del cursor de Monaco. Los nodos insertados DENTRO de un editor
+  // existente (líneas, decoraciones) se descartan sin consultar el DOM.
+  // El intervalo de abajo cubre el caso raro de un nodo que recibe la
+  // clase `monaco-editor` después de insertarse.
   const observer = new MutationObserver(mutations => {
     for (const mutation of mutations) {
-      if (mutation.type === 'attributes') {
-        const el = mutation.target;
-        if (mutation.attributeName === 'class' && el.classList?.contains('monaco-editor')) {
-          dispatchEditorData(el);
-        }
-        continue;
-      }
-      if (mutation.type === 'childList') {
-        mutation.addedNodes.forEach(node => {
-          if (!(node instanceof Element)) return;
-          if (node.matches('.monaco-editor')) dispatchEditorData(node);
-          node.querySelectorAll?.('.monaco-editor').forEach(dispatchEditorData);
-        });
+      for (const node of mutation.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        if (node.parentElement?.closest('.monaco-editor')) continue;
+        if (node.matches('.monaco-editor')) dispatchEditorData(node);
+        else node.querySelectorAll('.monaco-editor').forEach(dispatchEditorData);
       }
     }
   });
 
-  observer.observe(document.body, {
-    attributes:      true,
-    attributeFilter: ['class'],
-    childList:       true,
-    subtree:         true,
-  });
+  observer.observe(document.body, { childList: true, subtree: true });
 
-  setInterval(() => {
+  const intervalId = setInterval(() => {
     const editors = document.querySelectorAll('.monaco-editor');
     const present = editors.length > 0;
 
@@ -400,32 +431,52 @@ function watchForEditors(payload) {
     _editorsWerePresent = present;
     editors.forEach(dispatchEditorData);
   }, 1500);
+
+  return function stop() {
+    observer.disconnect();
+    clearInterval(intervalId);
+  };
 }
 
 // ─────────────────────────────────────────────
 // INICIALIZACIÓN
 // ─────────────────────────────────────────────
 
+// Handles de teardown del bootstrap; evitan duplicar observers/intervalos
+// si init() se ejecuta más de una vez (p. ej. re-enable global).
+let G_STOP_NAVIGATION = null;
+let G_STOP_EDITOR_WATCH = null;
+let G_INIT_RUNNING = false;
+
 async function init() {
+  if (G_INIT_RUNNING) return;
+  G_INIT_RUNNING = true;
   try {
-    const [settings, snippets, activeTheme, resources] = await Promise.all([
-      getSavedSettings(),
-      getSavedSnippets(),
-      getSavedTheme(),
-      loadResources(),
-    ]);
+    const settings = await getSavedSettings();
 
     if (settings['global-enable'] === false) {
       dispatchGAS(GAS_EVENTS.GLOBAL_DISABLE);
       return;
     }
 
-    // Cargamos las librerias a usar
-    await injectScripts();
+    const [snippets, activeTheme, resources, i18n] = await Promise.all([
+      getSavedSnippets(),
+      getSavedTheme(),
+      loadResources(),
+      loadEditorI18n(settings['ui-language']),
+    ]);
+
+    // Cargamos las librerias a usar (solo una vez por página)
+    if (!document.querySelector('script[data-gas-tools-loaded]')) {
+      await injectScripts();
+    }
+
+    G_STOP_NAVIGATION?.();
+    G_STOP_EDITOR_WATCH?.();
 
     // Monitoreo de navegación SPA por cambio de URL
     // Cuando cambia de proyecto, reinicializa todo
-    createNavigationDetector({
+    G_STOP_NAVIGATION = createNavigationDetector({
       onProjectChange(scriptKey) {
         // Cambio a otro proyecto: cerramos paneles y limpiamos refs.
         dispatchGAS('GAS_HidePanels');
@@ -454,19 +505,22 @@ async function init() {
       },
     });
 
-    watchForEditors({
+    G_STOP_EDITOR_WATCH = watchForEditors({
       chatButton:    resources.chatButton,
       fileButton:    resources.fileButton,
       actionsButton: resources.actionsButton,
       githubButton:  resources.githubButton,
-      themeUrl:      chrome.runtime.getURL('themes'),
+      assetsBaseUrl: assetsBaseUrl_(),
       settings,
       snippets,
       activeTheme,
+      i18n,
     });
 
   } catch (err) {
     console.error('[GASTools] Error en init:', err);
+  } finally {
+    G_INIT_RUNNING = false;
   }
 }
 
@@ -477,92 +531,93 @@ async function init() {
 // ─────────────────────────────────────────────
 
 if (!__GAS_TOOLS_IS_WEBAPP_OR_OAUTH__) {
-  chrome.runtime.onMessage.addListener(async (msg) => {
-    // Push del device flow desde el background → MAIN world.
-    if (msg.type === 'GITHUB_DEVICE_CODE') {
-      dispatchGAS(GAS_EVENTS.GH_DEVICE_CODE, msg.payload || {});
-      return;
-    }
-
-    // Eventos de progreso del push: el background los emite por cada
-    // blob subido y por cada cambio de fase.
-    if (msg.type === 'GH_PUSH_PROGRESS') {
-      dispatchGAS('GAS_GH_PUSH_PROGRESS', msg.payload || {});
-      return;
-    }
-
-    if (msg.type !== 'SETTINGS_UPDATED') return;
-
-    const { options, data, updateType } = msg.payload;
-
-    // Se valida si es una actualización de configuración
-    if (updateType === 'settings') {
-      // Si se reactiva la extensión y los scripts aún no se inyectaron en el
-      // mundo MAIN, hacemos init() completo. La presencia del flag
-      // `__gasToolsInit` (que persiste aunque los <script> se hayan removido)
-      // indica que el bootstrap ya se ejecutó al menos una vez.
-      const alreadyBooted = !!document.querySelector('script[data-gas-tools-loaded]');
-      if (options['global-enable'] === true && !alreadyBooted) {
-        document.querySelectorAll('.monaco-editor[data-gasreference]').forEach(el => {
-          delete el.dataset.gasreference;
-        });
-        dispatchGAS(GAS_EVENTS.GLOBAL_ENABLE);
-        await init();
-      }
-      dispatchGAS(GAS_EVENTS.SETTINGS_UPDATED, options);
-    }
-
-    // Se valida si es una actualización de snippets
-    if (updateType === 'snippets') {
-      const newSnippets = data || await getSavedSnippets();
-      dispatchGAS(GAS_EVENTS.DATA_UPDATED, { updateType: 'snippets', data: newSnippets });
-    }
-
-    // Se valida si es una actualización de temas
-    if (updateType === 'themes') {
-      const newTheme = data || await getSavedTheme();
-      dispatchGAS(GAS_EVENTS.DATA_UPDATED, { updateType: 'themes', data: newTheme });
-    }
+  // IMPORTANTE: el listener NO puede ser `async`. Chrome trata la Promise
+  // devuelta como respuesta del mensaje: respondería `undefined` al instante
+  // y se adelantaría a otros listeners (p. ej. EDITOR_REQUEST del Side
+  // Panel, que entonces veía "sin editor"). Se procesa en segundo plano y
+  // se devuelve `false` (este listener nunca responde).
+  chrome.runtime.onMessage.addListener((msg) => {
+    handlePushMessage_(msg).catch((err) => console.warn('[GASTools] Error procesando mensaje:', err));
+    return false;
   });
 }
 
+/** Mensajes "push" del background hacia el MAIN world (sin respuesta). */
+async function handlePushMessage_(msg) {
+  if (!msg || typeof msg.type !== 'string') return;
+
+  // Push del device flow desde el background → MAIN world.
+  if (msg.type === 'GITHUB_DEVICE_CODE') {
+    dispatchGAS(GAS_EVENTS.GH_DEVICE_CODE, msg.payload || {});
+    return;
+  }
+
+  // Eventos de progreso del push: el background los emite por cada
+  // blob subido y por cada cambio de fase.
+  if (msg.type === 'GH_PUSH_PROGRESS') {
+    dispatchGAS('GAS_GH_PUSH_PROGRESS', msg.payload || {});
+    return;
+  }
+
+  // Config LLM guardada (p. ej. desde el Side Panel): el autocompletado
+  // del MAIN world recarga su copia.
+  if (msg.type === 'LLM_CONFIG_UPDATED') {
+    dispatchGAS('GAS_LLM_CONFIG_UPDATED', {});
+    return;
+  }
+
+  if (msg.type !== 'SETTINGS_UPDATED') return;
+
+  const { options, changed, data, updateType } = msg.payload || {};
+
+  // Se valida si es una actualización de configuración
+  if (updateType === 'settings') {
+    // Con `changed` solo viaja el delta. Sin él (reset, migración) o si cambia
+    // `global-enable`, va todo: los servicios se reactivan con su estado real.
+    const hasDelta = !!changed && typeof changed === 'object' && !('global-enable' in changed);
+    const delta = hasDelta ? changed : { ...(options || {}), ...(changed || {}) };
+    // Si se reactiva la extensión y los scripts aún no se inyectaron en el
+    // mundo MAIN, hacemos init() completo. La presencia del flag
+    // `__gasToolsInit` (que persiste aunque los <script> se hayan removido)
+    // indica que el bootstrap ya se ejecutó al menos una vez.
+    const alreadyBooted = !!document.querySelector('script[data-gas-tools-loaded]');
+    if (delta['global-enable'] === true && !alreadyBooted) {
+      document.querySelectorAll('.monaco-editor[data-gasreference]').forEach(el => {
+        delete el.dataset.gasreference;
+      });
+      dispatchGAS(GAS_EVENTS.GLOBAL_ENABLE);
+      await init();
+    }
+    dispatchGAS(GAS_EVENTS.SETTINGS_UPDATED, delta);
+  }
+
+  // Se valida si es una actualización de snippets
+  if (updateType === 'snippets') {
+    const newSnippets = data || await getSavedSnippets();
+    dispatchGAS(GAS_EVENTS.DATA_UPDATED, { updateType: 'snippets', data: newSnippets });
+  }
+
+  // Se valida si es una actualización de temas
+  if (updateType === 'themes') {
+    const newTheme = data || await getSavedTheme();
+    dispatchGAS(GAS_EVENTS.DATA_UPDATED, { updateType: 'themes', data: newTheme });
+  }
+}
+
 // ─────────────────────────────────────────────
-// BRIDGE LLM — tabla de despacho unificada
-// Todos los eventos LLM del mundo MAIN siguen el mismo patrón:
+// BRIDGE MAIN ↔ BACKGROUND — tabla de despacho unificada
+// Las rutas LLM (petición, streaming, config) viven en
+// `extension/js/shared/llm-bridge.js` (compartido con el Side Panel) y se
+// instalan más abajo con `GasLlmBridge.install`.
+// Todos los eventos del mundo MAIN siguen el mismo patrón:
 // escuchar evento → parsear detail → enviar al background → despachar respuesta.
-// La tabla evita repetir el mismo try/catch y sendToBackground 4 veces.
+//
+// Seguridad: ninguna respuesta incluye secretos. El background inyecta
+// API keys y tokens del lado del service worker; aquí solo viajan
+// `apiKeysSet` (booleanos) y el perfil público del usuario.
 // ─────────────────────────────────────────────
 
-const G_LLM_BRIDGE = [
-  {
-    listenEvent:   GAS_EVENTS.LLM_REQUEST,
-    responseEvent: GAS_EVENTS.LLM_RESPONSE,
-    buildMessage: ({ requestId, ...rest }) => ({ type: 'LLM_CHAT_REQUEST', payload: rest }),
-    buildDetail:  (response, requestId) => ({
-      requestId,
-      ok:      response?.ok ?? false,
-      content: response?.ok ? (response.content || '') : null,
-      error:   response?.ok ? null : (response?.error || 'Unknown error'),
-    }),
-  },
-  {
-    listenEvent:   GAS_EVENTS.LLM_GET_CONFIG,
-    responseEvent: GAS_EVENTS.LLM_CONFIG_RESULT,
-    buildMessage:  () => ({ type: 'LLM_GET_CONFIG' }),
-    buildDetail:   (data, requestId) => ({ requestId, data: data || null }),
-  },
-  {
-    listenEvent:   GAS_EVENTS.LLM_GET_GLOBAL_AI_CONTEXT,
-    responseEvent: GAS_EVENTS.LLM_CONFIG_RESULT,
-    buildMessage:  () => ({ type: 'GET_GLOBAL_AI_CONTEXT' }),
-    buildDetail:   (data, requestId) => ({ requestId, data: data || null }),
-  },
-  {
-    listenEvent:   GAS_EVENTS.LLM_SAVE_CONFIG,
-    responseEvent: null,
-    buildMessage:  (payload) => ({ type: 'LLM_SAVE_CONFIG', payload }),
-    buildDetail:   null,
-  },
+const G_BRIDGE_ROUTES = [
   {
     listenEvent:   GAS_EVENTS.DOWNLOAD_PROJECT,
     responseEvent: GAS_EVENTS.DOWNLOAD_RESULT,
@@ -676,18 +731,98 @@ const G_LLM_BRIDGE = [
 // Como el bridge solo tiene sentido cuando los componentes del editor
 // están vivos en MAIN world, lo registramos únicamente en el IDE.
 if (!__GAS_TOOLS_IS_WEBAPP_OR_OAUTH__) {
-  G_LLM_BRIDGE.forEach(({ listenEvent, responseEvent, buildMessage, buildDetail }) => {
+  G_BRIDGE_ROUTES.forEach(({ listenEvent, responseEvent, buildMessage, buildDetail }) => {
     document.addEventListener(listenEvent, async (e) => {
       let payload;
       try { payload = JSON.parse(e.detail); } catch (_) { return; }
 
       const { requestId, ...rest } = payload || {};
-      const response = await sendToBackground(buildMessage({ requestId, ...rest }));
+      const response = await sendToBackground(buildMessage({ ...rest, requestId }));
 
       if (responseEvent && buildDetail) {
         dispatchGAS(responseEvent, buildDetail(response, requestId));
       }
     });
+  });
+}
+
+// ─────────────────────────────────────────────
+// BRIDGE LLM (compartido con el Side Panel)
+// ─────────────────────────────────────────────
+
+// Menor privilegio: la página (MAIN world) solo usa el autocompletado, que
+// pide completions, cancela y lee la config. Guardar config, listar modelos,
+// el contexto global y el streaming quedan solo para el Side Panel.
+if (!__GAS_TOOLS_IS_WEBAPP_OR_OAUTH__) {
+  const E = GasLlmBridge.EVENTS;
+  GasLlmBridge.install({
+    sendToBackground,
+    isContextValid: isExtensionContextValid,
+    routes: [E.LLM_REQUEST, E.LLM_CANCEL, E.LLM_GET_CONFIG],
+    stream: false,
+  });
+}
+
+// ─────────────────────────────────────────────
+// SIDE PANEL: apertura y canal de editor
+// ─────────────────────────────────────────────
+
+const EDITOR_REQUEST_TIMEOUT_MS = 5000;
+// Acciones lentas (guardado, aplicar varios archivos). Una respuesta tardía
+// tras el timeout se descarta: reintentar applyChangeSet es idempotente.
+const EDITOR_REQUEST_TIMEOUTS_MS = Object.freeze({ saveProject: 15000, applyChangeSet: 15000 });
+
+/**
+ * Reenvía una petición del Side Panel al MAIN world (`gas-tools.js`) y
+ * espera `GAS_EDITOR_RESPONSE` con el mismo requestId.
+ * @returns {Promise<{ok:boolean, data?:*, error?:string}>}
+ */
+function relayEditorRequest_(action, payload) {
+  return new Promise((resolve) => {
+    const requestId = `ed_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    let timerId = 0;
+    const onResponse = (e) => {
+      let detail;
+      try { detail = JSON.parse(e.detail); } catch (_) { return; }
+      if (detail?.requestId !== requestId) return;
+      clearTimeout(timerId);
+      document.removeEventListener('GAS_EDITOR_RESPONSE', onResponse);
+      resolve({ ok: !!detail.ok, data: detail.data, error: detail.error });
+    };
+    document.addEventListener('GAS_EDITOR_RESPONSE', onResponse);
+    timerId = setTimeout(() => {
+      document.removeEventListener('GAS_EDITOR_RESPONSE', onResponse);
+      resolve({ ok: false, error: 'timeout' });
+    }, Object.hasOwn(EDITOR_REQUEST_TIMEOUTS_MS, action) ? EDITOR_REQUEST_TIMEOUTS_MS[action] : EDITOR_REQUEST_TIMEOUT_MS);
+    dispatchGAS('GAS_EDITOR_REQUEST', { requestId, action, payload: payload || {} });
+  });
+}
+
+if (!__GAS_TOOLS_IS_WEBAPP_OR_OAUTH__) {
+  // Peticiones de contexto/edición desde el Side Panel. Solo se aceptan
+  // de páginas de la propia extensión (sin `sender.tab`).
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg?.type !== 'EDITOR_REQUEST') return false;
+    if (sender?.id !== chrome.runtime.id || sender.tab) return false;
+    relayEditorRequest_(msg.action, msg.payload).then(sendResponse);
+    return true;
+  });
+
+  // Eventos del editor (vista previa de cambios: aceptar/rechazar/navegar/cerrar)
+  // → páginas de la extensión (Side Panel). Sin receptor no es un error.
+  document.addEventListener('GAS_EDITOR_EVENT', (e) => {
+    let event;
+    try { event = JSON.parse(e.detail); } catch (_) { return; }
+    if (!event?.type || !isExtensionContextValid()) return;
+    try {
+      chrome.runtime.sendMessage({ type: 'EDITOR_EVENT', event }).catch(() => {});
+    } catch (_) { /* contexto invalidado entre la comprobación y el envío */ }
+  });
+
+  // Botón IA / atajos del editor → abrir el Side Panel de esta ventana.
+  document.addEventListener('GAS_OPEN_SIDE_PANEL', async () => {
+    const res = await sendToBackground({ type: 'OPEN_SIDE_PANEL' }, { ok: false, error: 'no-response' });
+    if (!res?.ok) dispatchGAS('GAS_OPEN_SIDE_PANEL_RESULT', { ok: false, error: res?.error || 'unknown' });
   });
 }
 

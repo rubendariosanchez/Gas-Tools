@@ -23,53 +23,55 @@
 <main>
   <div class="page-label">// Legal</div>
   <h1>Privacy Policy</h1>
-  <p class="last-updated">Last updated: June 2025</p>
+  <p class="last-updated">Last updated: 2026-10-18</p>
 
   <div class="highlight-box">
-    <p><strong>The short version:</strong> GAS Tools does not collect, store, or transmit any personal data to our servers. Your API keys, code, and settings stay entirely on your device.</p>
+    <p><strong>The short version:</strong> GAS Tools has no servers and does not collect personal data. Your settings, API keys and code stay in your browser. Data leaves it only when you use an AI provider, GitHub sync or the Apps Script API, and then it goes directly to that service.</p>
   </div>
 
   <h2>1. Who We Are</h2>
   <p>GAS Tools ("the Extension") is a Chrome extension developed by Rubén Darío Sánchez that enhances the Google Apps Script editor. The extension is distributed under the MIT License and is available on the Chrome Web Store.</p>
 
   <h2>2. Data We Do Not Collect</h2>
-  <p>We do not collect, process, or store any of the following:</p>
+  <p>We do not run any server, so we do not receive or store any of the following:</p>
   <ul>
     <li>Personal identifiers (name, email, IP address)</li>
-    <li>Your source code or project files</li>
-    <li>AI API keys you configure in the extension</li>
+    <li>We do not receive your source code or project files</li>
+    <li>AI API keys or access tokens you configure in the extension</li>
     <li>Editor settings, themes, or snippets you create</li>
     <li>Usage analytics or telemetry</li>
     <li>Browsing history or behavior</li>
   </ul>
 
-  <h2>3. Local Storage Only</h2>
-  <p>All extension data — including your preferences, custom themes, code snippets, and AI provider settings — is stored locally in your browser using <code>chrome.storage.local</code> or <code>localStorage</code>. This data never leaves your device and is not accessible to us or any third party through GAS Tools.</p>
-
-  <h2>4. AI Provider API Keys</h2>
-  <p>If you configure an AI provider (OpenAI, Anthropic, Google Gemini, or others), your API key is stored exclusively in your browser's local storage. When you send a request to the AI:</p>
+  <h2>3. Where Your Data Is Stored</h2>
+  <p>All extension data stays in your browser. We do not run any server.</p>
   <ul>
-    <li>The request is made directly from your browser to the AI provider's API endpoint.</li>
-    <li>GAS Tools does not act as a proxy, relay, or intermediary for these requests.</li>
-    <li>We have no access to the content of those requests or responses.</li>
-    <li>The AI provider's own privacy policy governs how they handle your data.</li>
+    <li><strong>IndexedDB (local):</strong> your snippets, custom themes and editor settings.</li>
+    <li><strong><code>chrome.storage.sync</code>:</strong> non-secret preferences (such as the AI provider and model, language, active theme, your global AI instructions and per-project GitHub repository settings) and the name and email of the Google account you sign in with, which the panel displays. Chrome syncs this data across your own signed-in browsers through your Google account; we cannot access it.</li>
+    <li><strong><code>chrome.storage.local</code> (this device only, never synced):</strong> your AI provider API keys, your GitHub access token and your AI chat history per project, which may include code snippets.</li>
+    <li><strong><code>localStorage</code> (this device only):</strong> small UI preferences such as dark mode and language.</li>
   </ul>
+  <p>You can delete everything by removing the extension.</p>
 
-  <h2>5. Google Authentication (GitHub Sync Panel)</h2>
-  <p>The optional GitHub sync panel uses <code>chrome.identity.getAuthToken</code> to authenticate with Google and access the Apps Script API. In this case:</p>
-  <ul>
-    <li>Authentication tokens are managed entirely by Chrome's identity service.</li>
-    <li>Tokens are not persisted by the extension and never travel outside Chrome's secure environment.</li>
-    <li>We do not store or have access to your Google credentials.</li>
-  </ul>
+  <h2>4. AI Providers</h2>
+  <p>AI features are off until you enable a provider (OpenAI, Anthropic, Google Gemini, OpenRouter, Abacus.AI ChatLLM, NVIDIA, or a local model through Ollama or LM Studio) and grant Chrome's permission for its domain. Requests are sent from the extension's background service worker directly to that provider with your own API key and contain your prompt plus the code context you select. The background service worker only relays these requests inside your browser; no server of ours is involved and we have no access to their content. The provider's privacy policy applies.</p>
+
+  <h2>5. Google and GitHub Sign-In</h2>
+  <p>Google sign-in (<code>chrome.identity</code>) is used only to call the Apps Script API on your own projects, for GitHub sync, bulk file deletion and file creation. Google tokens are managed by Chrome.</p>
+  <p>GitHub sign-in uses GitHub's Device Flow; the resulting token is stored only in <code>chrome.storage.local</code>, and project files are sent to GitHub only when you push or pull. These calls are also made from the extension's background service worker directly to Google and GitHub.</p>
 
   <h2>6. Third-Party Services</h2>
-  <p>By using the AI chat feature, you interact directly with third-party AI providers. Please review their respective privacy policies:</p>
+  <p>When you use these features, you interact directly with third-party services. Please review their respective privacy policies:</p>
   <ul>
     <li><a href="https://openai.com/privacy" target="_blank">OpenAI Privacy Policy</a></li>
     <li><a href="https://www.anthropic.com/privacy" target="_blank">Anthropic Privacy Policy</a></li>
-    <li><a href="https://policies.google.com/privacy" target="_blank">Google Privacy Policy</a></li>
+    <li><a href="https://policies.google.com/privacy" target="_blank">Google Privacy Policy</a> (Gemini, Apps Script API, Google Fonts)</li>
+    <li><a href="https://openrouter.ai/privacy" target="_blank">OpenRouter Privacy Policy</a></li>
+    <li><a href="https://abacus.ai/privacy" target="_blank">Abacus.AI Privacy Policy</a></li>
+    <li><a href="https://www.nvidia.com/en-us/about-nvidia/privacy-policy/" target="_blank">NVIDIA Privacy Policy</a></li>
+    <li><a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank">GitHub Privacy Statement</a></li>
   </ul>
+  <p>If you pick a web font for the code editor (for example JetBrains Mono), the Apps Script editor page downloads it from Google Fonts. The extension's own interface does not load any external fonts.</p>
 
   <h2>7. Limited Use Requirements</h2>
   <p>The use and transfer of raw or derived user data received from Google Workspace APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>

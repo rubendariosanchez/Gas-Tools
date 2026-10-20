@@ -1,271 +1,248 @@
 /**
- * @fileoverview Módulo "Settings" del popup.
+ * @fileoverview Módulo "Settings" del popup: persistencia y reset.
  *
- * Pinta y persiste los toggles, selects y colores de la pestaña
- * "Settings" del popup. Lee/escribe a IndexedDB (singleton `DB`) y
- * notifica a los editores activos vía `notifyEditors()` para que
- * propaguen los cambios sin recargar.
+ * El pintado lo hace `settings-renderer.js` a partir de `SETTINGS_SCHEMA`.
+ * Aquí se escuchan los eventos de los componentes marcados con
+ * `data-setting-key`, se guarda en IndexedDB (singleton `DB`, cola
+ * serializada) o en chrome.storage.sync (`storage: 'sync'`) y se notifica
+ * a los editores activos vía `notifyEditors()` sin recargar.
  *
- * También aloja el sub-módulo "AI Context" que gestiona los prompts
- * de sistema personalizados.
+ * También aloja el sub-módulo "Contexto global" de IA (guardado automático).
  */
 
-import { G_PROPERTY_NAME, DEFAULT_SETTINGS_OPTIONS } from '../utils/Variables.js';
+import {
+    G_PROPERTY_NAME, SETTINGS_SCHEMA, normalizeSettings, settingsDiffer, isStoredSetting, getSchemaDefaults,
+} from '../utils/Variables.js';
 import { Toast } from '../utils/Toast.js';
 import { ConfirmDialog } from '../utils/ConfirmDialog.js';
 import { updateAboutStats_ } from './ui.js';
+import { renderSettings, applySettingValues } from './settings-renderer.js';
 import { DB } from '../utils/Storage.js';
 import { notifyEditors } from '../utils/Notify.js';
-import { syncLastUpdated } from '../utils/Functions.js';
+import { createWriteQueue } from '../utils/WriteQueue.js';
+import { tr } from '../utils/I18n.js';
+
+// Serializa los read-modify-write de settings: dos toggles rápidos no se pisan.
+const G_SETTINGS_WRITE_QUEUE = createWriteQueue();
+
+// Pestañas que restablece "Restablecer ajustes" (el resto se conserva).
+const RESET_TABS_ = ['editor', 'tools'];
+
+// Eventos de los componentes → forma de leer su valor.
+const CONTROL_EVENTS_ = {
+    toggle: (e) => e.detail.checked,
+    select: (e) => e.detail.value,
+    'color-change': (e) => e.detail.value,
+};
+
+// Mensaje de error por tipo de control.
+const SAVE_ERROR_KEYS_ = {
+    toggle: ['toastErrorSavingSetting', 'Error saving setting'],
+    select: ['toastErrorSavingSetting', 'Error saving setting'],
+    color: ['toastErrorSavingColor', 'Error saving color'],
+};
 
 /**
- * Inicializa el módulo de configuración: carga datos, bindea botones y auto-guardado.
+ * Inicializa el módulo de configuración: pinta, carga datos, bindea reset y auto-guardado.
+ * @returns {void}
  */
 export function initSettingsModule() {
+    renderSettings(document);
     loadQualityCodeSettings_();
     initActionButtons_();
     initAutoSave_();
 }
 
 /**
- * Configura el auto-guardado: cada cambio en un toggle, select o range se guarda automáticamente.
+ * Auto-guardado: cada cambio de un control del esquema se persiste al instante (sin toast de éxito).
+ * @returns {void}
  * @private
  */
 function initAutoSave_() {
-    const optionsContainer = document.getElementById('options');
-    if (!optionsContainer) return;
+    Object.entries(CONTROL_EVENTS_).forEach(([eventName, readValue]) => {
+        document.addEventListener(eventName, async (e) => {
+            const key = e.target?.dataset?.settingKey;
+            const entry = key && SETTINGS_SCHEMA.find((item) => item.key === key);
+            if (!entry) return;
 
-    // Listener para toggles (checkbox switches)
-    optionsContainer.addEventListener('toggle', async (e) => {
-        const toggleEl = e.target;
-        const optionId = toggleEl.id;
-        const isChecked = e.detail.checked;
-
-        try {
-            await saveSingleOption_(optionId, isChecked);
-            Toast.show('Setting saved', 'success', 800);
-            
-            // Si el toggle es gas-folders, actualizamos la visibilidad del color picker
-            if (optionId === 'gas-folders') {
-                updateFolderColorVisibility_(isChecked);
+            try {
+                await saveSchemaValue_(entry, readValue(e));
+            } catch (error) {
+                console.error('[Settings] Auto-save error:', error);
+                const [msgKey, fallback] = SAVE_ERROR_KEYS_[entry.type];
+                Toast.show(tr(msgKey, fallback), 'error');
             }
-        } catch (error) {
-            console.error('[Settings] Auto-save error:', error);
-            Toast.show('Error saving setting', 'error');
-        }
-    });
-
-    // Listener para option-select
-    optionsContainer.addEventListener('select', async (e) => {
-        const selectEl = e.target;
-        const optionId = selectEl.id;
-        const value = e.detail.value;
-
-        try {
-            await saveSingleOption_(optionId, value);
-            Toast.show('Setting saved', 'success', 800);
-        } catch (error) {
-            console.error('[Settings] Auto-save error:', error);
-            Toast.show('Error saving setting', 'error');
-        }
-    });
-
-    // Listener para el nuevo componente option-color
-    optionsContainer.addEventListener('color-change', async (e) => {
-        const optionId = e.target.id;
-        const value = e.detail.value;
-
-        try {
-            await saveSingleOption_(optionId, value);
-            Toast.show('Color saved', 'success', 800);
-        } catch (error) {
-            console.error('[Settings] Auto-save error:', error);
-            Toast.show('Error saving color', 'error');
-        }
+        });
     });
 }
 
 /**
- * Oculta o muestra los selectores de color (carpeta y archivos) en función
- * del toggle principal de gas-folders. Si el toggle está apagado, el árbol
- * personalizado no se aplica y los color pickers no aportan nada.
+ * Guarda el valor de una entrada del esquema en su almacenamiento.
+ * @param {Object} entry Entrada de SETTINGS_SCHEMA.
+ * @param {*} value Nuevo valor.
+ * @returns {Promise<void>}
+ * @throws {Error} Si el almacenamiento falla.
  * @private
  */
-function updateFolderColorVisibility_(enabled) {
-    const ids = [
-        'gas-folders-color',
-        'gas-file-gs-color',
-        'gas-file-html-color',
-        'gas-file-json-color',
-    ];
-    ids.forEach((id) => {
-        const el = document.getElementById(id);
-        if (el) el.style.display = enabled ? 'block' : 'none';
+async function saveSchemaValue_(entry, value) {
+    if (isStoredSetting(entry)) return saveSingleOption_(entry.key, value);
+    // chrome.storage.sync: el background lo lee en cada uso, sin notificar.
+    await chrome.storage.sync.set({ [entry.storageKey]: value || entry.default });
+}
+
+/**
+ * Guarda una única opción en IndexedDB (serializado) y notifica solo el delta.
+ * @param {string} optionId Clave de la opción.
+ * @param {*} value Nuevo valor.
+ * @returns {Promise<void>}
+ * @throws {Error} Si IndexedDB falla al leer o escribir.
+ */
+export function saveSingleOption_(optionId, value) {
+    return G_SETTINGS_WRITE_QUEUE(async () => {
+        const currentData = await DB.get('settings', G_PROPERTY_NAME) || {};
+        const currentOptions = currentData?.options || {};
+
+        // Se actualiza la opción seleccionada
+        const updatedOptions = {
+            ...currentOptions,
+            [optionId]: value
+        };
+
+        // Se construye el payload; `lastUpdated` lo lee la pestaña About.
+        const payload = {
+            id: G_PROPERTY_NAME,
+            ...currentData,
+            options: updatedOptions,
+            lastUpdated: new Date().toISOString()
+        };
+
+        // Guardamos en IndexedDB y esperamos a que la notificación llegue al background
+        await DB.set('settings', payload);
+        await notifyEditors('settings', { [optionId]: value }, updatedOptions);
     });
 }
 
 /**
- * Guarda una única opción en IndexedDB.
+ * Carga las opciones (IndexedDB + sync), las aplica a los controles y emite `gt-settings-loaded`.
+ * @returns {Promise<void>}
  * @private
- */
-async function saveSingleOption_(optionId, value) {
-    const currentData = await DB.get('settings', G_PROPERTY_NAME) || {};
-    const currentOptions = currentData?.options || {};
-
-    // Se actualiza la opción seleccionada
-    const updatedOptions = {
-        ...currentOptions,
-        [optionId]: value
-    };
-
-    // Se construye el payload
-    const payload = {
-        id: G_PROPERTY_NAME,
-        ...currentData,
-        options: updatedOptions,
-        lastUpdated: new Date().toISOString()
-    };
-
-    // Guardamos en IndexedDB y esperamos a que la notificación llegue al background
-    await DB.set('settings', payload);
-    await notifyEditors('settings');
-
-    // Actualizamos la fecha de última actualización
-    await syncLastUpdated();
-}
-
-/**
- * Carga las opciones desde el storage y aplica el estado a los componentes.
  */
 async function loadQualityCodeSettings_() {
     try {
-        let settingsData = await DB.get('settings', G_PROPERTY_NAME);
-
-        if (!settingsData) {
-            const defaultPayload = {
-                id: G_PROPERTY_NAME,
-                options: DEFAULT_SETTINGS_OPTIONS,
-                lastUpdated: new Date().toISOString()
-            };
-            await DB.set('settings', defaultPayload);
-            await notifyEditors('settings');
-            settingsData = defaultPayload;
-        }
-
-        const settings = settingsData?.options || {};
-
-        const optionIds = [
-            'global-enable', 'ai-autocomplete', 'gas-folders', 'gas-error-lens',
-            // Visuals & Layout
-            'ide-dark-mode', 'showMinimap', 'lineNumbers', 'wordWrap', 'renderLineHighlight',
-            'rulers', 'occurrencesHighlight', 'renderWhitespace',
-            // Code Assistance
-            'bracketPairs', 'quickSuggestions', 'autoClosingBrackets', 'guides-indentation',
-            // Navigation
-            'folding',
-            // Scrolling
-            'smoothScrolling', 'scrollBeyondLastLine'
-        ];
-
-        // Procesar toggles
-        optionIds.forEach(id => {
-            const el = document.getElementById(id);
-            if (el && el.tagName === 'OPTION-TOGGLE') {
-                settings[id] === true
-                    ? el.setAttribute('checked', '')
-                    : el.removeAttribute('checked');
-            }
-        });
-
-        // Procesar selects
-        const selectIds = ['fontFamily', 'fontSize', 'lineHeight', 'tabSize', 'cursorStyle', 'cursorBlinking'];
-        selectIds.forEach(id => {
-            const el = document.getElementById(id);
-            if (el && el.tagName === 'OPTION-SELECT' && settings[id] !== undefined) {
-                el.setAttribute('value', settings[id]);
-            }
-        });
-
-        // Procesar color inputs
-        const colorIds = [
-            'gas-folders-color',
-            'gas-file-gs-color',
-            'gas-file-html-color',
-            'gas-file-json-color',
-        ];
-        colorIds.forEach((id) => {
-            const el = document.getElementById(id);
-            if (el && settings[id]) el.setAttribute('value', settings[id]);
-        });
-
-        // Inicializar visibilidad de los color pickers
-        updateFolderColorVisibility_(settings['gas-folders'] !== false);
-
+        const settings = await G_SETTINGS_WRITE_QUEUE(loadNormalizedOptions_);
+        const syncValues = await loadSyncValues_();
+        applySettingValues({ ...settings, ...syncValues });
+        document.dispatchEvent(new CustomEvent('gt-settings-loaded', { detail: settings }));
     } catch (error) {
         console.error('Error loading settings:', error);
-        Toast.show('Error loading settings', 'error');
+        Toast.show(tr('toastErrorLoadingSettings', 'Error loading settings'), 'error');
     }
+}
+
+/**
+ * Lee de chrome.storage.sync las entradas del esquema con `storage: 'sync'`.
+ * @returns {Promise<Object>} Mapa clave del esquema → valor (o default).
+ * @private
+ */
+async function loadSyncValues_() {
+    const entries = SETTINGS_SCHEMA.filter((e) => !isStoredSetting(e));
+    if (!entries.length) return {};
+    try {
+        const result = await chrome.storage.sync.get(entries.map((e) => e.storageKey));
+        return Object.fromEntries(entries.map((e) => [e.key, result?.[e.storageKey] || e.default]));
+    } catch (err) {
+        console.error('[Settings] Error loading sync values:', err);
+        return Object.fromEntries(entries.map((e) => [e.key, e.default]));
+    }
+}
+
+/**
+ * Lee las opciones, las normaliza y persiste solo si la normalización cambió algo.
+ * @returns {Promise<Object>} Opciones normalizadas.
+ * @throws {Error} Si IndexedDB falla.
+ * @private
+ */
+async function loadNormalizedOptions_() {
+    const settingsData = await DB.get('settings', G_PROPERTY_NAME);
+    const options = normalizeSettings(settingsData?.options);
+    if (settingsData && !settingsDiffer(settingsData.options, options)) return options;
+
+    const payload = {
+        ...(settingsData || {}),
+        id: G_PROPERTY_NAME,
+        options,
+        lastUpdated: settingsData?.lastUpdated || new Date().toISOString()
+    };
+    await DB.set('settings', payload);
+    await notifyEditors('settings', null, options);
+    return options;
 }
 
 /**
  * Configura los listeners para el botón de Restablecer.
+ * @returns {void}
+ * @private
  */
 function initActionButtons_() {
-    const resetBtn = document.getElementById('resetBtn');
-
-    // Listener para resetear opciones
-    resetBtn?.addEventListener('click', () => resetSettings_());
+    document.getElementById('resetBtn')?.addEventListener('click', () => resetSettings_());
 }
 
 /**
- * Permite restaurar las opciones a valores por defecto.
+ * Restablece a sus defaults solo los ajustes de Editor y Herramientas.
+ * Idioma, interruptor general, IA, modo oscuro, snippets y temas se conservan.
+ * @returns {Promise<void>}
+ * @private
  */
 async function resetSettings_() {
-    if (await ConfirmDialog('Reset all settings?')) {
-        try {
-            // Obtenemos datos actuales para no perder otras propiedades
+    if (!await ConfirmDialog(tr('confirmResetEditorTools', 'Reset the Editor and Tools settings to their defaults?'))) return;
+    try {
+        const options = await G_SETTINGS_WRITE_QUEUE(async () => {
             const currentData = await DB.get('settings', G_PROPERTY_NAME) || {};
-
-            // Construimos el payload con valores por defecto
             const payload = {
                 id: G_PROPERTY_NAME,
                 ...currentData,
-                options: DEFAULT_SETTINGS_OPTIONS,
+                options: normalizeSettings({ ...currentData?.options, ...getSchemaDefaults(RESET_TABS_) }),
                 lastUpdated: new Date().toISOString()
             };
-
-            // Guardamos en IndexedDB
             await DB.set('settings', payload);
+            return payload.options;
+        });
 
-            // Actualizamos la fecha de última actualización
-            await syncLastUpdated();
+        // Sin `changed`: el editor calcula el delta contra su copia.
+        notifyEditors('settings', null, options);
 
-            // Notificar a los editores sobre el cambio de configuración para que puedan reaccionar
-            notifyEditors('settings');
+        // Refrescar UI sin recargar toda la página
+        loadQualityCodeSettings_();
+        updateAboutStats_();
 
-            // Refrescar UI sin recargar toda la página
-            loadQualityCodeSettings_();
-            updateAboutStats_();
-
-            Toast.show('Settings restored to default', 'success');
-
-        } catch (error) {
-            console.error('Error resetting settings:', error);
-            Toast.show('Error resetting settings', 'error');
-        }
+        Toast.show(tr('toastSettingsRestored', 'Settings restored to default'), 'success');
+    } catch (error) {
+        console.error('Error resetting settings:', error);
+        Toast.show(tr('toastErrorResettingSettings', 'Error resetting settings'), 'error');
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// AI CONTEXT — Persistido en chrome.storage.sync (global)
+// CONTEXTO GLOBAL DE IA — chrome.storage.sync (global), guardado automático
 // ─────────────────────────────────────────────────────────────────────────
 
+// Espera tras la última pulsación antes de guardar (también limita las escrituras a sync).
+const AI_CONTEXT_DEBOUNCE_MS_ = 800;
+
+/**
+ * Inicializa el contexto global de IA: carga y guardado automático con debounce.
+ * @returns {void}
+ */
 export function initAiContextModule() {
   loadAiContext_();
-  initAiContextActions_();
+  initAiContextAutoSave_();
 }
 
-/** Carga el contexto guardado y lo muestra en el textarea. */
+/**
+ * Carga el contexto guardado en el textarea.
+ * @returns {Promise<void>}
+ * @private
+ */
 async function loadAiContext_() {
   try {
     const result   = await chrome.storage.sync.get(['gasToolsAiContext']);
@@ -276,16 +253,47 @@ async function loadAiContext_() {
   }
 }
 
-/** Guarda el contenido del textarea en chrome.storage.sync al hacer clic en guardar. */
-function initAiContextActions_() {
-  document.getElementById('saveAiContextBtn')?.addEventListener('click', async () => {
-    const contextText = document.getElementById('aiContextInput')?.value || '';
+/**
+ * Guarda el textarea tras una pausa al escribir, al salir del campo o al cerrar el popup.
+ * @returns {void}
+ * @private
+ */
+function initAiContextAutoSave_() {
+  const textarea = document.getElementById('aiContextInput');
+  const status   = document.getElementById('aiContextStatus');
+  if (!textarea) return;
+
+  let timer = null;
+  let dirty = false;
+
+  const setStatus_ = (key, fallback, saved = false) => {
+    if (!status) return;
+    status.textContent = key ? tr(key, fallback) : '';
+    status.classList.toggle('qc__save-status--saved', saved);
+  };
+
+  const flush_ = async () => {
+    clearTimeout(timer);
+    timer = null;
+    if (!dirty) return;
+    dirty = false;
+    setStatus_('aiContextSaving', 'Saving…');
     try {
-      await chrome.storage.sync.set({ gasToolsAiContext: contextText });
-      Toast.show('Context saved', 'success');
+      await chrome.storage.sync.set({ gasToolsAiContext: textarea.value });
+      if (!dirty) setStatus_('aiContextSaved', 'Saved ✓', true);
     } catch (err) {
       console.error('Error saving AI context:', err);
-      Toast.show('Error saving context', 'error');
+      setStatus_('');
+      Toast.show(tr('toastErrorSavingContext', 'Error saving context'), 'error');
     }
+  };
+
+  textarea.addEventListener('input', () => {
+    dirty = true;
+    setStatus_('');
+    clearTimeout(timer);
+    timer = setTimeout(flush_, AI_CONTEXT_DEBOUNCE_MS_);
   });
+  textarea.addEventListener('blur', flush_);
+  window.addEventListener('pagehide', flush_);
 }

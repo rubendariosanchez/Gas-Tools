@@ -4,11 +4,14 @@
  * Bootstrap del popup HTML (`src/html/index.html`):
  *  - Registra los Web Components usados en el popup (toggles, selects,
  *    cards de snippets/temas, modales).
- *  - Inicializa cada pestaña ("Settings", "Snippets", "Themes",
- *    "AI Context", "About") delegando en módulos independientes
+ *  - Inicializa las pestañas ("Editor", "Herramientas", "IA", "Temas",
+ *    "Snippets") y la vista "About" delegando en módulos independientes
  *    bajo `src/js/modules/`.
- *  - Detecta si el popup se abre fuera del editor de GAS y notifica al
- *    usuario (algunas opciones solo tienen sentido dentro del editor).
+ *  - Fuera del editor de GAS solo muestra About (las opciones solo tienen
+ *    sentido dentro del editor).
+ *
+ * Los tokens de diseño (`--gt-*`) los instala antes
+ * `extension/js/shared/gas-ui.js` (script clásico cargado en el HTML).
  *
  * Este archivo no contiene lógica de negocio: todo el comportamiento
  * vive en sus respectivos módulos y se comunica con el background vía
@@ -24,49 +27,70 @@ import { SnippetModal } from '../components/SnippetModal.js';
 import { ThemeModal } from '../components/ThemeModal.js';
 import { OptionColor } from '../components/OptionColor.js';
 
-import { initTabs_, updateAboutStats_ } from './modules/ui.js';
+import {
+    initTabs_, updateAboutStats_, showAboutOnly_, initColorMode_, initGlobalStatus_, renderVersion_,
+} from './modules/ui.js';
 import { initSettingsModule, initAiContextModule } from './modules/settings.js';
 import { initThemeModule } from './modules/themes.js';
 import { initSnippetModule } from './modules/snippets.js';
+import { initProviderAccessModule } from './modules/providers.js';
+import { initLanguageModule } from './modules/language.js';
+import { applyI18n, loadI18n, getStoredLanguage } from './utils/I18n.js';
+import { hydrateIcons } from './utils/Icons.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
+    // Modo de color antes de nada para evitar el parpadeo claro/oscuro.
+    initColorMode_();
+    // Iconos SVG del HTML estático (sin fuentes externas).
+    hydrateIcons(document);
+
+    // Traducciones antes de cualquier otra inicialización: idioma elegido
+    // por el usuario (inglés por defecto), no el del navegador.
+    const lang = await loadI18n(getStoredLanguage());
+    applyI18n(document);
+    initLanguageModule(lang);
+    renderVersion_();
+
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
     // Validamos la URL del editor de Google Apps Script
     const isEditor_ = tab?.url?.includes('script.google.com/') && tab?.url?.includes('/edit');
 
-    // Si no estamos en el editor, mostramos una pantalla de créditos o información básica
+    // Fuera del editor: solo la vista About (sin pestañas, búsqueda ni pie).
     if (!isEditor_) {
-        // 1. Ocultar navegación y footer (donde están los botones Save/Reset)
-        document.querySelector('.qc__nav-tabs').style.display = 'none';
-        document.querySelector('.qc__footer').style.display = 'none';
-        
-        // 2. Forzar visualización de créditos
-        document.querySelectorAll('.qc__page').forEach(p => p.classList.remove('qc__active'));
-        const aboutPage = document.getElementById('about');
-        aboutPage.classList.add('qc__active');
+        showAboutOnly_();
 
-        // 3. Opcional: Eliminar los modales del DOM para liberar memoria
-        document.getElementById('snippetModal')?.remove();
-        document.getElementById('themeModal')?.remove();
+        // Eliminar la confirmación del DOM para liberar memoria
         document.getElementById('qc__confirm')?.remove();
-        
-        // Inicializar solo lo básico para que se vean las estadísticas en los créditos
-        updateAboutStats_();
         return; // Detenemos la inicialización de módulos pesados
     }
 
-    // Inicializar navegación base
-    initTabs_();
-    
-    // Inicializar estadísticas
-    updateAboutStats_();
+    // Modales: se crean tras loadI18n para que pinten sus textos ya traducidos.
+    mountModals_();
 
-    // Inicializar módulos funcionales
+    // Módulos funcionales (settings pinta los controles del esquema).
+    initGlobalStatus_();
     initSettingsModule();
     initAiContextModule();
+    initProviderAccessModule();
     initThemeModule();
-    
-    // Si tienes snippets listos:
     initSnippetModule();
+
+    // Navegación al final: indexa la búsqueda con todo ya pintado.
+    initTabs_();
+    updateAboutStats_();
 });
+
+/**
+ * Inserta los modales de snippet y tema (su render usa `tr()` al conectarse).
+ * @returns {void}
+ */
+function mountModals_() {
+    const confirm = document.getElementById('qc__confirm');
+    [['snippet-modal', 'snippetModal'], ['theme-modal', 'themeModal']].forEach(([tag, id]) => {
+        if (document.getElementById(id)) return;
+        const modal = document.createElement(tag);
+        modal.id = id;
+        document.body.insertBefore(modal, confirm);
+    });
+}

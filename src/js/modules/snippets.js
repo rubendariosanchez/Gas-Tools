@@ -17,6 +17,8 @@ import { Toast } from '../utils/Toast.js';
 import { ConfirmDialog } from '../utils/ConfirmDialog.js';
 import { notifyEditors } from '../utils/Notify.js';
 import { syncLastUpdated } from '../utils/Functions.js';
+import { tr } from '../utils/I18n.js';
+import { createEmptyState } from '../utils/EmptyState.js';
 
 // Estado local del módulo para filtros
 let currentSnippetFilter = 'custom'; // 'default' o 'custom'
@@ -95,7 +97,15 @@ export async function loadSnippets_(startModule_, query = '', category = current
 
     // 3. Validar si hay resultados
     if (filtered.length === 0) {
-        container.innerHTML = `<div class="qc__no-results">No ${category} snippets found</div>`;
+        const emptyMsg = category === 'default'
+            ? tr('noDefaultSnippets', 'No default snippets found')
+            : tr('noCustomSnippets', 'No custom snippets found');
+        container.appendChild(createEmptyState({
+            icon: 'terminal',
+            message: emptyMsg,
+            actionLabel: tr('btnCreateSnippet', 'Create snippet'),
+            onAction: () => document.getElementById('snippetModal')?.open_(),
+        }));
         return;
     }
 
@@ -116,7 +126,7 @@ export async function loadSnippets_(startModule_, query = '', category = current
 
         // Evento: Confirmar y eliminar
         card.addEventListener('delete-snippet', async () => {
-            if (await ConfirmDialog(`Delete "${snip.title}"?`)) {
+            if (await ConfirmDialog(tr('confirmDeleteSnippet', 'Delete "$1"?', [snip.title]))) {
                 deleteSnippet_(snip.id);
             }
         });
@@ -163,7 +173,7 @@ async function saveSnippet_(newSnip, modalInstance) {
         // Cargar nuevamente los snippets para actualizar la vista (podemos optimizar esto más adelante para solo actualizar el snippet modificado)
         loadSnippets_(true);
     } catch (err) {
-        Toast.show("Error saving data", "error");
+        Toast.show(tr('toastErrorSavingData', 'Error saving data'), 'error');
     }
 }
 
@@ -181,9 +191,9 @@ async function deleteSnippet_(id) {
         notifyEditors('snippets');
         
         // Feedback al usuario
-        Toast.show('Snippet deleted from IndexedDB', 'success');
+        Toast.show(tr('toastSnippetDeleted', 'Snippet deleted'), 'success');
     } catch (error) {
         console.error('Error al eliminar snippet:', error);
-        Toast.show('Could not delete snippet', 'error');
+        Toast.show(tr('toastSnippetDeleteError', 'Could not delete snippet'), 'error');
     }
 }

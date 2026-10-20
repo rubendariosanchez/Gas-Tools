@@ -17,6 +17,68 @@ class GasCustomEditor {
   // Es estático porque Monaco es global: registrar el mismo provider dos veces
   // duplica las sugerencias en el autocompletado para todos los editores.
   static providersRegistered = false;
+  /**
+   * Archivos no activos al aplicar cambios del agente. `false` (seguro):
+   * `setModel` + `executeEdits` y vuelta al archivo original con su view
+   * state. `true` (experimental): `model.pushEditOperations` sin cambiar de
+   * archivo; probar en GAS real que marca el archivo como modificado y lo
+   * guarda (ver AGENTS.md, "Aplicar").
+   */
+  static EDIT_INACTIVE_IN_PLACE = false;
+  /** Disposables de los completion providers de snippets (para liberarlos en disable). */
+  static snippetProviderDisposables = [];
+  /** Instancia cuyos `_snippets` consultan los providers globales. */
+  static snippetOwner = null;
+
+  // Textos heredados de los toggles (antes guardaban valores de Monaco).
+  // Duplicado mínimo de la tabla de `legacyToBool` en src/js/utils/Variables.js
+  // (este script corre en MAIN world y no puede importar módulos ES).
+  /**
+   * Selectores de clases ofuscadas de GAS que usa el modo oscuro del IDE.
+   * Único punto a revisar si Google cambia el DOM; con `debug-mode` se avisa
+   * (`console.debug`) de los que no coinciden con ningún nodo.
+   * @type {Readonly<Object<string,string>>}
+   */
+  static IDE_SELECTORS = Object.freeze({
+    accountName: '.gb_Zc .gb_Vd',                     // nombre en la barra de Google
+    productName: 'header a[href$="/home"], header a[href$="/home"] *', // logo "Apps Script" (enlace a /home)
+    mutedText: '.UGZzee, .jvZ3Wb, .e0Nwve',           // textos secundarios de la cabecera
+    topBar: '.voS0mf, .xifBgf',                       // cabecera y navegación superior
+    separators: '.ZHQ5U, .GLLFQe:not(:first-child)',  // separadores horizontales
+    toolbarGroup: '.yggLIc',                          // grupo de botones (divisor en ::after)
+    sideBorders: '.LDouke, .MJnCFe',                  // bordes verticales de paneles
+    labelText: '.AVdUn',                              // etiquetas secundarias
+    treeItemName: '.dxw0vf',                          // nombre de archivo en el árbol
+    treeItemActive: 'li.UeVsd',                       // archivo activo del árbol
+    foregroundText: '.ry3kXd, .cfWmIb, .orScbe, .VfPpkd-fmcmS-yrriRe, .VfPpkd-fmcmS-yrriRe-OWXEXe-mWPk3d',
+    inputText: '.MocG8c',                             // texto de inputs nativos
+    inverseText: '.ncFHed .MocG8c, .eU809d',          // texto sobre fondos invertidos
+    invertedSurfaces: '.vL6DV, .vZzXQ, .awn63d, .ZBGfLd, .N3bjuf, .td5WLe, .hmN6tf, .OaLLmb, .wNGeMc', // paneles y menús
+    invertedTree: '.UeVsd, .z2IeMc',                  // sidebar y árbol (invertidos)
+    inputs: '.icpHQc',                                // campos de texto
+    toolbar: '.g3VIld',                               // toolbar del editor (invertida)
+    toolbarItem: '.ncFHed',                           // elementos de la toolbar
+    toolbarReinvert: 'div.yggLIc .ncFHed, .CtTFvc .eU809d', // re-inversión dentro de la toolbar
+    editorArea: '.LjDxcd, .ry3kXd',                   // contenedor de Monaco
+    lightBackdrops: '.z9lUof, .Y7MQLd',               // fondos claros a invertir
+  });
+
+  static LEGACY_TRUE_VALUES = ['on', 'line', 'all', 'singleFile', 'always', 'selection', 'boundary', 'gutter', 'true'];
+
+  /**
+   * Convierte un toggle (booleano o texto heredado) en booleano.
+   * @param {*} val Valor guardado.
+   * @returns {boolean}
+   */
+  static toBool_(val) {
+    if (typeof val === 'boolean') return val;
+    return GasCustomEditor.LEGACY_TRUE_VALUES.includes(val);
+  }
+
+  /** `true` si el modelo es temporal de la vista previa de cambios (`gas-preview:`). */
+  static _isPreviewModel_(model) {
+    return model?.uri?.scheme === 'gas-preview' || model?.uri?.scheme === 'gas-ghdiff';
+  }
 
   /**
    * @param {Object} options               - Datos iniciales del editor.
@@ -26,7 +88,7 @@ class GasCustomEditor {
    * @param {string} options.chatButton    - HTML del botón del chat AI.
    * @param {string} options.fileButton    - HTML del indicador de archivo activo.
    * @param {string} options.actionsButton - HTML del botón de acciones del proyecto.
-   * @param {string} options.themeUrl      - URL base de la carpeta de temas.
+   * @param {string} options.assetsBaseUrl - URL base de los recursos web-accesibles (CSS de vendor).
    * @param {string} options.referenceId   - UUID del editor Monaco al que corresponde esta instancia.
    */
   constructor(options) {
@@ -34,6 +96,14 @@ class GasCustomEditor {
     // ── Estado principal ─────────────────────────────────────────
     // Copia defensiva para no mutar el objeto original recibido del content script
     this._settings = { ...(options.settings || {}) };
+    // Modo debug lo antes posible para cubrir los logs de init().
+    DomUtils.setDebug(this._settings['debug-mode'] === true);
+    // Idioma de la UI inyectada (elegido en el popup). Se fija una vez,
+    // antes de crear toolbar y paneles; un cambio posterior se aplica al
+    // recargar la pestaña de Apps Script.
+    DomUtils.setI18n(options.i18n || null);
+    // URL base de recursos (el MAIN world no tiene `chrome.runtime`).
+    DomUtils.setAssetsBaseUrl(options.assetsBaseUrl);
     this._snippets = [...(options.snippets || [])];
     this._activeTheme = options.activeTheme || null;
 
@@ -70,11 +140,13 @@ class GasCustomEditor {
     this._rootParent = null;
     /** @type {HTMLElement[]} Todas las toolbars `.INSTk` activas. */
     this._toolsMenuElements = [];
-    this._chatPanel = null;
 
     // ── Listeners (guardados para poder eliminarlos en disable()) ─
     this._onChatButtonClick = null;
     this._onChatShortcut = null;
+    this._onSidePanelResult = null;
+    /** Listener del bridge `GAS_EDITOR_REQUEST` (Side Panel ↔ Monaco). */
+    this._onEditorRequest = null;
 
     // ── Indicador de archivo activo ──────────────────────────────
     /** @type {HTMLElement|null} Web Component <gas-current-file>. */
@@ -90,12 +162,16 @@ class GasCustomEditor {
     this._githubPanel = null;
     this._onGithubButtonClick = null;
     this._onGithubShortcut = null;
-    this._githubMonacoCommandBound = false;
 
-    // ── Flags de registro único ──────────────────────────────────
-    // Solo aplican a comandos registrados con `editor.addCommand` (Monaco
-    // no expone API para deshacerlos, por eso se registran una sola vez).
-    this._chatMonacoCommandBound = false;
+    // ── Atajos dentro de Monaco ──────────────────────────────────
+    // id → { keyCode, run, editor, disposable }. Se registran con
+    // `editor.addAction` (devuelve disposable) y se re-enlazan al editor
+    // activo cuando GAS lo reemplaza (ver `_syncServicesEditor_`).
+    this._monacoShortcuts = new Map();
+    // Editores donde ya se registró un fallback `addCommand` (sin dispose).
+    this._monacoCommandFallbacks = new WeakMap();
+    // Timers de reintento de `_onFileChange_` (se cancelan en el teardown).
+    this._fileChangeRetryTimers = [];
 
     // ── Tema ─────────────────────────────────────────────────────
     // true cuando monaco.editor.setTheme ha sido monkey-patched
@@ -112,7 +188,7 @@ class GasCustomEditor {
 
     // ── Mapa URI → nombre legible de archivo ─────────────────────
     // Apuntamos al singleton global `window.gasFileMap` para que los
-    // web components (gas-current-file, gas-chat-panel) lo consuman
+    // web components (gas-current-file) lo consuman
     // directamente sin que tengamos que pasarles el mapa.
     this._fileNameObjectMap = window.gasFileMap;
     this._aiAutocomplete = null;
@@ -158,6 +234,8 @@ class GasCustomEditor {
    * @param {Object} theme - Entrada del nuevo tema activo.
    */
   updateTheme(theme) {
+    // Mismo tema (id y definición): no se redefine ni se reaplica en Monaco.
+    if (this._activeTheme && theme && JSON.stringify(this._activeTheme) === JSON.stringify(theme)) return;
     this._activeTheme = theme;
     this.options.activeTheme = theme;
     this.reloadTheme();
@@ -187,9 +265,27 @@ class GasCustomEditor {
     // Si el editor referenciado quedó stale (p. ej. tras volver de Ejecuciones),
     // forzamos a init() a recapturar la instancia activa de Monaco.
     if (window.jsWireMonacoEditor && this.editor !== window.jsWireMonacoEditor) {
+      DomUtils.debug('Editor', 'Editor Monaco reemplazado; recapturando instancia.');
       this.editor = null;
     }
+    // `init()` recaptura el editor y propaga el cambio a los servicios
+    // (autocompletado AI, búsqueda nativa) vía `_syncServicesEditor_`.
     this.init();
+  }
+
+  /**
+   * Propaga el editor Monaco activo a los servicios que mantienen
+   * listeners atados a él. Idempotente: cada servicio ignora el mismo editor.
+   * @private
+   */
+  _syncServicesEditor_() {
+    if (!this.editor) return;
+    this._aiAutocomplete?.setEditor?.(this.editor);
+    window.gasNativeSearch?.setEditor?.(this.editor);
+    window.gasFileTabs?.setEditor?.(this.editor);
+    // Los atajos de Monaco viven en la instancia del editor: si cambió,
+    // los movemos al nuevo (y liberamos los del viejo).
+    this._rebindMonacoShortcuts_();
   }
 
   // ──────────────────────────────────────────
@@ -211,12 +307,18 @@ class GasCustomEditor {
     // Monaco debe existir en este punto; si no, no hay nada que hacer
     this.editor = window.jsWireMonacoEditor;
     if (!this.editor) return;
+    // Si el editor cambió (re-init por navegación SPA), los servicios deben
+    // soltar el editor viejo y engancharse al nuevo.
+    this._syncServicesEditor_();
     // Permite establecer el elemento padre de todas las opciones
     if (cwizRootParent_) this._setRootParent_(cwizRootParent_);
 
     // Elemento Monaco al que está anclada esta instancia (útil para mejoras futuras por editor)
     this.element = document.querySelector(`[data-gasreference='${this.options.referenceId}']`);
-    if (!this.element) return;
+    if (!this.element) {
+      DomUtils.debug('Editor', 'init(): elemento de referencia no encontrado', this.options.referenceId);
+      return;
+    }
 
     // Capturamos el tema por defecto de GAS para poder restaurarlo en disable()
     this._defaultThemeName = this.editor._themeService._theme.themeName;
@@ -232,6 +334,7 @@ class GasCustomEditor {
     // Esperamos hasta 15 s a que aparezcan toolbars; sin ellas no podemos
     // inyectar la UI, pero el resto del editor sigue operando.
     this._toolsMenuElements = await this._waitForToolsMenu_();
+    DomUtils.debug('Editor', 'init(): toolbars encontradas =', this._toolsMenuElements.length);
 
     // Aplicar opciones de Monaco (minimap, wordWrap, etc.) desde el estado interno
     this.applySettings(this._settings);
@@ -256,6 +359,9 @@ class GasCustomEditor {
     if (this._toolsMenuElements.length) {
       this._ensureUiInjected_();
     }
+
+    // Bridge de lectura/edición del editor para el Side Panel (idempotente).
+    this._bindEditorBridge_();
 
     // Escuchar cambios de modelo para mantener snippets y tema activos al cambiar de archivo
     this._setupModelListeners_();
@@ -322,13 +428,16 @@ class GasCustomEditor {
       this._modelChangeDisposable = null;
     }
     this._stopFileCheckInterval_();
+    // init() ya sincronizó el archivo actual: evitamos que el primer tick
+    // del intervalo dispare un `_onFileChange_` redundante.
+    this._lastModelUri = this.editor.getModel?.()?.uri?.toString?.() || null;
 
     // Debounce compartido: si llegan varios eventos seguidos (p. ej. el
     // intervalo y onDidChangeModel al mismo tiempo), solo ejecutamos una vez.
-    let debounceTimer = null;
+    // El timer vive en la instancia para poder cancelarlo en el teardown.
     const scheduleFileChange = () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => this._onFileChange_(), 150);
+      clearTimeout(this._fileChangeTimer);
+      this._fileChangeTimer = setTimeout(() => this._onFileChange_(), 150);
     };
 
     // Fuente principal: el usuario seleccionó otro archivo en el árbol.
@@ -360,6 +469,11 @@ class GasCustomEditor {
     // Si la extensión fue deshabilitada mientras el intervalo o un listener
     // estaba en vuelo, no hacemos nada y dejamos que _teardownInjectedUi_ termine
     if (window.__gasGloballyDisabled) return;
+    // Registrar el URI procesado: así el intervalo de seguridad no vuelve a
+    // disparar el mismo cambio que ya detectó onDidChangeModel.
+    this._lastModelUri = this.editor?.getModel?.()?.uri?.toString?.() || this._lastModelUri;
+    // Modelo temporal de la vista previa de cambios: no es un archivo real.
+    if (GasCustomEditor._isPreviewModel_(this.editor?.getModel?.())) return;
     // Refrescar la raíz por si la navegación SPA cambió la `c-wiz` activa.
     this._refreshRootParent_();
     if (this._snippets.length > 0) this.reloadSnippets();
@@ -368,7 +482,6 @@ class GasCustomEditor {
     // Construye el mapa y refresca todos los consumidores en cadena.
     const syncAll = () => {
       this._buildUriToNameMap();
-      this._chatPanel?.setEditor?.(this.editor);
       document.querySelectorAll('gas-current-file').forEach((el) => {
         el.setEditor?.(this.editor);
         el.setFileNameObjectMap?.(this._fileNameObjectMap);
@@ -388,12 +501,24 @@ class GasCustomEditor {
     const isResolved = () =>
       !activeUri || this._fileNameObjectMap.has(activeUri);
 
-    [120, 350, 800].forEach((delay) => {
+    // Cancelamos reintentos de un cambio anterior para no acumular timers
+    // cuando el usuario navega rápido entre archivos.
+    this._clearFileChangeRetries_();
+    this._fileChangeRetryTimers = [120, 350, 800].map((delay) =>
       setTimeout(() => {
-        if (isResolved()) return;
+        if (window.__gasGloballyDisabled || isResolved()) return;
         syncAll();
-      }, delay);
-    });
+      }, delay)
+    );
+  }
+
+  /**
+   * Cancela los reintentos diferidos pendientes de `_onFileChange_`.
+   * @private
+   */
+  _clearFileChangeRetries_() {
+    (this._fileChangeRetryTimers || []).forEach((id) => clearTimeout(id));
+    this._fileChangeRetryTimers = [];
   }
 
   /**
@@ -405,6 +530,9 @@ class GasCustomEditor {
       clearInterval(this._fileCheckInterval);
       this._fileCheckInterval = null;
     }
+    clearTimeout(this._fileChangeTimer);
+    this._fileChangeTimer = null;
+    this._clearFileChangeRetries_();
   }
 
   // ──────────────────────────────────────────
@@ -425,19 +553,34 @@ class GasCustomEditor {
    * @private
    */
   _refreshRootParent_() {
-    const containers = document.querySelectorAll('c-wiz[data-p]');
-    let next = null;
+    // Criterio canónico: la `c-wiz` con `aria-busy="false"` explícito.
+    let next = this._findActiveCwiz_();
 
-    if (containers.length === 1 && containers[0].getAttribute('aria-hidden') !== 'true') {
-      next = containers[0];
-    } else {
-      next = document.querySelector(
-        'c-wiz[data-p]:not([aria-hidden="true"]):not([aria-busy="true"])'
-      );
+    // Fallback (comportamiento previo) mientras GAS no ha marcado ninguna.
+    if (!next) {
+      const containers = document.querySelectorAll('c-wiz[data-p]');
+      if (containers.length === 1 && containers[0].getAttribute('aria-hidden') !== 'true') {
+        next = containers[0];
+      } else {
+        next = document.querySelector(
+          'c-wiz[data-p]:not([aria-hidden="true"]):not([aria-busy="true"])'
+        );
+      }
     }
 
     if (next) this._rootParent = next;
     return this._rootParent ?? null;
+  }
+
+  /**
+   * Devuelve la `c-wiz[data-p][aria-busy="false"]` activa, priorizando la
+   * que no está oculta. `null` si GAS aún no marcó ninguna.
+   * @returns {HTMLElement|null}
+   * @private
+   */
+  _findActiveCwiz_() {
+    return document.querySelector('c-wiz[data-p][aria-busy="false"]:not([aria-hidden="true"])')
+      || document.querySelector('c-wiz[data-p][aria-busy="false"]');
   }
 
   /**
@@ -499,6 +642,7 @@ class GasCustomEditor {
 
     // Modelos de Monaco ordenados por ID numérico
     const models = (window.monaco?.editor?.getModels?.() || [])
+      .filter(m => !GasCustomEditor._isPreviewModel_(m))
       .map(m => ({
         uri: m.uri.toString(),
         id:  parseInt(m.uri.path.replace('/', ''), 10),
@@ -584,7 +728,7 @@ class GasCustomEditor {
    *
    * @param {string} buttonId  ID del wrapper a remover (p.ej. `'buttonChatGas'`).
    * @param {string} panelTag  Tag del Web Component a remover del body
-   *   (p.ej. `'gas-chat-panel'`).
+   *   (p.ej. `'gas-actions-panel'`).
    * @param {{type:string, capture?:boolean}[]} listenerSpecs  Lista de
    *   listeners a quitar; cada uno con la propiedad de instancia que lo
    *   guarda (`prop`) y el tipo de evento (`type`, `capture` opcional).
@@ -592,7 +736,8 @@ class GasCustomEditor {
    */
   _teardownToolbarUi_(buttonId, panelTag, listenerSpecs) {
     document.querySelectorAll(`#${buttonId}`).forEach((el) => el.remove());
-    document.querySelector(panelTag)?.remove();
+    // `panelTag` nulo: el caller conserva el panel (p. ej. el chat).
+    if (panelTag) document.querySelector(panelTag)?.remove();
     listenerSpecs.forEach(({ prop, type, capture }) => {
       const fn = this[prop];
       if (fn) document.removeEventListener(type, fn, capture);
@@ -622,23 +767,93 @@ class GasCustomEditor {
   }
 
   /**
-   * Registra un atajo dentro de Monaco. `editor.addCommand` no expone
-   * API de remoción, así que el caller debe pasar un flag de "ya
-   * registrado" para evitar duplicados al re-inyectar.
+   * Registra (o actualiza) un atajo Alt+Shift+<tecla> dentro de Monaco.
+   * Se guarda en `_monacoShortcuts` para re-enlazarlo cuando GAS cambia
+   * la instancia del editor y liberarlo en el teardown. Idempotente: no
+   * duplica el binding sobre el mismo editor.
    *
-   * @param {string} flagProp   Propiedad de instancia que actúa de guard.
+   * @param {string} id         Id único de la acción (ej. 'gas-tools.chat.open').
    * @param {number} keyCode    `monaco.KeyCode.KeyX` correspondiente.
    * @param {() => void} run    Acción a ejecutar.
    * @private
    */
-  _bindMonacoShortcut_(flagProp, keyCode, run) {
-    if (this[flagProp]) return;
-    if (!this.editor?.addCommand || !window.monaco?.KeyMod) return;
-    this[flagProp] = true;
-    this.editor.addCommand(
-      window.monaco.KeyMod.Alt | window.monaco.KeyMod.Shift | keyCode,
-      run
-    );
+  _bindMonacoShortcut_(id, keyCode, run) {
+    if (keyCode == null) return;
+    const prev = this._monacoShortcuts.get(id);
+    // Mismo editor ya enlazado: solo actualizamos el callback.
+    if (prev && prev.editor === this.editor && prev.disposable) {
+      prev.run = run;
+      return;
+    }
+    prev?.disposable?.dispose?.();
+    const entry = { keyCode, run, editor: null, disposable: null };
+    this._monacoShortcuts.set(id, entry);
+    this._attachMonacoShortcut_(id, entry);
+  }
+
+  /**
+   * Enlaza una entrada de `_monacoShortcuts` al editor activo. Usa
+   * `addAction` (disposable); si no existe, cae a `addCommand` una sola
+   * vez por editor (Monaco no permite deshacerlo).
+   * @private
+   */
+  _attachMonacoShortcut_(id, entry) {
+    const editor = this.editor;
+    if (!editor || !window.monaco?.KeyMod) return;
+    const keybinding = window.monaco.KeyMod.Alt | window.monaco.KeyMod.Shift | entry.keyCode;
+    // El callback lee `entry.run` para que un re-bind no requiera re-registrar.
+    const invoke = () => entry.run?.();
+
+    try {
+      if (typeof editor.addAction === 'function') {
+        entry.disposable = editor.addAction({ id, label: `GAS Tools: ${id}`, keybindings: [keybinding], run: invoke });
+        entry.editor = editor;
+        return;
+      }
+      if (typeof editor.addCommand === 'function') {
+        let bound = this._monacoCommandFallbacks.get(editor);
+        if (!bound) this._monacoCommandFallbacks.set(editor, (bound = new Set()));
+        if (!bound.has(id)) {
+          bound.add(id);
+          // Sin dispose: el callback consulta el registro para quedar inerte tras el teardown.
+          editor.addCommand(keybinding, () => this._monacoShortcuts.get(id)?.run?.());
+        }
+        entry.editor = editor;
+        entry.disposable = { dispose: () => {} };
+      }
+    } catch (err) {
+      console.warn('[GASTools] No se pudo registrar el atajo de Monaco', id, err);
+    }
+  }
+
+  /**
+   * Re-enlaza todos los atajos registrados al editor activo. Llamado
+   * cuando GAS reemplaza la instancia de Monaco.
+   * @private
+   */
+  _rebindMonacoShortcuts_() {
+    this._monacoShortcuts.forEach((entry, id) => {
+      if (entry.editor === this.editor && entry.disposable) return;
+      entry.disposable?.dispose?.();
+      entry.disposable = null;
+      entry.editor = null;
+      this._attachMonacoShortcut_(id, entry);
+      DomUtils.debug('Shortcuts', 'Atajo re-enlazado al nuevo editor:', id);
+    });
+  }
+
+  /**
+   * Libera un atajo de Monaco (o todos si no se indica id).
+   * @param {string} [id]
+   * @private
+   */
+  _disposeMonacoShortcut_(id) {
+    const ids = id ? [id] : [...this._monacoShortcuts.keys()];
+    ids.forEach((key) => {
+      const entry = this._monacoShortcuts.get(key);
+      try { entry?.disposable?.dispose?.(); } catch (_) { /* ignorar */ }
+      this._monacoShortcuts.delete(key);
+    });
   }
 
   // ──────────────────────────────────────────
@@ -663,6 +878,7 @@ class GasCustomEditor {
       option.className = 'yggLIc';
       option.id = buttonId;
       this.DomUtils.setHTML(option, html);
+      DomUtils.applyI18n(option);
       toolbar.parentNode.insertBefore(option, toolbar);
     });
   }
@@ -670,8 +886,8 @@ class GasCustomEditor {
   /**
    * Mantiene la UI inyectada al día con un comportamiento idempotente:
    *
-   *  - Si el panel de chat falta en el body (GAS desmontó la página por
-   *    completo), reinyecta TODO desde cero.
+   *  - Si el panel de acciones falta en el body (GAS desmontó la página
+   *    por completo), reinyecta TODO desde cero.
    *  - Si el panel sigue vivo, solo añade los botones faltantes a las
    *    toolbars `.INSTk` que aún no los tienen. Esto evita cerrar el
    *    panel abierto cuando el usuario está usándolo.
@@ -679,22 +895,22 @@ class GasCustomEditor {
    * @private
    */
   _ensureUiInjected_() {
-    const chatPanel = document.querySelector('gas-chat-panel');
-    const panelsAlive = !!chatPanel;
+    // Marca de "paneles vivos": el popover de acciones (el chat ya no se
+    // inyecta en la página; vive en el Side Panel nativo de Chrome).
+    const panelsAlive = !!document.querySelector('gas-actions-panel');
 
     if (!panelsAlive) {
-      this._injectChatPanel_();
+      this._injectSidePanelButton_();
       this._injectActionsPanel_();
       this._injectGithubPanel_();
       this._injectCurrentFile_();
       return;
     }
 
-    // Panel vivo: refrescamos referencias para que esta instancia lo
-    // controle y el editor activo sea el actual.
-    this._chatPanel = chatPanel;
-    this._chatPanel.setEditor(this.editor);
     this._buildUriToNameMap();
+
+    // Los listeners del botón AI pueden faltar si esta instancia aún no los registró.
+    if (!this._onChatButtonClick) this._injectSidePanelButton_();
 
     // Y solo añadir los botones que falten en alguna toolbar.
     this._injectToolbarButton_('buttonChatGas',    this.options.chatButton);
@@ -733,8 +949,16 @@ class GasCustomEditor {
    * @private
    */
   _waitForToolsMenu_() {
-    // Si por algún motivo _rootParent no está establecido aún, usamos document como fallback
-    const all   = () => Array.from(this._getDomScope_().querySelectorAll('.INSTk'));
+    // Solo toolbars de la `c-wiz` activa. Si GAS aún no marcó ninguna con
+    // aria-busy="false", usamos la raíz conocida (o document) y descartamos
+    // las que pertenecen a una `c-wiz` en pausa.
+    const all = () => {
+      const scope = this._findActiveCwiz_() || this._getDomScope_();
+      return Array.from(scope.querySelectorAll('.INSTk')).filter((el) => {
+        const owner = el.closest('c-wiz[data-p]');
+        return !owner || owner.getAttribute('aria-busy') !== 'true';
+      });
+    };
 
     // Creamos la promesa para validar que el lemento este creado
     return new Promise((resolve) => {
@@ -745,11 +969,13 @@ class GasCustomEditor {
       }
 
       let resolved = false;
+      let checkTimer = 0;
       const finish = (value) => {
         if (resolved) return;
         resolved = true;
         observer.disconnect();
         clearTimeout(timeoutId);
+        clearTimeout(checkTimer);
         // Aprovechamos para anclar la raíz al `c-wiz` activa que acaba de
         // emerger, así los siguientes consumidores la usan sin redoblar
         // queries innecesarias.
@@ -757,9 +983,15 @@ class GasCustomEditor {
         resolve(value);
       };
 
+      // Coalescemos ráfagas de mutaciones: una sola consulta cada 50 ms
+      // en vez de un querySelectorAll por cada lote del observer.
       const observer = new MutationObserver(() => {
-        const found = all();
-        if (found.length) finish(found);
+        if (checkTimer || resolved) return;
+        checkTimer = setTimeout(() => {
+          checkTimer = 0;
+          const found = all();
+          if (found.length) finish(found);
+        }, 50);
       });
       observer.observe(document.body, {
         childList:       true,
@@ -773,61 +1005,513 @@ class GasCustomEditor {
   }
 
   /**
-   * Crea (o recrea) el botón del chat AI. El panel se reutiliza entre
-   * re-inyecciones para preservar la conversación, configuración del LLM,
-   * tema y posición ajustados por el usuario.
+   * Crea (o recrea) el botón del chat AI. El chat ya no vive en la página:
+   * el botón y los atajos solo piden al content script que abra el Side
+   * Panel nativo de Chrome (`GAS_OPEN_SIDE_PANEL`).
    * @private
    */
-  _injectChatPanel_() {
-    // 1. Limpiar todo: botones duplicados, panel viejo, listeners y atajo.
-    this._teardownChatPanel_();
+  _injectSidePanelButton_() {
+    // 1. Limpiar botones duplicados, listeners y atajos previos.
+    this._teardownSidePanelButton_();
 
-    // 2. Crear el panel limpio (recreado en cada inyección).
-    this._chatPanel = document.createElement('gas-chat-panel');
-    document.body.appendChild(this._chatPanel);
-    this._chatPanel.setEditor(this.editor);
-
-    // 3. Insertar un botón en cada toolbar `.INSTk` activa.
+    // 2. Insertar un botón en cada toolbar `.INSTk` activa.
     this._injectToolbarButton_('buttonChatGas', this.options.chatButton);
 
-    // 4. Click delegado a nivel de documento. Verificamos que el trigger
+    // 3. Click delegado a nivel de documento. Verificamos que el trigger
     //    esté dentro de una toolbar `.INSTk` o del contenedor inyectado.
     this._onChatButtonClick = (e) => {
       const trigger = e.target.closest('#rsBtnChatGas');
       if (!trigger) return;
       if (!trigger.closest('.INSTk') && !trigger.closest('#buttonChatGas')) return;
       e.preventDefault();
-      this._chatPanel.setEditor(this.editor);
-      this._chatPanel.toggle();
+      this._requestSidePanel_();
     };
     document.addEventListener('click', this._onChatButtonClick);
 
-    // 5. Atajo global Alt+Shift+C. Siempre abre el panel.
-    const openChat = () => {
-      this._chatPanel?.setEditor(this.editor);
-      this._chatPanel?.open();
-    };
-    this._onChatShortcut = this._bindGlobalShortcut_('c', openChat);
+    // 4. Atajo global Alt+Shift+C.
+    const openSidePanel = () => this._requestSidePanel_();
+    this._onChatShortcut = this._bindGlobalShortcut_('c', openSidePanel);
 
-    // 6. Atajo dentro de Monaco (registrado una sola vez).
+    // 5. Atajo dentro de Monaco (se re-enlaza si cambia el editor).
     this._bindMonacoShortcut_(
-      '_chatMonacoCommandBound',
+      'gas-tools.chat.open',
       window.monaco?.KeyCode?.KeyC,
-      openChat
+      openSidePanel
     );
+
+    // 6. Resultado de la apertura: el content script solo lo despacha
+    //    cuando falla. Se avisa con un toast de página (y el detalle en consola).
+    this._onSidePanelResult = (e) => {
+      let detail = null;
+      try { detail = JSON.parse(e.detail || '{}'); } catch (_) { /* ignorar */ }
+      if (!detail || detail.ok !== false) return;
+      const text = DomUtils.t('edSideOpenFailed', "Couldn't open the side panel. Open it from Chrome's side panel menu.");
+      console.warn('[GASTools]', text, detail.error || '');
+      window.GasUi?.toast(document, { text, kind: 'warning', closeLabel: DomUtils.t('edGhDismiss', 'Dismiss') });
+    };
+    document.addEventListener('GAS_OPEN_SIDE_PANEL_RESULT', this._onSidePanelResult);
   }
 
   /**
-   * Elimina todos los botones del chat duplicados, el panel del body, el
-   * click delegado y el atajo global.
+   * Solicita al content script (→ background) abrir el Side Panel del chat.
    * @private
    */
-  _teardownChatPanel_() {
-    this._teardownToolbarUi_('buttonChatGas', 'gas-chat-panel', [
+  _requestSidePanel_() {
+    document.dispatchEvent(new CustomEvent('GAS_OPEN_SIDE_PANEL', { detail: JSON.stringify({}) }));
+  }
+
+  /**
+   * Elimina los botones del chat, el click delegado, los atajos y el
+   * listener del resultado de apertura del Side Panel.
+   * @private
+   */
+  _teardownSidePanelButton_() {
+    this._teardownToolbarUi_('buttonChatGas', null, [
       { prop: '_onChatButtonClick', type: 'click' },
       { prop: '_onChatShortcut',    type: 'keydown', capture: true },
+      { prop: '_onSidePanelResult', type: 'GAS_OPEN_SIDE_PANEL_RESULT' },
     ]);
-    this._chatPanel = null;
+    this._disposeMonacoShortcut_('gas-tools.chat.open');
+  }
+
+  // ──────────────────────────────────────────
+  // BRIDGE DEL EDITOR (Side Panel ↔ Monaco)
+  // ──────────────────────────────────────────
+
+  /**
+   * Registra (una sola vez) el listener `GAS_EDITOR_REQUEST` con el que el
+   * Side Panel lee/edita el editor Monaco activo. Responde siempre con
+   * `GAS_EDITOR_RESPONSE` y el mismo `requestId`.
+   * @private
+   */
+  _bindEditorBridge_() {
+    if (this._onEditorRequest) return;
+    this._onEditorRequest = (e) => {
+      let request;
+      try { request = JSON.parse(e.detail || '{}'); } catch (_) { return; }
+      const { requestId, action, payload } = request || {};
+      if (!requestId) return;
+      const reply = (response) => {
+        document.dispatchEvent(new CustomEvent('GAS_EDITOR_RESPONSE', {
+          detail: JSON.stringify({ requestId, ...response }),
+        }));
+      };
+      const fail = (err) => reply({ ok: false, error: String(err?.message || err) });
+      // Algunas acciones son asíncronas (saveProject): resolvemos siempre como promesa.
+      try {
+        Promise.resolve(this._handleEditorRequest_(action, payload || {})).then(reply, fail);
+      } catch (err) {
+        fail(err);
+      }
+    };
+    document.addEventListener('GAS_EDITOR_REQUEST', this._onEditorRequest);
+  }
+
+  /** Elimina el listener del bridge del editor. @private */
+  _unbindEditorBridge_() {
+    if (!this._onEditorRequest) return;
+    document.removeEventListener('GAS_EDITOR_REQUEST', this._onEditorRequest);
+    this._onEditorRequest = null;
+  }
+
+  /**
+   * Resuelve una acción del bridge del editor.
+   * @param {string} action
+   * @param {object} payload
+   * @returns {{ok:boolean, data?:object, error?:string}|Promise<{ok:boolean, error?:string}>}
+   * @private
+   */
+  _handleEditorRequest_(action, payload) {
+    // Las ediciones directas no pueden caer sobre el modelo de solo lectura de la vista previa.
+    if (['insertAtCursor', 'replaceSelection', 'replaceFile'].includes(action) && window.gasDiffPreview?.isActive?.()) {
+      window.gasDiffPreview.close();
+    }
+    const editor = this.editor || null;
+    // Con la vista previa abierta, las lecturas se refieren al archivo real del usuario.
+    const activeModel = editor?.getModel?.() || null;
+    const model = GasCustomEditor._isPreviewModel_(activeModel)
+      ? (window.gasDiffPreview?.userModel?.() || null)
+      : activeModel;
+    const ok_ = (data) => ({ ok: true, data });
+    const readActions = ['getInfo', 'getStats', 'getSelection', 'getFile', 'getProject'];
+
+    if (readActions.includes(action) && !model) return ok_({ available: false });
+
+    switch (action) {
+      case 'getInfo':
+        return ok_({ available: true, fileName: this._modelDisplayName_(model) });
+
+      case 'getStats': {
+        const models = this._projectModels_();
+        const projectChars = models.reduce((sum, m) => sum + this._modelLength_(m), 0);
+        return ok_({
+          available:      true,
+          selectionChars: this._selectedText_(editor, model).length,
+          fileChars:      this._modelLength_(model),
+          projectChars,
+        });
+      }
+
+      case 'getSelection':
+        return ok_({ available: true, text: this._selectedText_(editor, model) });
+
+      case 'getFile':
+        return ok_({ available: true, name: this._modelDisplayName_(model), text: model.getValue(), versionId: GasCustomEditor._versionOf_(model) });
+
+      case 'getProject': {
+        // Mismo orden que `getModels()`; se incluyen archivos hasta que el
+        // siguiente supere `maxChars`, el resto se lista en `omitted`.
+        const maxChars = Number(payload.maxChars) > 0 ? Number(payload.maxChars) : Infinity;
+        const models = window.monaco?.editor?.getModels?.() || [];
+        const files = [];
+        const omitted = [];
+        let total = 0;
+        models.forEach((m, index) => {
+          if (m?.isDisposed?.() || GasCustomEditor._isPreviewModel_(m)) return;
+          let text;
+          try { text = m.getValue(); } catch (_) { return; }
+          const name = this._modelDisplayName_(m, index);
+          if (total + text.length > maxChars) {
+            omitted.push(name);
+            return;
+          }
+          total += text.length;
+          files.push({ name, text });
+        });
+        return ok_({ available: true, files, omitted });
+      }
+
+      case 'insertAtCursor': {
+        if (!editor) return { ok: false, error: 'no-editor' };
+        const sel = editor.getSelection?.();
+        if (!sel) return { ok: false, error: 'no-cursor' };
+        editor.executeEdits('gas-chat', [{
+          range: {
+            startLineNumber: sel.startLineNumber,
+            startColumn:     sel.startColumn,
+            endLineNumber:   sel.startLineNumber,
+            endColumn:       sel.startColumn,
+          },
+          text: String(payload.text ?? ''),
+          forceMoveMarkers: true,
+        }]);
+        editor.focus();
+        return { ok: true };
+      }
+
+      case 'replaceSelection': {
+        if (!editor) return { ok: false, error: 'no-editor' };
+        const sel = editor.getSelection?.();
+        if (!sel || sel.isEmpty?.()) return { ok: false, error: 'no-selection' };
+        editor.executeEdits('gas-chat', [{ range: sel, text: String(payload.text ?? ''), forceMoveMarkers: true }]);
+        editor.focus();
+        return { ok: true };
+      }
+
+      case 'replaceFile': {
+        if (!editor || !model) return { ok: false, error: 'no-editor' };
+        const fullRange = model.getFullModelRange();
+        editor.executeEdits('gas-chat-diff', [{
+          range: fullRange,
+          text: String(payload.text ?? ''),
+          forceMoveMarkers: true,
+        }]);
+        editor.focus();
+        return { ok: true };
+      }
+
+      case 'listFiles': {
+        const files = this._projectModels_().map((m, index) => {
+          const name = this._modelDisplayName_(m, index);
+          return { name, type: this._modelFileType_(m, name), lines: m.getLineCount?.() || 0 };
+        });
+        return ok_({ available: !!files.length, files });
+      }
+
+      case 'readFile': {
+        const name = String(payload.name ?? '');
+        const target = this._findModelByName_(name);
+        if (!target) return ok_({ available: !!this._projectModels_().length, found: false, name, text: '' });
+        return ok_({ available: true, found: true, name: this._modelDisplayName_(target), text: target.getValue(), versionId: GasCustomEditor._versionOf_(target) });
+      }
+
+      case 'readFiles': {
+        // Varios archivos en un solo viaje; el orden coincide con `names`.
+        const names = (Array.isArray(payload.names) ? payload.names : []).slice(0, 200).map((n) => String(n ?? ''));
+        const files = names.map((name) => {
+          const target = this._findModelByName_(name);
+          return target
+            ? { found: true, name: this._modelDisplayName_(target), text: target.getValue(), versionId: GasCustomEditor._versionOf_(target) }
+            : { found: false, name, text: '' };
+        });
+        return ok_({ available: !!this._projectModels_().length, files });
+      }
+
+      case 'previewChanges': {
+        if (!editor) return { ok: false, error: 'no-editor' };
+        const preview = window.gasDiffPreview;
+        if (!preview?.open) return { ok: false, error: 'preview-unavailable' };
+        const requested = Array.isArray(payload.files) ? payload.files : [];
+        const files = [];
+        const conflicts = [];
+        const pinned = new Map(); // nombre → versión mostrada (Accept aplica exactamente lo visto)
+        let index = 0;
+        requested.forEach((f, i) => {
+          const kind = f?.kind === 'create' ? 'create' : 'edit';
+          const name = String(f?.name ?? '');
+          const target = kind === 'edit' ? this._findModelByName_(name) : null;
+          const original = target ? target.getValue() : '';
+          let proposed = String(f?.proposed ?? '');
+          if (target) {
+            const rebased = this._rebaseForPreview_(target, f, original);
+            if (rebased.conflict) { conflicts.push({ name, ...rebased.conflict }); return; }
+            proposed = rebased.proposed;
+            pinned.set(name, { name, mode: 'full', proposed, baseVersionId: GasCustomEditor._versionOf_(target), key: f?.key || '' });
+          }
+          if (i === (Number(payload.index) || 0)) index = files.length;
+          files.push({ name, kind, original, proposed });
+        });
+        if (!files.length) return conflicts.length ? { ok: true, data: { ok: false, error: 'conflict', conflicts } } : { ok: false, error: 'no-files' };
+        preview.open({
+          files,
+          index,
+          editor,
+          getModelByName: (n) => this._findModelByName_(n),
+          applyFile:      (n, text) => this._applyChangeSetSafe_([pinned.get(n) || { name: n, mode: 'full', proposed: text }], { fromPreview: true })
+            .then((res) => ({ ok: res.ok, error: res.ok ? undefined : (res.results?.[0]?.status === 'conflict' ? 'conflict' : res.error) })),
+        });
+        return { ok: true, data: { ok: true, conflicts } };
+      }
+
+      case 'navigatePreview': {
+        if (!window.gasDiffPreview?.isActive?.()) return { ok: false, error: 'no-preview' };
+        window.gasDiffPreview.navigate(Number(payload.index) || 0);
+        return { ok: true };
+      }
+
+      case 'closePreview':
+        window.gasDiffPreview?.close?.();
+        return { ok: true };
+
+      case 'applyFileEdits':
+        return this._applyFileEdits_(String(payload.name ?? ''), String(payload.proposed ?? ''));
+
+      case 'applyChangeSet':
+        return this._applyChangeSetSafe_(Array.isArray(payload.files) ? payload.files : [])
+          .then((res) => ({ ok: true, data: res }));
+
+      case 'saveProject':
+        return this._saveProject_();
+
+      case 'reloadPage':
+        setTimeout(() => window.top.location.reload(), 50);
+        return { ok: true };
+
+      default:
+        return { ok: false, error: `unknown-action: ${action}` };
+    }
+  }
+
+  /** Modelos de archivos reales del proyecto (sin vista previa ni liberados). @private */
+  _projectModels_() {
+    return (window.monaco?.editor?.getModels?.() || [])
+      .filter((m) => m && !m.isDisposed?.() && !GasCustomEditor._isPreviewModel_(m));
+  }
+
+  /** Tipo GAS de un modelo: 'gs' | 'html' | 'json'. @private */
+  _modelFileType_(model, name = '') {
+    const lower = String(name).toLowerCase();
+    if (lower.endsWith('.html')) return 'html';
+    if (lower.endsWith('.json')) return 'json';
+    const lang = model?.getLanguageId?.() || '';
+    if (lang === 'html') return 'html';
+    if (lang === 'json') return 'json';
+    return 'gs';
+  }
+
+  /**
+   * Busca un modelo por nombre legible: exacto, sin distinguir mayúsculas
+   * o ignorando la extensión (`Code` ↔ `Code.gs`).
+   * @param {string} name
+   * @returns {object|null}
+   * @private
+   */
+  _findModelByName_(name) {
+    const wanted = String(name || '').trim();
+    if (!wanted) return null;
+    const entries = this._projectModels_().map((m, index) => ({ m, n: this._modelDisplayName_(m, index) }));
+    const stripExt = (s) => s.toLowerCase().replace(/\.(gs|js|html|json)$/i, '');
+    return entries.find((e) => e.n === wanted)?.m
+      || entries.find((e) => e.n.toLowerCase() === wanted.toLowerCase())?.m
+      || entries.find((e) => stripExt(e.n) === stripExt(wanted))?.m
+      || null;
+  }
+
+  /**
+   * Adaptador legado: aplica `proposed` al archivo `name` (modo archivo
+   * completo, sin control de versión) por la ruta de `applyChangeSet`.
+   * @param {string} name
+   * @param {string} proposed
+   * @param {{fromPreview?:boolean}} [opts]
+   * @returns {Promise<{ok:boolean, error?:string, unchanged?:boolean}>}
+   * @private
+   */
+  async _applyFileEdits_(name, proposed, opts = {}) {
+    const res = await this._applyChangeSetSafe_([{ name, mode: 'full', proposed: String(proposed ?? '') }], opts);
+    if (res.ok) return res.results?.[0]?.status === 'unchanged' ? { ok: true, unchanged: true } : { ok: true };
+    return { ok: false, error: res.error === 'not-found' ? 'not-found' : (res.error || 'apply-failed') };
+  }
+
+  /**
+   * Ediciones mínimas por líneas (delegado en `GasEditApplier.fromFullText`).
+   * @param {object} model
+   * @param {string} next Texto propuesto normalizado a '\n'.
+   * @returns {Array<object>|null}
+   * @private
+   */
+  _buildLineEdits_(model, next) {
+    if (typeof GasEditApplier === 'undefined') return null;
+    return GasEditApplier.fromFullText(model.getLinesContent().join('\n'), next, GasCustomEditor._diffFn_());
+  }
+
+  /** Diff por líneas disponible en el MAIN world. @private */
+  static _diffFn_() {
+    return (typeof GasLineDiff !== 'undefined' && GasLineDiff?.diffLines)
+      ? GasLineDiff.diffLines
+      : window.GasDiffPreview?.diffLines?.bind(window.GasDiffPreview);
+  }
+
+  /** `getAlternativeVersionId()` del modelo o null. @private */
+  static _versionOf_(model) {
+    try { return typeof model?.getAlternativeVersionId === 'function' ? model.getAlternativeVersionId() : null; } catch (_) { return null; }
+  }
+
+  /**
+   * Texto propuesto para la vista previa recalculado sobre el texto vivo.
+   * @returns {{proposed?:string, conflict?:{reason:string, failed?:Array}}}
+   * @private
+   */
+  _rebaseForPreview_(model, f, original) {
+    if (typeof GasEditApplier === 'undefined') return { proposed: String(f?.proposed ?? '') };
+    const r = GasEditApplier.rebase(original, f || {}, GasCustomEditor._versionOf_(model));
+    return r.conflict ? { conflict: r.conflict } : { proposed: r.proposed };
+  }
+
+  /** `_applyChangeSet_` que nunca rechaza. @private */
+  async _applyChangeSetSafe_(files, opts = {}) {
+    try {
+      return await this._applyChangeSet_(files, opts);
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err), results: [] };
+    }
+  }
+
+  /**
+   * Aplica un ChangeSet en un solo paso por archivo, todo o nada (ver
+   * `GasEditApplier.applyChangeSet`). Por defecto activa cada archivo con
+   * `setModel` (GAS registra el cambio) y al final vuelve al archivo y view
+   * state originales. Idempotente: un reintento tras un timeout no duplica.
+   * @param {Array<object>} files
+   * @param {{fromPreview?:boolean}} [opts]
+   * @returns {Promise<{ok:boolean, error?:string, results:Array<object>}>}
+   * @private
+   */
+  async _applyChangeSet_(files, opts = {}) {
+    const editor = this.editor;
+    if (!editor) return { ok: false, error: 'no-editor', results: [] };
+    if (typeof GasEditApplier === 'undefined') return { ok: false, error: 'applier-unavailable', results: [] };
+    if (!opts.fromPreview && window.gasDiffPreview?.isActive?.()) window.gasDiffPreview.close();
+
+    const startModel = editor.getModel?.() || null;
+    const startView = editor.saveViewState?.() || null;
+    const inPlace = GasCustomEditor.EDIT_INACTIVE_IN_PLACE;
+    if (!this._appliedChanges || this._appliedChanges.size > 200) this._appliedChanges = new Map();
+
+    const activate = (model) => {
+      if (editor.getModel?.() !== model) editor.setModel(model);
+    };
+    const deps = {
+      findModel: (n) => this._findModelByName_(n),
+      diff: GasCustomEditor._diffFn_(),
+      applied: this._appliedChanges,
+      applyEdits: (model, edits) => {
+        if (inPlace && editor.getModel?.() !== model) {
+          model.pushStackElement();
+          model.pushEditOperations([], edits, () => null);
+          model.pushStackElement();
+          return;
+        }
+        activate(model);
+        editor.pushUndoStop();
+        editor.executeEdits('gas-agent', edits);
+        editor.pushUndoStop();
+      },
+      undo: async (model) => {
+        if (!inPlace) activate(model);
+        if (typeof model.undo === 'function') await model.undo();
+      },
+    };
+
+    try {
+      return await GasEditApplier.applyChangeSet(files, deps);
+    } finally {
+      // Volver al archivo y posición del usuario (sin tocar la vista previa)
+      try {
+        if (startModel && !startModel.isDisposed?.() && !GasCustomEditor._isPreviewModel_(startModel)
+          && editor.getModel?.() !== startModel) {
+          editor.setModel(startModel);
+          if (startView) editor.restoreViewState?.(startView);
+        }
+      } catch (_) { /* editor destruido */ }
+    }
+  }
+
+  /**
+   * Simula Ctrl+S igual que `_triggerGasSave_` del panel de GitHub y espera
+   * a que GAS procese el guardado.
+   * @returns {Promise<{ok:boolean, error?:string}>}
+   * @private
+   */
+  async _saveProject_() {
+    if (window.gasDiffPreview?.isActive?.()) window.gasDiffPreview.close();
+    try {
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 's',
+        code: 'KeyS',
+        keyCode: 83,
+        which: 83,
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    return { ok: true };
+  }
+
+  /** Nombre legible de un modelo (mapa global `gasFileMap` o fallback). @private */
+  _modelDisplayName_(model, index = 0) {
+    const uri = String(model?.uri || '');
+    return (uri && this._fileNameObjectMap?.get?.(uri)) || this._formatModelName(model, index);
+  }
+
+  /** Longitud de un modelo sin materializar el texto cuando es posible. @private */
+  _modelLength_(model) {
+    if (!model || model.isDisposed?.()) return 0;
+    try {
+      return typeof model.getValueLength === 'function'
+        ? model.getValueLength()
+        : String(model.getValue() || '').length;
+    } catch (_) { return 0; }
+  }
+
+  /** Texto seleccionado en el editor ('' si la selección está vacía). @private */
+  _selectedText_(editor, model) {
+    const sel = editor?.getSelection?.();
+    if (!sel || sel.isEmpty?.()) return '';
+    try { return model.getValueInRange(sel) || ''; } catch (_) { return ''; }
   }
 
   // ──────────────────────────────────────────
@@ -919,7 +1603,7 @@ class GasCustomEditor {
       this._githubPanel?.toggle?.(anchor);
     });
     this._bindMonacoShortcut_(
-      '_githubMonacoCommandBound',
+      'gas-tools.github.toggle',
       window.monaco?.KeyCode?.KeyH,
       () => {
         const anchor = document.querySelector('#rsBtnGithubGas');
@@ -937,6 +1621,7 @@ class GasCustomEditor {
       { prop: '_onGithubButtonClick', type: 'click' },
       { prop: '_onGithubShortcut',    type: 'keydown', capture: true },
     ]);
+    this._disposeMonacoShortcut_('gas-tools.github.toggle');
     this._githubPanel = null;
   }
 
@@ -992,6 +1677,7 @@ class GasCustomEditor {
         'margin-left:auto',
       ].join(';');
       this.DomUtils.setHTML(wrapper, this.options.fileButton);
+      DomUtils.applyI18n(wrapper);
       // Como hermano DESPUÉS de `.INSTk` para quedar a la derecha del flow.
       toolbar.parentNode.insertBefore(wrapper, toolbar.nextSibling);
     });
@@ -1019,8 +1705,9 @@ class GasCustomEditor {
   }
 
   /**
-   * Inyecta los estilos CSS del botón nativo (ancho fijo, dot, pulso).
-   * El popover trae su propio CSS dentro del Shadow DOM. Idempotente.
+   * Inyecta los estilos del botón nativo como botón tonal GM3 (tokens
+   * `--gt-*`; `!important` solo para ganar a las clases de GAS), con el
+   * punto de estado y su pulso. El popover trae su propio CSS. Idempotente.
    * @private
    */
   _injectCurrentFileStyles_() {
@@ -1032,19 +1719,19 @@ class GasCustomEditor {
       .qc__cfn-btn {
         display: inline-flex !important;
         align-items: center;
-        gap: 8px;
+        gap: var(--gt-space-2);
         min-width: 200px;
         max-width: 260px;
-        padding: 0 12px !important;
-        border-radius: 18px !important;
-        background: #e8f0fe !important;
-        border: 1px solid #d2e3fc !important;
-        transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+        padding: 0 var(--gt-space-3) !important;
+        border: 0 !important;
+        border-radius: var(--gt-shape-full) !important;
+        background: var(--gt-primary-container) !important;
+        transition: background-color var(--gt-motion-duration) var(--gt-motion-standard),
+          box-shadow var(--gt-motion-duration) var(--gt-motion-standard);
       }
       .qc__cfn-btn:hover {
-        background: #d2e3fc !important;
-        border-color: #aecbfa !important;
-        box-shadow: 0 1px 3px rgba(26,115,232,0.18);
+        background: color-mix(in srgb, var(--gt-primary-container) 92%, var(--gt-on-primary-container)) !important;
+        box-shadow: var(--gt-elevation-1);
       }
       .qc__cfn-btn .qc__cfn-name {
         flex: 1 1 auto;
@@ -1052,28 +1739,31 @@ class GasCustomEditor {
         text-overflow: ellipsis;
         white-space: nowrap;
         text-align: center;
-        font-weight: 600 !important;
-        color: #1a73e8 !important;
+        font-family: var(--gt-font-brand) !important;
+        font-weight: 500 !important;
+        color: var(--gt-on-primary-container) !important;
         letter-spacing: 0.2px;
       }
       .qc__cfn-dot {
+        position: relative;
         flex: 0 0 auto;
         width: 8px;
         height: 8px;
-        border-radius: 50%;
+        border-radius: var(--gt-shape-full);
         background: transparent;
-        position: relative;
       }
       .qc__cfn-dot--error {
-        background: #d93025;
-        box-shadow: 0 0 0 0 rgba(217, 48, 37, 0.6);
+        background: var(--gt-error);
         animation: qc__cfn-pulse 1.6s ease-out infinite;
       }
-      .qc__cfn-dot--warning { background: #f9ab00; }
+      .qc__cfn-dot--warning { background: var(--gt-warning); }
       @keyframes qc__cfn-pulse {
-        0%   { box-shadow: 0 0 0 0 rgba(217,48,37,0.55); }
-        70%  { box-shadow: 0 0 0 6px rgba(217,48,37,0); }
-        100% { box-shadow: 0 0 0 0 rgba(217,48,37,0); }
+        0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gt-error) 55%, transparent); }
+        70%  { box-shadow: 0 0 0 6px transparent; }
+        100% { box-shadow: 0 0 0 0 transparent; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .qc__cfn-dot--error { animation: none; }
       }
     `;
     document.head.appendChild(style);
@@ -1090,11 +1780,20 @@ class GasCustomEditor {
       this._cfnDisposables.forEach((d) => d?.dispose?.());
     }
     this._cfnDisposables = [];
+    this._cfnRenderDebounced?.cancel?.();
+
+    // Los markers cambian en cada pausa de tecleo (diagnósticos, Error
+    // Lens): repintamos con debounce y solo si afectan al modelo activo.
+    this._cfnRenderDebounced = this.DomUtils.debounce(() => this._renderCurrentFileButton_(), 150);
 
     // Solo markers: el cambio de modelo lo gestiona _onFileChange_ con el
     // mapa ya actualizado, así que no lo registramos aquí.
     if (window.monaco?.editor) {
-      const d = window.monaco.editor.onDidChangeMarkers?.(() => this._renderCurrentFileButton_());
+      const d = window.monaco.editor.onDidChangeMarkers?.((uris) => {
+        const active = this.editor?.getModel?.()?.uri?.toString?.();
+        if (Array.isArray(uris) && active && !uris.some((u) => String(u) === active)) return;
+        this._cfnRenderDebounced();
+      });
       if (d) this._cfnDisposables.push(d);
     }
   }
@@ -1107,6 +1806,8 @@ class GasCustomEditor {
    */
   _renderCurrentFileButton_() {
     const model = this.editor?.getModel?.();
+    // Durante la vista previa de cambios se conserva el nombre del archivo real.
+    if (GasCustomEditor._isPreviewModel_(model)) return;
     let name = '—';
     let severity = 'none';
 
@@ -1130,7 +1831,7 @@ class GasCustomEditor {
       const dotEl  = wrapper.querySelector('#qcCfnDot');
       if (nameEl) {
         nameEl.textContent = name;
-        btnCurrentFile_.setAttribute("data-tt", name);
+        btnCurrentFile_?.setAttribute("data-tt", name);
       }
       if (dotEl) {
         dotEl.classList.remove('qc__cfn-dot--error', 'qc__cfn-dot--warning');
@@ -1162,6 +1863,7 @@ class GasCustomEditor {
       this._cfnDisposables.forEach((d) => d?.dispose?.());
       this._cfnDisposables = [];
     }
+    this._cfnRenderDebounced?.cancel?.();
   }
 
   // ──────────────────────────────────────────
@@ -1175,18 +1877,29 @@ class GasCustomEditor {
    * @param {Object} settings - Mapa `{ optionId: valor }` con las opciones a aplicar.
    */
   applySettings(settings) {
+    // Opciones que no dependen de Monaco: se aplican aunque no haya editor.
+    if ('debug-mode' in settings) DomUtils.setDebug(settings['debug-mode'] === true);
+    if ('gas-error-lens' in settings || 'gas-error-lens-custom-rules' in settings) {
+      this._applyErrorLensCustomRules_();
+    }
     if (!this.editor) return;
+
+    // Toggles: aceptan booleanos y los textos heredados ('on', 'none', ...).
+    const toBool = GasCustomEditor.toBool_;
+    // Estilos de cursor válidos (valor = TextEditorCursorStyle). `updateOptions`
+    // solo acepta el nombre: Monaco descarta números y vuelve a 'line'.
+    const CURSOR_STYLES = { 'line': 1, 'block': 2, 'underline': 3, 'line-thin': 4, 'block-outline': 5, 'underline-thin': 6 };
 
     // Tabla de handlers: cada clave mapea a la llamada updateOptions correspondiente
     const SETTINGS_MAP = {
       // Visuales & Layout
       'showMinimap': (val) => this.editor.updateOptions({ minimap: { enabled: val } }),
-      'lineNumbers': (val) => this.editor.updateOptions({ lineNumbers: val ? 'on' : 'off' }),
+      'lineNumbers': (val) => this.editor.updateOptions({ lineNumbers: toBool(val) ? 'on' : 'off' }),
       'wordWrap': (val) => this.editor.updateOptions({ wordWrap: val ? 'on' : 'off' }),
-      'renderLineHighlight': (val) => this.editor.updateOptions({ renderLineHighlight: val }),
-      'rulers': (val) => this.editor.updateOptions({ rulers: val ? [80, 120] : [] }),
-      'occurrencesHighlight': (val) => this.editor.updateOptions({ occurrencesHighlight: val ? 'singleFile' : 'off' }),
-      'renderWhitespace': (val) => this.editor.updateOptions({ renderWhitespace: val ? 'selection' : 'none' }),
+      'renderLineHighlight': (val) => this.editor.updateOptions({ renderLineHighlight: toBool(val) ? 'line' : 'none' }),
+      'rulers': (val) => this.editor.updateOptions({ rulers: toBool(val) ? [80, 120] : [] }),
+      'occurrencesHighlight': (val) => this.editor.updateOptions({ occurrencesHighlight: toBool(val) ? 'singleFile' : 'off' }),
+      'renderWhitespace': (val) => this.editor.updateOptions({ renderWhitespace: toBool(val) ? 'selection' : 'none' }),
       // Font
       // 'fontFamily': (val) => this.editor.updateOptions({ fontFamily: val }),
       'fontFamily': (val) => {
@@ -1208,13 +1921,13 @@ class GasCustomEditor {
       // Code Assistance
       'bracketPairs': (val) => this.editor.updateOptions({ bracketPairColorization: { enabled: val } }),
       'quickSuggestions': (val) => this.editor.updateOptions({ quickSuggestions: val }),
-      'autoClosingBrackets': (val) => this.editor.updateOptions({ autoClosingBrackets: val ? 'always' : 'never' }),
+      'autoClosingBrackets': (val) => this.editor.updateOptions({ autoClosingBrackets: toBool(val) ? 'always' : 'never' }),
       'guides-indentation': (val) => this.editor.updateOptions({ guides: { indentation: val } }),
       // Navigation
       'folding': (val) => this.editor.updateOptions({ folding: val }),
       // Scrolling
       'smoothScrolling': (val) => this.editor.updateOptions({ smoothScrolling: val }),
-      'scrollBeyondLastLine': (val) => this.editor.updateOptions({ scrollBeyondLastLine: val }),
+      'scrollBeyondLastLine': (val) => this.editor.updateOptions({ scrollBeyondLastLine: toBool(val) }),
       // Editor Behavior
       'tabSize': (val) => {
         const size = parseInt(val, 10) || 2;
@@ -1223,7 +1936,7 @@ class GasCustomEditor {
           model_.updateOptions({ tabSize: size, indentSize: size, insertSpaces: true });
         }
       },
-      'cursorStyle': (val) => this.editor.updateOptions({ cursorStyle: val === 'block' ? 2 : 1 }),
+      'cursorStyle': (val) => this.editor.updateOptions({ cursorStyle: Object.hasOwn(CURSOR_STYLES, val) ? val : 'line' }),
       'cursorBlinking': (val) => this.editor.updateOptions({ cursorBlinking: val }),
 
       /**
@@ -1253,9 +1966,29 @@ class GasCustomEditor {
       if (handler) {
         try {
           handler(value);
-        } catch (_) { /* setting inválido: ignorar */ }
+        } catch (err) {
+          // Setting inválido: lo ignoramos, pero lo dejamos visible en debug.
+          DomUtils.debug('Settings', `No se pudo aplicar "${key}"`, err);
+        }
       }
     });
+  }
+
+  /**
+   * Propaga `gas-error-lens-custom-rules` al servicio Error Lens. Se lee
+   * de `_settings` (estado completo) porque las actualizaciones parciales
+   * pueden traer solo `gas-error-lens`. Se repite en el siguiente tick
+   * por si Error Lens se (re)habilita después de este listener.
+   * @private
+   */
+  _applyErrorLensCustomRules_() {
+    const apply = () => {
+      if (window.__gasGloballyDisabled) return;
+      const enabled = this._settings?.['gas-error-lens-custom-rules'] === true;
+      window.gasErrorLens?.setCustomRulesEnabled?.(enabled);
+    };
+    apply();
+    setTimeout(apply, 0);
   }
 
   /**
@@ -1317,19 +2050,11 @@ class GasCustomEditor {
   }
 
   /**
-   * Aplica o remueve el tema dark al entorno completo del IDE de Google
-   * Apps Script y notifica al resto de Web Components inyectados.
-   *
-   * Tres responsabilidades:
-   *  1. Inyecta/elimina el `<style id="qc__ide-dark-mode">` con la
-   *     paleta dark para los nodos nativos de GAS.
-   *  2. Mantiene la clase `gc__is-dark-mode` en el `<body>` como única
-   *     fuente de verdad para que cualquier componente del proyecto
-   *     pueda adaptar su estética leyéndola.
-   *  3. Sincroniza el atributo `theme` en los Web Components flotantes
-   *     (`gas-chat-panel`, `gas-github-panel`, `gas-actions-panel`,
-   *     `gas-current-file`) para que adopten su paleta dark/light al
-   *     instante.
+   * Aplica o remueve el tema oscuro del IDE de Apps Script.
+   *  1. `qc__is-dark-mode` en `<body>`: única fuente de verdad; los tokens
+   *     `--gt-*` (gas-ui.js) cambian solos y los paneles los heredan.
+   *  2. `<style id="qc__ide-dark-mode">` para los nodos nativos de GAS
+   *     (selectores en `GasCustomEditor.IDE_SELECTORS`).
    *
    * @param {boolean} enabled - true para aplicar dark mode, false para removerlo.
    * @private
@@ -1337,275 +2062,138 @@ class GasCustomEditor {
   _applyIdeDarkMode(enabled) {
     const styleId = 'qc__ide-dark-mode';
     const existing = document.getElementById(styleId);
-
-    // Marca canónica en el <body>: el resto del proyecto la consulta para
-    // decidir su paleta sin duplicar heurísticas.
-    document.body.classList.toggle('gc__is-dark-mode', !!enabled);
-
-    // Propaga el tema a los Web Components inyectados. Cada panel decide
-    // cómo reaccionar al atributo `theme` desde su propio CSS scoped.
-    this._syncFloatingPanelsTheme_(enabled);
+    document.body.classList.toggle('qc__is-dark-mode', !!enabled);
 
     if (!enabled) {
       existing?.remove();
       return;
     }
-
+    if (DomUtils.isDebug()) this._auditIdeSelectors_();
     if (existing) return; // Ya aplicado
 
     const style = document.createElement('style');
     style.id = styleId;
-    style.textContent = `
-      /* ═══════════════════════════════════════════════════════════════
-         IDE DARK MODE - Google Apps Script Tools
-         Tema dark para el entorno completo del IDE de GAS
-         Basado en clases específicas de Google Apps Script.
-         La paleta se mantiene alineada con la del chat/web components
-         (ver DomUtils.themeTokensCss): mismas familias de fondo, texto y
-         acento para que el IDE y los paneles flotantes "respiren" igual.
-         ═══════════════════════════════════════════════════════════════ */
-      :root{
-        /* Backgrounds (mirror de --gc-bg / --gc-bg-raised / --gc-bg-elevated). */
-        --gc__root-bg:           #16181c;
-        --gc__root-bg-raised:    #1e2027;
-        --gc__root-bg-elevated:  #262830;
-        --gc__root-bg-deep:      #11131a;  /* equivalente a --gc-code-bg */
-
-        /* Texto. */
-        --gc__root-foreground:   #e8eaed;  /* --gc-text */
-        --gc__root-text-muted:   #8b8fa8;  /* --gc-text-muted */
-
-        /* Borde sólido equivalente a --gc-border (rgba .08) sobre bg-raised. */
-        --gc__root-border:       #262830;
-
-        /* Acento (highlight de archivo activo, hovers azulados). */
-        --gc__root-accent-dim:   rgba(99,179,237,.12);  /* --gc-accent-dim */
-        --gc__root-accent-soft:  rgba(99,179,237,.20);
-
-        /* Aliases legacy: nombres antiguos siguen funcionando para
-           cualquier consumidor externo que los lea. */
-        --gc__root-background:   var(--gc__root-bg);
-        --gc__root-forenground:  var(--gc__root-foreground);
-      }
-
-      /* ── Fondo principal y body ────────────────────────────────── */
-      body {
-        background: var(--gc__root-bg) !important;
-      }
-
-      .gb_Zc .gb_Vd{
-        color: var(--gc__root-foreground) !important;
-      }
-
-      .UGZzee, .jvZ3Wb, .e0Nwve{
-        color: var(--gc__root-text-muted) !important;
-      }
-
-      /* ── Header y navegación superior ──────────────────────────── */
-      .voS0mf,
-      .xifBgf {
-        background: var(--gc__root-bg) !important;
-        border-bottom: 1px solid var(--gc__root-border) !important;
-      }
-
-      header {
-        background: var(--gc__root-bg-deep) !important;
-      }
-
-      /* ── Separadores y bordes ──────────────────────────────────── */
-      .ZHQ5U,
-      .GLLFQe:not(:first-child) {
-        border-top: 1px solid var(--gc__root-border) !important;
-      }
-
-      .yggLIc::after {
-        border-right: 1px solid var(--gc__root-bg-elevated) !important;
-      }
-
-      .LDouke,
-      .MJnCFe {
-        border-left: 1px solid var(--gc__root-border) !important;
-      }
-
-      /* ── Texto y colores de fuente ─────────────────────────────── */
-      .AVdUn {
-        color: var(--gc__root-text-muted) !important;
-      }
-
-      :not(.UeVsd) > .dxw0vf,
-      .qc__folder-children li[role="option"] div[title]::before,
-      .qc__folder-header {
-        color: var(--gc__root-foreground) !important;
-      }
-
-      /* Item activo del árbol: usa el accent de la paleta del chat
-         (azul tenue) en vez de un ámbar suelto, para que el highlight
-         entre IDE y panels comparta lenguaje visual. */
-      li.UeVsd {
-        filter: none !important;
-        background: var(--gc__root-accent-dim) !important;
-        border-radius: 2px;
-      }
-
-      li.UeVsd .dxw0vf {
-        color: var(--gc__root-foreground) !important;
-      }
-
-      .ry3kXd,
-      .cfWmIb,
-      .orScbe,
-      .VfPpkd-fmcmS-yrriRe,
-      .VfPpkd-fmcmS-yrriRe-OWXEXe-mWPk3d {
-        color: var(--gc__root-foreground) !important;
-      }
-
-      .MocG8c {
-        color: var(--gc__root-foreground) !important;
-      }
-
-      .ncFHed .MocG8c,
-      .eU809d {
-        color: var(--gc__root-bg) !important;
-      }
-
-      /* ── Paneles, modales y menús (inversión de colores) ───────── */
-      div[aria-modal="true"],
-      .vL6DV,
-      .vZzXQ,
-      .awn63d,
-      .ZBGfLd,
-      .N3bjuf,
-      .td5WLe,
-      .hmN6tf,
-      .OaLLmb,
-      div[role="menu"],
-      div[role="complementary"],
-      .wNGeMc {
-        background: #F7F7F7 !important;
-        filter: invert(1) !important;
-        text-shadow: 0 0 0 rgba(0, 0, 0, 1);
-      }
-
-      /* ── Sidebar y árbol de archivos ───────────────────────────── */
-      .UeVsd,
-      .z2IeMc {
-        filter: invert(1) !important;
-        text-shadow: 0 0 0 rgba(0, 0, 0, 1);
-      }
-
-      /* Excepción: iconos de carpetas y archivos personalizados NO se invierten */
-      .qc__folder-icon-wrapper,
-      .qc__file-icon {
-        filter: invert(1) !important;
-      }
-
-      /* ── Inputs y campos de texto ──────────────────────────────── */
-      .MocG8c,
-      .icpHQc,
-      input[type="text"] {
-        text-shadow: 0 0 0 rgba(0, 0, 0, 1);
-      }
-
-      /* ── Toolbar y botones ─────────────────────────────────────── */
-      .g3VIld {
-        background: #F7F7F7 !important;
-        filter: invert(100%) !important;
-        text-shadow: 0 0 0 rgba(0, 0, 0, 1);
-      }
-
-      div.g3VIld .ncFHed {
-        position: static !important;
-      }
-
-      div.yggLIc .ncFHed,
-      .CtTFvc .eU809d {
-        filter: invert(100%) !important;
-      }
-
-      /* ── Editor Monaco y área de código ────────────────────────── */
-      .LjDxcd,
-      .ry3kXd {
-        filter: invert(1) contrast(1) !important;
-        -webkit-font-smoothing: none;
-        -moz-osx-font-smoothing: unset;
-        font-smoothing: unset;
-        font-smooth: never;
-      }
-
-      /* ── Fondos claros para elementos invertidos ───────────────── */
-      .z9lUof,
-      .Y7MQLd {
-        background: #F7F7F7 !important;
-      }
-
-      /* ── Scrollbars personalizados ─────────────────────────────── */
-      ::-webkit-scrollbar {
-        background: var(--gc__root-bg) !important;
-        width: 6px !important;;
-      }
-
-      ::-webkit-scrollbar-thumb {
-        background: var(--gc__root-bg-elevated) !important;
-      }
-
-      ::-webkit-scrollbar-thumb:hover {
-        background: #3a3d47 !important;
-      }
-
-      /* ── Ajustes adicionales para compatibilidad ───────────────── */
-      c-wiz[data-p] {
-        background: var(--gc__root-bg) !important;
-      }
-
-      /* Prevenir doble inversión en elementos anidados */
-      .UeVsd .UeVsd,
-      .z2IeMc .z2IeMc {
-        filter: none !important;
-      }
-    `;
-
+    style.textContent = this._ideDarkModeCss_();
     document.head.appendChild(style);
   }
 
   /**
-   * Sincroniza el atributo `theme` en los Web Components flotantes con
-   * el estado de la opción "IDE Dark Mode". Cada componente expone su
-   * propia paleta dark/light usando selectores `:host([theme="dark"])`
-   * o `:host([theme="light"])`; este helper solo activa/desactiva el
-   * atributo, no toca CSS interno.
-   *
-   * Se ejecuta tanto al toggle del usuario como al re-init del editor,
-   * para cubrir el caso de paneles que se montaron antes de que el
-   * estado dark estuviera disponible.
-   *
-   * @param {boolean} enabled - true para tema dark, false para tema light.
+   * CSS del modo oscuro para los nodos nativos de GAS. Colores de los
+   * tokens `--gt-*` (body.qc__is-dark-mode); los `#F7F7F7` + `invert()`
+   * son el truco de inversión para paneles que GAS pinta en claro.
+   * @returns {string}
    * @private
    */
-  _syncFloatingPanelsTheme_(enabled) {
-    const tags = (typeof DomUtils !== 'undefined' && DomUtils.FLOATING_PANEL_TAGS)
-      ? DomUtils.FLOATING_PANEL_TAGS
-      : [
-          'gas-chat-panel',
-          'gas-current-file',
-          'gas-actions-panel',
-          'gas-github-panel',
-        ];
+  _ideDarkModeCss_() {
+    const S = GasCustomEditor.IDE_SELECTORS;
+    const each = (sel, suffix) => sel.split(',').map((s) => `${s.trim()}${suffix}`).join(', ');
+    const nested = S.invertedTree.split(',').map((s) => `${s.trim()} ${s.trim()}`).join(', ');
+    return `
+      /* IDE DARK MODE - Google Apps Script Tools (tokens --gt-* de gas-ui.js). */
+      body { background: var(--gt-background) !important; }
 
-    const value = enabled ? 'dark' : 'light';
-    for (const tag of tags) {
-      document.querySelectorAll(tag).forEach((el) => {
-        el.setAttribute('theme', value);
-      });
+      ${S.accountName}, ${S.productName} { color: var(--gt-on-surface) !important; }
+      ${S.mutedText}, ${S.labelText} { color: var(--gt-on-surface-variant) !important; }
+
+      /* Cabecera y navegación superior */
+      ${S.topBar} {
+        background: var(--gt-background) !important;
+        border-bottom: 1px solid var(--gt-outline-variant) !important;
+      }
+      header { background: var(--gt-background) !important; }
+
+      /* Separadores y bordes */
+      ${S.separators} { border-top: 1px solid var(--gt-outline-variant) !important; }
+      ${each(S.toolbarGroup, '::after')} { border-right: 1px solid var(--gt-surface-container) !important; }
+      ${S.sideBorders} { border-left: 1px solid var(--gt-outline-variant) !important; }
+
+      /* Texto */
+      :not(.UeVsd) > ${S.treeItemName},
+      .qc__folder-children li[role="option"] div[title]::before,
+      .qc__folder-header,
+      ${S.foregroundText},
+      ${S.inputText} { color: var(--gt-on-surface) !important; }
+      ${S.inverseText} { color: var(--gt-background) !important; }
+
+      /* Archivo activo del árbol: acento primario tenue. */
+      ${S.treeItemActive} {
+        filter: none !important;
+        background: color-mix(in srgb, var(--gt-primary) 12%, transparent) !important;
+        border-radius: 2px;
+      }
+      ${S.treeItemActive} ${S.treeItemName} { color: var(--gt-on-surface) !important; }
+
+      /* Paneles, modales y menús (inversión de colores) */
+      div[aria-modal="true"]:not(.gt-dialog),
+      div[role="menu"]:not(.gt-menu),
+      div[role="complementary"],
+      ${S.invertedSurfaces} {
+        background: #F7F7F7 !important;
+        filter: invert(1) !important;
+        text-shadow: 0 0 0 rgba(0, 0, 0, 1);
+      }
+
+      /* Sidebar y árbol: invertidos. Carpetas e iconos propios usan tokens
+         --gt-* y conservan su color real (sin contra-inversión). */
+      ${S.invertedTree} {
+        filter: invert(1) !important;
+        text-shadow: 0 0 0 rgba(0, 0, 0, 1);
+      }
+
+      /* Inputs */
+      ${S.inputText}, ${S.inputs}, input[type="text"] { text-shadow: 0 0 0 rgba(0, 0, 0, 1); }
+
+      /* Toolbar */
+      ${S.toolbar} {
+        background: #F7F7F7 !important;
+        filter: invert(100%) !important;
+        text-shadow: 0 0 0 rgba(0, 0, 0, 1);
+      }
+      div${S.toolbar} ${S.toolbarItem} { position: static !important; }
+      ${S.toolbarReinvert} { filter: invert(100%) !important; }
+
+      /* Botones inyectados (LjDxcd → invertidos): lo pintado con --gt-*
+         se contra-invierte para conservar el color de token oscuro. */
+      #ctnCurrentFileName .qc__cfn-btn { filter: none !important; }
+      .qc__gh-dot { filter: invert(1); }
+
+      /* Editor Monaco y área de código */
+      ${S.editorArea} {
+        filter: invert(1) contrast(1) !important;
+        -webkit-font-smoothing: none;
+        -moz-osx-font-smoothing: unset;
+      }
+
+      /* Fondos claros para elementos invertidos */
+      ${S.lightBackdrops} { background: #F7F7F7 !important; }
+
+      /* Scrollbars */
+      ::-webkit-scrollbar { background: var(--gt-background) !important; width: 6px !important; }
+      ::-webkit-scrollbar-thumb { background: var(--gt-surface-container) !important; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--gt-outline) !important; }
+
+      c-wiz[data-p] { background: var(--gt-background) !important; }
+
+      /* Prevenir doble inversión en elementos anidados */
+      ${nested} { filter: none !important; }
+    `;
+  }
+
+  /**
+   * Modo debug: avisa de los selectores de `IDE_SELECTORS` sin coincidencias
+   * (señal de que GAS cambió sus clases ofuscadas).
+   * @private
+   */
+  _auditIdeSelectors_() {
+    for (const [key, selector] of Object.entries(GasCustomEditor.IDE_SELECTORS)) {
+      let found = false;
+      try { found = !!document.querySelector(selector); } catch (_) { /* selector inválido */ }
+      if (!found) console.debug('[GASTools:DarkMode] selector sin coincidencias:', key, selector);
     }
-
-    // El badge del botón de GitHub vive fuera del Shadow DOM (en la
-    // toolbar nativa de GAS) y usa estilos inline para el anillo. Tras
-    // cambiar el tema lo repintamos para que recalcule el color del
-    // ring contra el nuevo fondo del IDE.
-    document.querySelector('gas-github-panel')?.refreshBadge?.();
   }
 
   // ──────────────────────────────────────────
+  // SNIPPETS  // ──────────────────────────────────────────
   // SNIPPETS
   // ──────────────────────────────────────────
 
@@ -1623,8 +2211,11 @@ class GasCustomEditor {
         this._snippets = this.options.snippets;
       }
 
+      // Los providers globales leen los snippets de la instancia dueña.
+      GasCustomEditor.snippetOwner = this;
+
       // Si los providers ya están registrados, no necesitamos hacer nada más:
-      // el closure ya apunta a this._snippets y se actualiza automáticamente
+      // leen `snippetOwner._snippets` en cada invocación.
       if (GasCustomEditor.providersRegistered) return;
 
       // Grupos de lenguajes que soportamos; 'google apps script' es el identificador
@@ -1636,8 +2227,10 @@ class GasCustomEditor {
       ];
 
       langGroups.forEach(group => {
-        monaco.languages.registerCompletionItemProvider(group.id, {
+        const disposable = monaco.languages.registerCompletionItemProvider(group.id, {
           provideCompletionItems: (model, position) => {
+            if (GasCustomEditor._isPreviewModel_(model)) return { suggestions: [] };
+            const owner = GasCustomEditor.snippetOwner || this;
             const word = model.getWordUntilPosition(position);
             const range = {
               startLineNumber: position.lineNumber,
@@ -1646,17 +2239,34 @@ class GasCustomEditor {
               endColumn: word.endColumn,
             };
             // Filtramos desde el estado interno de la instancia (siempre actualizado)
-            const filtered = this._snippets.filter(s =>
+            const filtered = (owner._snippets || []).filter(s =>
               group.types.includes(s.lang?.toLowerCase())
             );
-            return { suggestions: this._buildSuggestions(filtered, range) };
+            return { suggestions: owner._buildSuggestions(filtered, range) };
           },
         });
+        if (disposable) GasCustomEditor.snippetProviderDisposables.push(disposable);
       });
 
       // Marcamos como registrado a nivel de clase para que nuevas instancias no dupliquen
       GasCustomEditor.providersRegistered = true;
-    } catch (_) { /* error al registrar snippets */ }
+      DomUtils.debug('Snippets', 'Completion providers registrados.');
+    } catch (err) {
+      DomUtils.debug('Snippets', 'Error al registrar snippets', err);
+    }
+  }
+
+  /**
+   * Libera los completion providers de snippets y resetea el flag para
+   * que el próximo `reloadSnippets()` los registre de nuevo (una sola vez).
+   * @private
+   */
+  _disposeSnippetProviders_() {
+    GasCustomEditor.snippetProviderDisposables.forEach((d) => {
+      try { d?.dispose?.(); } catch (_) { /* ignorar */ }
+    });
+    GasCustomEditor.snippetProviderDisposables = [];
+    GasCustomEditor.providersRegistered = false;
   }
 
   /**
@@ -1713,7 +2323,9 @@ class GasCustomEditor {
 
       // Aplicar inmediatamente usando la función original (no el interceptor)
       monaco.editor.setTheme(themeName);
-    } catch (_) { /* error al cargar tema */ }
+    } catch (err) {
+      DomUtils.debug('Theme', 'Error al cargar tema', err);
+    }
   }
 
   /**
@@ -1814,6 +2426,7 @@ class GasCustomEditor {
    * Desactiva la extensión y limpia todos los cambios inyectados.
    */
   disable() {
+    DomUtils.debug('Editor', 'disable()');
     //  Mostramos el sidebar
     const actionsPanel_ = document.querySelector('gas-actions-panel');
     if (actionsPanel_){
@@ -1830,24 +2443,31 @@ class GasCustomEditor {
     this._resetEditorDefaults();
     // 4. Eliminar la UI inyectada y los listeners
     this._teardownInjectedUi_();
-    // 5. Remover el tema dark del IDE si está aplicado.
-    //    También quitamos la clase canónica del body y reseteamos el
-    //    atributo `theme` de los paneles flotantes a 'light' para que
-    //    cualquiera que se quede montado vuelva a su paleta clara.
+    // 5. Remover el tema dark del IDE y la clase canónica del body (los
+    //    tokens --gt-* vuelven a claro en todos los paneles).
     document.getElementById('qc__ide-dark-mode')?.remove();
-    document.body.classList.remove('gc__is-dark-mode');
-    this._syncFloatingPanelsTheme_(false);
+    document.body.classList.remove('qc__is-dark-mode');
+    document.getElementById('gt-toast-host')?.remove();
 
     // 6. Deshabilitar autocompletado AI si existe
     if (this._aiAutocomplete) {
       this._aiAutocomplete.disable();
     }
+
+    // 7. Liberar los providers de snippets (enable() los re-registra).
+    this._disposeSnippetProviders_();
+
+    // 8. Desconectar el bridge del editor (enable() lo re-registra) y
+    // cerrar la vista previa de cambios si estaba abierta.
+    this._unbindEditorBridge_();
+    try { window.gasDiffPreview?.close?.(); } catch (_) { /* editor ya destruido */ }
   }
 
   /**
    * Reactiva la extensión con el estado guardado en memoria.
    */
   enable() {
+    DomUtils.debug('Editor', 'enable()');
     // Restaurar el estado desde memoria (o desde options si aún no hay nada en memoria)
     const settingsToApply = Object.keys(this._settings).length > 0
       ? this._settings
@@ -1871,6 +2491,7 @@ class GasCustomEditor {
 
     // Re-inyectar botones y paneles sin pasar por init()
     this._reinjectUI_();
+    this._bindEditorBridge_();
 
     // Reaplicar settings, snippets y tema desde el estado ya sincronizado
     this.applySettings(settingsToApply);
@@ -1886,7 +2507,7 @@ class GasCustomEditor {
    */
   _reinjectUI_() {
     const inject = () => {
-      this._injectChatPanel_();
+      this._injectSidePanelButton_();
       this._injectActionsPanel_();
       this._injectGithubPanel_();
       this._injectCurrentFile_();
@@ -1908,19 +2529,17 @@ class GasCustomEditor {
   /**
    * Limpia toda la UI inyectada: botones (en todas las toolbars), paneles,
    * listeners delegados y atajos globales. También libera los disposables
-   * de Monaco y detiene el intervalo de verificación de cambio de archivo.
-   * Los flags de comandos de Monaco no se resetean (la API no permite
-   * deshacer `addCommand`).
+   * de Monaco (incluidos los atajos) y detiene el intervalo de
+   * verificación de cambio de archivo.
    * @private
    */
   _teardownInjectedUi_() {
     // Cerrar paneles antes de eliminarlos para que cierren listeners propios.
-    this._chatPanel?.close?.();
     this._actionsPanel?.close?.();
     this._githubPanel?.close?.();
 
     // Delegar el teardown específico (botones + paneles + listeners + atajos).
-    this._teardownChatPanel_();
+    this._teardownSidePanelButton_();
     this._teardownActionsPanel_();
     this._teardownGithubPanel_();
     this._teardownCurrentFile_();
@@ -1932,6 +2551,7 @@ class GasCustomEditor {
     // Liberar disposables de Monaco para evitar memory leaks.
     this._modelChangeDisposable?.dispose();
     this._modelChangeDisposable = null;
+    this._disposeMonacoShortcut_();
 
     this._stopFileCheckInterval_();
     this._lastModelUri = null;

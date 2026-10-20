@@ -1,0 +1,2572 @@
+{
+  "extName": {
+    "message": "Google Apps Script Tools"
+  },
+  "extDescription": {
+    "message": "Convierte el editor de Apps Script en un IDE moderno: chat con IA, errores en vivo, sync con GitHub, carpetas, temas y snippets."
+  },
+  "actionTitle": {
+    "message": "Google Apps Script Tools"
+  },
+  "appTitle": {
+    "message": "Google Apps Script Tools"
+  },
+  "appTagline": {
+    "message": "Todo para desarrolladores de Apps Script"
+  },
+  "tabOptions": {
+    "message": "Opciones"
+  },
+  "tabSnippets": {
+    "message": "Snippets"
+  },
+  "tabThemes": {
+    "message": "Temas"
+  },
+  "tabAiContext": {
+    "message": "Contexto de IA"
+  },
+  "tabAbout": {
+    "message": "Acerca de"
+  },
+  "sectionExtension": {
+    "message": "Extensión"
+  },
+  "sectionFont": {
+    "message": "Fuente"
+  },
+  "sectionVisuals": {
+    "message": "Apariencia y diseño"
+  },
+  "sectionCodeAssistance": {
+    "message": "Asistencia de código"
+  },
+  "sectionNavigation": {
+    "message": "Navegación"
+  },
+  "sectionScrolling": {
+    "message": "Desplazamiento"
+  },
+  "sectionEditorBehavior": {
+    "message": "Comportamiento del editor"
+  },
+  "sectionSnippets": {
+    "message": "Snippets de código"
+  },
+  "sectionThemes": {
+    "message": "Temas"
+  },
+  "sectionAiContext": {
+    "message": "Contexto de IA"
+  },
+  "sectionProviderAccess": {
+    "message": "Acceso a proveedores"
+  },
+  "sectionStatistics": {
+    "message": "Estadísticas"
+  },
+  "optGlobalEnableTitle": {
+    "message": "Activar extensión"
+  },
+  "optGlobalEnableDesc": {
+    "message": "Activa o desactiva las funciones de forma global"
+  },
+  "optAiAutocompleteTitle": {
+    "message": "Autocompletado con IA"
+  },
+  "optAiAutocompleteDesc": {
+    "message": "Muestra sugerencias de código con IA mientras escribes"
+  },
+  "optGasFoldersTitle": {
+    "message": "Carpetas personalizadas"
+  },
+  "optGasFoldersDesc": {
+    "message": "Organiza los archivos usando '/' (p. ej. Carpeta/Archivo.gs)"
+  },
+  "optFolderColorTitle": {
+    "message": "Color de carpeta"
+  },
+  "optFolderColorDesc": {
+    "message": "Personaliza el color de los iconos de carpeta"
+  },
+  "optGsColorTitle": {
+    "message": "Color de archivos .gs"
+  },
+  "optGsColorDesc": {
+    "message": "Color del icono de los archivos .gs (Apps Script)"
+  },
+  "optHtmlColorTitle": {
+    "message": "Color de archivos .html"
+  },
+  "optHtmlColorDesc": {
+    "message": "Color del icono de los archivos .html"
+  },
+  "optJsonColorTitle": {
+    "message": "Color de archivos .json"
+  },
+  "optJsonColorDesc": {
+    "message": "Color del icono de los archivos .json"
+  },
+  "optGasFileTabsTitle": {
+    "message": "Pestañas de archivos"
+  },
+  "optGasFileTabsDesc": {
+    "message": "Muestra los archivos que abres como pestañas estilo VS Code sobre el editor"
+  },
+  "optErrorLensTitle": {
+    "message": "Error Lens"
+  },
+  "optErrorLensDesc": {
+    "message": "Muestra los diagnósticos al final de cada línea"
+  },
+  "optErrorLensCustomRulesTitle": {
+    "message": "Reglas personalizadas de Error Lens"
+  },
+  "optErrorLensCustomRulesDesc": {
+    "message": "Comprobaciones heurísticas extra (reasignación de const, código inalcanzable, punto y coma faltante). Puede generar falsos positivos."
+  },
+  "optDebugModeTitle": {
+    "message": "Modo depuración"
+  },
+  "optDebugModeDesc": {
+    "message": "Logs detallados en la consola del navegador para diagnosticar problemas."
+  },
+  "optFontFamilyTitle": {
+    "message": "Tipo de fuente"
+  },
+  "optFontFamilyDesc": {
+    "message": "Fuente del editor"
+  },
+  "optFontSizeTitle": {
+    "message": "Tamaño de fuente"
+  },
+  "optFontSizeDesc": {
+    "message": "Tamaño de la fuente del editor"
+  },
+  "optLineHeightTitle": {
+    "message": "Altura de línea"
+  },
+  "optLineHeightDesc": {
+    "message": "Espaciado entre líneas"
+  },
+  "optIdeDarkModeTitle": {
+    "message": "Modo oscuro del IDE"
+  },
+  "optIdeDarkModeDesc": {
+    "message": "Aplica el tema oscuro a toda la interfaz de Google Apps Script"
+  },
+  "optShowMinimapTitle": {
+    "message": "Mostrar minimapa"
+  },
+  "optShowMinimapDesc": {
+    "message": "Muestra una vista general del código en el lateral"
+  },
+  "optLineNumbersTitle": {
+    "message": "Números de línea"
+  },
+  "optLineNumbersDesc": {
+    "message": "Muestra los números de línea en el margen izquierdo"
+  },
+  "optWordWrapTitle": {
+    "message": "Ajuste de línea"
+  },
+  "optWordWrapDesc": {
+    "message": "Ajusta las líneas largas al ancho del editor"
+  },
+  "optLineHighlightTitle": {
+    "message": "Resaltar línea actual"
+  },
+  "optLineHighlightDesc": {
+    "message": "Resalta la línea actual"
+  },
+  "optRulersTitle": {
+    "message": "Reglas verticales"
+  },
+  "optRulersDesc": {
+    "message": "Muestra reglas verticales"
+  },
+  "optOccurrencesHighlightTitle": {
+    "message": "Resaltar coincidencias"
+  },
+  "optOccurrencesHighlightDesc": {
+    "message": "Resalta las apariciones de una variable"
+  },
+  "optRenderWhitespaceTitle": {
+    "message": "Mostrar espacios en blanco"
+  },
+  "optRenderWhitespaceDesc": {
+    "message": "Muestra los caracteres de espacio en blanco"
+  },
+  "optBracketPairsTitle": {
+    "message": "Colorear pares de corchetes"
+  },
+  "optBracketPairsDesc": {
+    "message": "Resalta los corchetes coincidentes con colores únicos"
+  },
+  "optQuickSuggestionsTitle": {
+    "message": "Sugerencias rápidas"
+  },
+  "optQuickSuggestionsDesc": {
+    "message": "Muestra sugerencias mientras escribes"
+  },
+  "optAutoClosingBracketsTitle": {
+    "message": "Cierre automático de corchetes"
+  },
+  "optAutoClosingBracketsDesc": {
+    "message": "Cierra los corchetes automáticamente"
+  },
+  "optIndentGuidesTitle": {
+    "message": "Guías de sangría"
+  },
+  "optIndentGuidesDesc": {
+    "message": "Muestra líneas guía de sangría"
+  },
+  "optFoldingTitle": {
+    "message": "Plegado de código"
+  },
+  "optFoldingDesc": {
+    "message": "Permite contraer bloques de código"
+  },
+  "optSmoothScrollingTitle": {
+    "message": "Desplazamiento suave"
+  },
+  "optSmoothScrollingDesc": {
+    "message": "Anima el desplazamiento para una experiencia más fluida"
+  },
+  "optScrollBeyondLastLineTitle": {
+    "message": "Desplazar más allá de la última línea"
+  },
+  "optScrollBeyondLastLineDesc": {
+    "message": "Permite desplazarse más allá de la última línea de código"
+  },
+  "optTabSizeTitle": {
+    "message": "Tamaño de tabulación"
+  },
+  "optTabSizeDesc": {
+    "message": "Tamaño de la sangría"
+  },
+  "optCursorStyleTitle": {
+    "message": "Estilo del cursor"
+  },
+  "optCursorStyleDesc": {
+    "message": "Apariencia del cursor"
+  },
+  "optCursorBlinkingTitle": {
+    "message": "Parpadeo del cursor"
+  },
+  "optCursorBlinkingDesc": {
+    "message": "Animación de parpadeo del cursor"
+  },
+  "optAiResponseLanguageTitle": {
+    "message": "Idioma de respuesta de la IA"
+  },
+  "optAiResponseLanguageDesc": {
+    "message": "Idioma de las respuestas del chat y de los comentarios generados. \"Auto\" usa el idioma de la interfaz (selector EN/ES de la cabecera)."
+  },
+  "experimentalBadge": {
+    "message": "Experimental"
+  },
+  "experimentalTooltip": {
+    "message": "Experimental: puede no funcionar por completo en todos los proyectos"
+  },
+  "experimentalNote": {
+    "message": "Función experimental. Puede no funcionar en el 100 % de los casos; tus comentarios son bienvenidos."
+  },
+  "searchPlaceholder": {
+    "message": "Buscar…"
+  },
+  "filterDefault": {
+    "message": "Predeterminados"
+  },
+  "filterCustom": {
+    "message": "Personalizados"
+  },
+  "addSnippet": {
+    "message": "Agregar snippet"
+  },
+  "addTheme": {
+    "message": "Agregar tema"
+  },
+  "currentThemeNone": {
+    "message": "Tema actual: --"
+  },
+  "activeTheme": {
+    "message": "Tema activo"
+  },
+  "noDefaultSnippets": {
+    "message": "No se encontraron snippets predeterminados"
+  },
+  "noCustomSnippets": {
+    "message": "No se encontraron snippets personalizados"
+  },
+  "btnEdit": {
+    "message": "Editar"
+  },
+  "btnDelete": {
+    "message": "Eliminar"
+  },
+  "badgeSystem": {
+    "message": "sistema"
+  },
+  "badgeCustom": {
+    "message": "personalizado"
+  },
+  "themeDuplicate": {
+    "message": "Duplicar tema"
+  },
+  "themeEdit": {
+    "message": "Editar tema"
+  },
+  "themeDelete": {
+    "message": "Eliminar tema"
+  },
+  "snippetModalTitle": {
+    "message": "Snippet"
+  },
+  "snippetModalSubtitle": {
+    "message": "Crear o editar snippet"
+  },
+  "labelName": {
+    "message": "Nombre"
+  },
+  "placeholderSnippetName": {
+    "message": "Mi función"
+  },
+  "labelPrefix": {
+    "message": "Prefijo"
+  },
+  "labelLanguage": {
+    "message": "Lenguaje"
+  },
+  "labelCode": {
+    "message": "Código"
+  },
+  "errorAllFieldsRequired": {
+    "message": "Todos los campos son obligatorios"
+  },
+  "themeModalTitle": {
+    "message": "Editar tema"
+  },
+  "labelThemeName": {
+    "message": "NOMBRE DEL TEMA *"
+  },
+  "placeholderThemeName": {
+    "message": "Mi tema personalizado"
+  },
+  "labelBaseTheme": {
+    "message": "TEMA BASE"
+  },
+  "themeColorsSection": {
+    "message": "Colores del editor y la interfaz"
+  },
+  "btnResetColors": {
+    "message": "Restablecer"
+  },
+  "resetColorsTooltip": {
+    "message": "Restaurar los colores predeterminados"
+  },
+  "btnAddColor": {
+    "message": "Agregar color"
+  },
+  "placeholderAddColorSearch": {
+    "message": "Buscar para agregar (p. ej. sidebar, tab)…"
+  },
+  "placeholderColorSearch": {
+    "message": "Buscar propiedad de color (p. ej. activityBar)…"
+  },
+  "themeRulesSection": {
+    "message": "Reglas de tokens de sintaxis"
+  },
+  "btnAddRule": {
+    "message": "AGREGAR REGLA"
+  },
+  "themeInherit": {
+    "message": "Heredar reglas básicas del tema base"
+  },
+  "btnSaveTheme": {
+    "message": "Guardar tema"
+  },
+  "btnRemove": {
+    "message": "Quitar"
+  },
+  "colorAdded": {
+    "message": "Agregado"
+  },
+  "noResultsFor": {
+    "message": "Sin resultados para \"$QUERY$\"",
+    "placeholders": {
+      "query": {
+        "content": "$1"
+      }
+    }
+  },
+  "fontStyleNormal": {
+    "message": "Normal"
+  },
+  "fontStyleBold": {
+    "message": "Negrita"
+  },
+  "fontStyleItalic": {
+    "message": "Cursiva"
+  },
+  "alertThemeNameRequired": {
+    "message": "Ingresa un nombre para el tema."
+  },
+  "aiHeadsUpLabel": {
+    "message": "Atención:"
+  },
+  "aiHeadsUpText": {
+    "message": "Las funciones de IA (chat, autocompletado y panel de archivo activo) son experimentales. Funcionan bien en la mayoría de los casos, pero pueden comportarse de forma irregular con proyectos muy grandes, estructuras de archivos poco comunes o algunos modelos concretos. Envía tus comentarios a"
+  },
+  "aiContextDescription": {
+    "message": "Define el contexto, la arquitectura y las pautas de código para el asistente de IA. Se aplica a todos los proyectos. Úsalo para estándares generales y buenas prácticas."
+  },
+  "aiContextPlaceholder": {
+    "message": "# Contexto del proyecto\n## Arquitectura\n- Describe la estructura del proyecto\n- Archivos principales y su propósito\n## Estilo de código\n- Idioma de los comentarios: español/inglés\n- Usar funciones flecha\n- Preferir const sobre let\n## Buenas prácticas\n- Añadir comentarios JSDoc a las funciones\n- Usar nombres de variables descriptivos\n- Manejar errores con try-catch\n## Formato de respuesta\n- Explicar en español\n- Incluir ejemplos de código"
+  },
+  "providerAccessDescription": {
+    "message": "Concede acceso de red solo a los proveedores de IA que uses. Chrome te pedirá confirmación para cada uno."
+  },
+  "toastProviderGranted": {
+    "message": "Acceso concedido: $PROVIDER$",
+    "placeholders": {
+      "provider": {
+        "content": "$1"
+      }
+    }
+  },
+  "toastProviderRevoked": {
+    "message": "Acceso revocado: $PROVIDER$",
+    "placeholders": {
+      "provider": {
+        "content": "$1"
+      }
+    }
+  },
+  "toastProviderDenied": {
+    "message": "Permiso sin cambios: $PROVIDER$",
+    "placeholders": {
+      "provider": {
+        "content": "$1"
+      }
+    }
+  },
+  "toastProviderError": {
+    "message": "No se pudo actualizar el acceso a $PROVIDER$",
+    "placeholders": {
+      "provider": {
+        "content": "$1"
+      }
+    }
+  },
+  "aboutVersionLabel": {
+    "message": "Versión"
+  },
+  "socialGithub": {
+    "message": "Perfil de GitHub"
+  },
+  "socialLinkedIn": {
+    "message": "LinkedIn"
+  },
+  "socialEmail": {
+    "message": "Correo"
+  },
+  "statCustomSnippets": {
+    "message": "Snippets personalizados"
+  },
+  "statCustomThemes": {
+    "message": "Temas personalizados"
+  },
+  "statLastUpdate": {
+    "message": "Última actualización"
+  },
+  "statNever": {
+    "message": "Nunca"
+  },
+  "btnSave": {
+    "message": "Guardar"
+  },
+  "btnCancel": {
+    "message": "Cancelar"
+  },
+  "btnConfirm": {
+    "message": "Confirmar"
+  },
+  "btnReset": {
+    "message": "RESTABLECER"
+  },
+  "confirmResetSettings": {
+    "message": "¿Restablecer todos los ajustes?"
+  },
+  "confirmDeleteSnippet": {
+    "message": "¿Eliminar \"$TITLE$\"?",
+    "placeholders": {
+      "title": {
+        "content": "$1"
+      }
+    }
+  },
+  "confirmDeleteTheme": {
+    "message": "¿Eliminar este tema personalizado?"
+  },
+  "toastSettingSaved": {
+    "message": "Ajuste guardado"
+  },
+  "toastErrorSavingSetting": {
+    "message": "Error al guardar el ajuste"
+  },
+  "toastColorSaved": {
+    "message": "Color guardado"
+  },
+  "toastErrorSavingColor": {
+    "message": "Error al guardar el color"
+  },
+  "toastErrorLoadingSettings": {
+    "message": "Error al cargar los ajustes"
+  },
+  "toastSettingsRestored": {
+    "message": "Ajustes restablecidos a los valores predeterminados"
+  },
+  "toastErrorResettingSettings": {
+    "message": "Error al restablecer los ajustes"
+  },
+  "toastLanguageSaved": {
+    "message": "Idioma guardado"
+  },
+  "toastErrorSavingLanguage": {
+    "message": "Error al guardar el idioma"
+  },
+  "toastContextSaved": {
+    "message": "Contexto guardado"
+  },
+  "toastErrorSavingContext": {
+    "message": "Error al guardar el contexto"
+  },
+  "toastErrorSavingData": {
+    "message": "Error al guardar los datos"
+  },
+  "toastSnippetDeleted": {
+    "message": "Snippet eliminado"
+  },
+  "toastSnippetDeleteError": {
+    "message": "No se pudo eliminar el snippet"
+  },
+  "toastThemeSaved": {
+    "message": "Tema guardado correctamente"
+  },
+  "toastErrorSavingTheme": {
+    "message": "Error al guardar el tema"
+  },
+  "toastThemeSelected": {
+    "message": "Tema \"$NAME$\" seleccionado; se aplicará en el editor.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "toastThemeSelectError": {
+    "message": "No se pudo guardar la selección de tema"
+  },
+  "toastCannotEditSystemTheme": {
+    "message": "Los temas del sistema no se pueden editar. Duplícalo primero."
+  },
+  "toastBaseJsonNotFound": {
+    "message": "Error: no se encontró el JSON base"
+  },
+  "toastThemeDuplicated": {
+    "message": "Tema duplicado"
+  },
+  "toastDuplicateFailed": {
+    "message": "No se pudo duplicar"
+  },
+  "toastThemeDeletedRestored": {
+    "message": "Tema eliminado. Se restauró el tema predeterminado."
+  },
+  "toastThemeDeleted": {
+    "message": "Tema eliminado"
+  },
+  "toastErrorDeletingTheme": {
+    "message": "Error al eliminar el tema"
+  },
+  "edActionsTitle": {
+    "message": "Acciones del proyecto"
+  },
+  "edActionsGroupView": {
+    "message": "Vista"
+  },
+  "edActionsShowFileTree": {
+    "message": "Mostrar árbol de archivos"
+  },
+  "edActionsHideFileTree": {
+    "message": "Ocultar árbol de archivos"
+  },
+  "edActionsOff": {
+    "message": "No"
+  },
+  "edActionsOn": {
+    "message": "Sí"
+  },
+  "edActionsGroupProject": {
+    "message": "Proyecto"
+  },
+  "edActionsScriptId": {
+    "message": "ID del script"
+  },
+  "edActionsCopyScriptId": {
+    "message": "Copiar ID del script"
+  },
+  "edActionsDownloadProject": {
+    "message": "Descargar proyecto"
+  },
+  "edActionsBulkDeleteEllipsis": {
+    "message": "Eliminar archivos en lote…"
+  },
+  "edActionsCopyFailed": {
+    "message": "No se pudo copiar al portapapeles"
+  },
+  "edActionsCopied": {
+    "message": "Copiado"
+  },
+  "edActionsFetching": {
+    "message": "Obteniendo…"
+  },
+  "edActionsUnknownError": {
+    "message": "Error desconocido"
+  },
+  "edActionsEmptyResponse": {
+    "message": "Respuesta vacía"
+  },
+  "edActionsPacking": {
+    "message": "Empaquetando…"
+  },
+  "edActionsSaving": {
+    "message": "Guardando…"
+  },
+  "edActionsDone": {
+    "message": "Listo ✓"
+  },
+  "edActionsFailed": {
+    "message": "Error"
+  },
+  "edActionsDownloadFailed": {
+    "message": "Error en la descarga: $1"
+  },
+  "edActionsDownloadTimeout": {
+    "message": "Se agotó el tiempo de descarga (la extensión no respondió)"
+  },
+  "edActionsTimeout": {
+    "message": "Tiempo de espera agotado"
+  },
+  "edActionsNoScriptId": {
+    "message": "El ID del script no está disponible."
+  },
+  "edActionsSignInRequired": {
+    "message": "Necesitas iniciar sesión con Google para usar esta acción."
+  },
+  "edActionsLoadingFiles": {
+    "message": "Cargando archivos del proyecto…"
+  },
+  "edActionsReadProjectFailed": {
+    "message": "No se pudo leer el proyecto"
+  },
+  "edActionsBulkDelete": {
+    "message": "Eliminar archivos en lote"
+  },
+  "edActionsClose": {
+    "message": "Cerrar"
+  },
+  "edActionsSearchFiles": {
+    "message": "Buscar archivos…"
+  },
+  "edActionsSelectAllVisible": {
+    "message": "Seleccionar visibles"
+  },
+  "edActionsSelectedCount": {
+    "message": "Seleccionados: $1"
+  },
+  "edActionsCancel": {
+    "message": "Cancelar"
+  },
+  "edActionsDeleteSelected": {
+    "message": "Eliminar seleccionados"
+  },
+  "edActionsNoFilterMatch": {
+    "message": "Ningún archivo coincide con este filtro."
+  },
+  "edActionsNoFiles": {
+    "message": "El proyecto no tiene archivos."
+  },
+  "edActionsConfirmDeletion": {
+    "message": "Confirmar eliminación"
+  },
+  "edActionsConfirmMessage": {
+    "message": "Vas a eliminar permanentemente $1 de este proyecto. Esta acción no se puede deshacer."
+  },
+  "edActionsDeleteFilesBtn": {
+    "message": "Eliminar $1"
+  },
+  "edActionsDeleteFailed": {
+    "message": "No se pudieron eliminar los archivos."
+  },
+  "edActionsDeletedOne": {
+    "message": "$1 archivo eliminado."
+  },
+  "edActionsDeletedMany": {
+    "message": "$1 archivos eliminados."
+  },
+  "edActionsFilesDeleted": {
+    "message": "Archivos eliminados"
+  },
+  "edActionsCompletedMessage": {
+    "message": "Se eliminaron $1 de este proyecto. El editor de Apps Script debe recargarse para actualizar su árbol de archivos; de lo contrario, seguirás viendo los archivos antiguos en la barra lateral."
+  },
+  "edActionsReloadNow": {
+    "message": "Recargar página ahora"
+  },
+  "edActionsDeletingFiles": {
+    "message": "Eliminando archivos"
+  },
+  "edActionsProgressFailed": {
+    "message": "$1/$2 ($3 con error)"
+  },
+  "edActionsDeletionFailed": {
+    "message": "Error al eliminar"
+  },
+  "edActionsFileCountOne": {
+    "message": "$1 archivo"
+  },
+  "edActionsFileCountMany": {
+    "message": "$1 archivos"
+  },
+  "edDvBase": {
+    "message": "Base (última sincronización)"
+  },
+  "edDvCancelEdit": {
+    "message": "Descartar edición"
+  },
+  "edDvChangeOf": {
+    "message": "Cambio $1 de $2"
+  },
+  "edDvClose": {
+    "message": "Cerrar (Esc)"
+  },
+  "edDvCopyBlock": {
+    "message": "Copiar bloque de GitHub"
+  },
+  "edDvCopyBlockBase": {
+    "message": "Copiar bloque de la base"
+  },
+  "edDvDecision": {
+    "message": "Decisión: $1"
+  },
+  "edDvDraftRestored": {
+    "message": "Se recuperó la edición sin guardar."
+  },
+  "edDvEdit": {
+    "message": "Editar resultado"
+  },
+  "edDvFiles": {
+    "message": "Archivos"
+  },
+  "edDvGas": {
+    "message": "GAS"
+  },
+  "edDvGithub": {
+    "message": "GitHub"
+  },
+  "edDvInline": {
+    "message": "En línea"
+  },
+  "edDvKeepLocal": {
+    "message": "Quedarme con GAS"
+  },
+  "edDvKeepLocalDesc": {
+    "message": "No se sobrescribe GAS al traer."
+  },
+  "edDvMerged": {
+    "message": "Resultado editado"
+  },
+  "edDvNext": {
+    "message": "Cambio siguiente (Alt+↓)"
+  },
+  "edDvNoChanges": {
+    "message": "Sin cambios"
+  },
+  "edDvPrev": {
+    "message": "Cambio anterior (Alt+↑)"
+  },
+  "edDvResolved": {
+    "message": "Resuelto"
+  },
+  "edDvResult": {
+    "message": "Resultado (editable)"
+  },
+  "edDvSaveMerge": {
+    "message": "Guardar resultado"
+  },
+  "edDvShowBase": {
+    "message": "Ver base"
+  },
+  "edDvSideBySide": {
+    "message": "Lado a lado"
+  },
+  "edDvStale": {
+    "message": "La comparación cambió: cierra el visor y vuelve a abrirlo."
+  },
+  "edDvTakeRemote": {
+    "message": "Traer de GitHub"
+  },
+  "edDvTakeRemoteDesc": {
+    "message": "Se reemplaza GAS por GitHub al aplicar el pull."
+  },
+  "edDvTitle": {
+    "message": "Comparar con GitHub"
+  },
+  "edDvToolbar": {
+    "message": "Acciones del diff"
+  },
+  "edDvUnavailable": {
+    "message": "Este archivo no está disponible para comparar."
+  },
+  "edDvUnresolved": {
+    "message": "Sin resolver"
+  },
+  "edGhChangeResolution": {
+    "message": "Cambiar"
+  },
+  "edGhPullFileLabel": {
+    "message": "Traer $1"
+  },
+  "edGhPullFilesGroup": {
+    "message": "Archivos a traer"
+  },
+  "edGhPullKeepLocalNote": {
+    "message": "Quedarme con GAS: no se toca"
+  },
+  "edGhPullNeedsResolve": {
+    "message": "Resuélvelo primero"
+  },
+  "edGhPullOverwriteWarn": {
+    "message": "Pisará tus cambios en GAS"
+  },
+  "edGhPullSelectedMany": {
+    "message": "$1 archivos seleccionados"
+  },
+  "edGhPullSelectedOne": {
+    "message": "$1 archivo seleccionado"
+  },
+  "edGhPullStale": {
+    "message": "$1 archivo(s) cambiaron en GAS después de la comparación y no se trajeron: $2. Actualiza el diff."
+  },
+  "edGhPullUnknownWarn": {
+    "message": "Puede sobrescribir tus cambios en GAS"
+  },
+  "edGhResolutionStale": {
+    "message": "La comparación cambió mientras decidías. Vuelve a abrir el visor."
+  },
+  "edGhResolve": {
+    "message": "Resolver"
+  },
+  "edSearchFilePosition": {
+    "message": "$1/$2 archivos"
+  },
+  "edSearchFileFallback": {
+    "message": "Archivo"
+  },
+  "edSearchInFile": {
+    "message": "En el archivo"
+  },
+  "edSearchShowFiles": {
+    "message": "Mostrar archivos con coincidencias"
+  },
+  "edSearchShowMatchesInFile": {
+    "message": "Mostrar coincidencias en este archivo"
+  },
+  "edSearchShowMatches": {
+    "message": "Mostrar coincidencias"
+  },
+  "edSearchPrevFile": {
+    "message": "Archivo anterior"
+  },
+  "edSearchNextFile": {
+    "message": "Archivo siguiente"
+  },
+  "edTabsLabel": {
+    "message": "Archivos abiertos"
+  },
+  "edTabsClose": {
+    "message": "Cerrar $1"
+  },
+  "edTabsCloseHint": {
+    "message": "Cerrar (clic central)"
+  },
+  "edTabsUnsaved": {
+    "message": "Cambios sin guardar (aproximado)"
+  },
+  "edTabsUnsavedAria": {
+    "message": "$1, cambios sin guardar"
+  },
+  "edTabsMenuLabel": {
+    "message": "Acciones de la pestaña"
+  },
+  "edTabsMenuClose": {
+    "message": "Cerrar"
+  },
+  "edTabsMenuCloseOthers": {
+    "message": "Cerrar las demás"
+  },
+  "edTabsMenuCloseRight": {
+    "message": "Cerrar a la derecha"
+  },
+  "edTabsMenuCopyName": {
+    "message": "Copiar nombre"
+  },
+  "edTabsUnsavedExact": {
+    "message": "Cambios sin guardar"
+  },
+  "edTabsSaveBeforeClose": {
+    "message": "Guarda los cambios de $1 antes de cerrar"
+  },
+  "edTabsKeptUnsavedOne": {
+    "message": "Una pestaña con cambios sin guardar quedó abierta"
+  },
+  "edTabsKeptUnsavedMany": {
+    "message": "$1 pestañas con cambios sin guardar quedaron abiertas"
+  },
+  "edTabsOpenFailed": {
+    "message": "No se pudo abrir $1 en el editor"
+  },
+  "edTabsMore": {
+    "message": "Mostrar todas las pestañas abiertas ($1 ocultas)"
+  },
+  "edTabsListLabel": {
+    "message": "Todas las pestañas abiertas"
+  },
+  "edTabsListHidden": {
+    "message": "Ocultas"
+  },
+  "edTabsListVisible": {
+    "message": "Visibles"
+  },
+  "edTabsListFilter": {
+    "message": "Filtrar pestañas"
+  },
+  "edTabsListEmpty": {
+    "message": "No hay pestañas que coincidan"
+  },
+  "edTabsCopied": {
+    "message": "Nombre copiado"
+  },
+  "edSearchNoMatchesInFile": {
+    "message": "No hay coincidencias en este archivo"
+  },
+  "edSearchLineColumn": {
+    "message": "Línea $1, columna $2"
+  },
+  "edSearchFilterFiles": {
+    "message": "Filtrar archivos…"
+  },
+  "edSearchNoFilterMatch": {
+    "message": "Ningún archivo coincide con este filtro"
+  },
+  "edSearchNoMatches": {
+    "message": "No hay coincidencias en el proyecto"
+  },
+  "edSearchFilesDialog": {
+    "message": "Archivos con coincidencias"
+  },
+  "edSearchMatchesDialog": {
+    "message": "Coincidencias en este archivo"
+  },
+  "edSearchFileOne": {
+    "message": "$1 archivo"
+  },
+  "edSearchFileMany": {
+    "message": "$1 archivos"
+  },
+  "edSearchMatchOne": {
+    "message": "$1 coincidencia"
+  },
+  "edSearchMatchMany": {
+    "message": "$1 coincidencias"
+  },
+  "edChatLocalProvider": {
+    "message": "Proveedor local"
+  },
+  "edChatKeyOptional": {
+    "message": "Clave de API (opcional)"
+  },
+  "edChatMentionSelection": {
+    "message": "Texto seleccionado"
+  },
+  "edChatMentionSelectionDesc": {
+    "message": "Inserta la selección actual del editor"
+  },
+  "edChatMentionFile": {
+    "message": "Archivo activo"
+  },
+  "edChatMentionFileDesc": {
+    "message": "Inserta el contenido completo del archivo abierto"
+  },
+  "edChatMentionProject": {
+    "message": "Proyecto completo"
+  },
+  "edChatMentionProjectDesc": {
+    "message": "Inserta todos los archivos del proyecto"
+  },
+  "edChatMissingKey": {
+    "message": "Falta la clave de API de $1. Configúrala en Ajustes."
+  },
+  "edChatTokenEstimate": {
+    "message": "≈ $1 tokens"
+  },
+  "edChatConfirmLarge": {
+    "message": "Esta solicitud tiene unos $1 tokens (más de $2). Puede ser lenta o costosa. ¿Enviar de todos modos?"
+  },
+  "edChatError": {
+    "message": "Error"
+  },
+  "edChatEmptyResponse": {
+    "message": "Respuesta vacía"
+  },
+  "edChatRequestCancelled": {
+    "message": "Solicitud cancelada"
+  },
+  "edChatUnknownResponse": {
+    "message": "Respuesta vacía o desconocida"
+  },
+  "edChatPermissionMissing": {
+    "message": "No se concedió acceso a $1. Abre el popup de la extensión → Contexto de IA → \"Acceso a proveedores\", permite este proveedor y vuelve a intentarlo."
+  },
+  "edChatTitle": {
+    "message": "Asistente de IA"
+  },
+  "edChatSettingsTooltip": {
+    "message": "Ajustes (⚙)"
+  },
+  "edChatOpenSettings": {
+    "message": "Abrir ajustes"
+  },
+  "edChatClear": {
+    "message": "Borrar conversación"
+  },
+  "edChatCloseEsc": {
+    "message": "Cerrar (Esc)"
+  },
+  "edChatClosePanel": {
+    "message": "Cerrar panel"
+  },
+  "edChatConversation": {
+    "message": "Conversación"
+  },
+  "edChatIntroPrefix": {
+    "message": "Pregunta sobre tu código · Usa"
+  },
+  "edChatIntroSuffix": {
+    "message": "para insertar contexto: selección, archivo o proyecto"
+  },
+  "edChatContextOptions": {
+    "message": "Opciones de contexto"
+  },
+  "edChatProviderModelGroup": {
+    "message": "Selección de proveedor y modelo"
+  },
+  "edChatProvider": {
+    "message": "Proveedor"
+  },
+  "edChatSelectProvider": {
+    "message": "Seleccionar proveedor"
+  },
+  "edChatModel": {
+    "message": "Modelo"
+  },
+  "edChatSelectModel": {
+    "message": "Seleccionar modelo"
+  },
+  "edChatCancel": {
+    "message": "Cancelar"
+  },
+  "edChatSendAnyway": {
+    "message": "Enviar de todos modos"
+  },
+  "edChatInputPlaceholder": {
+    "message": "Pregunta algo… escribe @ para agregar contexto"
+  },
+  "edChatMessageInput": {
+    "message": "Campo de mensaje"
+  },
+  "edChatSendMessage": {
+    "message": "Enviar mensaje"
+  },
+  "edChatHintSend": {
+    "message": "enviar"
+  },
+  "edChatHintNewLine": {
+    "message": "nueva línea"
+  },
+  "edChatHintContext": {
+    "message": "contexto"
+  },
+  "edChatHintClose": {
+    "message": "cerrar"
+  },
+  "edChatTokenEstimateTitle": {
+    "message": "Tokens estimados para esta solicitud (mensaje + contexto + historial, ~4 caracteres/token)"
+  },
+  "edChatResize": {
+    "message": "Redimensionar"
+  },
+  "edChatAiSettings": {
+    "message": "Ajustes de IA"
+  },
+  "edChatBack": {
+    "message": "Atrás"
+  },
+  "edChatCloseSettings": {
+    "message": "Cerrar ajustes"
+  },
+  "edChatSettingsTitle": {
+    "message": "Ajustes"
+  },
+  "edChatEndpointUrl": {
+    "message": "URL del endpoint"
+  },
+  "edChatEndpointHint": {
+    "message": "URL completa del endpoint (p. ej. LM Studio, Ollama)."
+  },
+  "edChatApiKey": {
+    "message": "Clave de API"
+  },
+  "edChatShowHideKey": {
+    "message": "Mostrar u ocultar clave"
+  },
+  "edChatToggleKey": {
+    "message": "Mostrar u ocultar la clave"
+  },
+  "edChatRemoveKey": {
+    "message": "Eliminar clave guardada"
+  },
+  "edChatKeyHint": {
+    "message": "La extensión la guarda y nunca se expone a la página. Déjala vacía para conservar la clave guardada."
+  },
+  "edChatTemperature": {
+    "message": "Temperatura"
+  },
+  "edChatPrecise": {
+    "message": "Precisa"
+  },
+  "edChatCreative": {
+    "message": "Creativa"
+  },
+  "edChatSystemPrompt": {
+    "message": "Instrucciones del sistema"
+  },
+  "edChatAdditionalModels": {
+    "message": "Modelos adicionales"
+  },
+  "edChatCustomModelsAria": {
+    "message": "Modelos personalizados, uno por línea"
+  },
+  "edChatCustomModelsHint": {
+    "message": "Un modelo por línea. Se agregan a la lista de modelos del proveedor."
+  },
+  "edChatSaveChanges": {
+    "message": "Guardar cambios"
+  },
+  "edChatApiKeyFor": {
+    "message": "Clave de API — $1"
+  },
+  "edChatSettingsSaved": {
+    "message": "Ajustes guardados ✓"
+  },
+  "edChatSaveError": {
+    "message": "Error al guardar: $1"
+  },
+  "edChatKeySaved": {
+    "message": "•••••• (guardada; escribe para reemplazarla)"
+  },
+  "edChatApiKeyLower": {
+    "message": "Clave de API"
+  },
+  "edChatKeyWillBeRemoved": {
+    "message": "La clave se eliminará al guardar"
+  },
+  "edChatThinking": {
+    "message": "La IA está pensando"
+  },
+  "edChatCancelRequest": {
+    "message": "Cancelar solicitud"
+  },
+  "edChatContext": {
+    "message": "Contexto"
+  },
+  "edChatCopied": {
+    "message": "✓ Copiado"
+  },
+  "edChatCopyFailed": {
+    "message": "No se pudo copiar al portapapeles."
+  },
+  "edChatEditorUnavailable": {
+    "message": "El editor no está disponible."
+  },
+  "edFileInfo": {
+    "message": "Información del archivo"
+  },
+  "edFileUntitled": {
+    "message": "Sin título"
+  },
+  "edFileNoActive": {
+    "message": "Ningún archivo activo"
+  },
+  "edFileLanguage": {
+    "message": "Lenguaje"
+  },
+  "edFileLines": {
+    "message": "Líneas"
+  },
+  "edFileSize": {
+    "message": "Tamaño"
+  },
+  "edFileDiagnostics": {
+    "message": "Diagnósticos"
+  },
+  "edFileErrors": {
+    "message": "Errores"
+  },
+  "edFileWarnings": {
+    "message": "Advertencias"
+  },
+  "edFileInfoLabel": {
+    "message": "Info"
+  },
+  "edToolbarChatTip": {
+    "message": "Asistente de IA"
+  },
+  "edToolbarChatLabel": {
+    "message": "IA"
+  },
+  "edToolbarActionsTip": {
+    "message": "Acciones del proyecto"
+  },
+  "edToolbarActionsLabel": {
+    "message": "Acciones"
+  },
+  "edToolbarGithubTip": {
+    "message": "Sincronizar con GitHub"
+  },
+  "edToolbarFileTip": {
+    "message": "Información del archivo activo"
+  },
+  "uiLanguageTitle": {
+    "message": "Idioma"
+  },
+  "toastLanguageChanged": {
+    "message": "Idioma actualizado. Recarga la pestaña de Apps Script para aplicarlo en el editor."
+  },
+  "edGhAbortMismatch": {
+    "message": "Cancelado: inconsistencia interna al armar el conjunto de archivos. No se escribió nada."
+  },
+  "edGhAfterGoogle": {
+    "message": "Disponible después de conectar Google."
+  },
+  "edGhAllLocalOnly": {
+    "message": "Todos los cambios son solo locales. Usa Push en su lugar."
+  },
+  "edGhAppliedReloading": {
+    "message": "$1 archivo(s) aplicado(s). Recargando GAS…"
+  },
+  "edGhAppliedViaApi": {
+    "message": "$1 archivo(s) aplicado(s) mediante la API de Apps Script. Recarga GAS para verlos en el editor."
+  },
+  "edGhApplyChanges": {
+    "message": "Aplicar cambios"
+  },
+  "edGhAuthFailed": {
+    "message": "Error de autenticación"
+  },
+  "edGhAuthorizeHint": {
+    "message": "Autoriza la app en GitHub. Iniciarás sesión aquí automáticamente."
+  },
+  "edGhBadgeConnected": {
+    "message": "GitHub · Conectado"
+  },
+  "edGhBaseMissing": {
+    "message": "El último commit sincronizado ya no está en GitHub. El origen de cada cambio se desconoce hasta el próximo push o pull."
+  },
+  "edGhBaseUnknown": {
+    "message": "No hay una sincronización previa registrada. El origen de cada cambio se desconoce hasta el próximo push o pull."
+  },
+  "edGhBasedOn": {
+    "message": "Basada en"
+  },
+  "edGhBlobsCached": {
+    "message": "$1 blob(s) ya subido(s): el reintento continuará desde ahí."
+  },
+  "edGhBranch": {
+    "message": "Rama"
+  },
+  "edGhBranchChanged": {
+    "message": "La rama cambió en GitHub. Se recalculará el diff; revísalo y vuelve a hacer push."
+  },
+  "edGhBranchCreateFailed": {
+    "message": "No se pudo crear la rama"
+  },
+  "edGhBranchCreated": {
+    "message": "Rama \"$1\" creada"
+  },
+  "edGhBranchName": {
+    "message": "Nombre de la rama"
+  },
+  "edGhBranchesLoadFailed": {
+    "message": "No se pudieron listar las ramas"
+  },
+  "edGhCancel": {
+    "message": "Cancelar"
+  },
+  "edGhClose": {
+    "message": "Cerrar"
+  },
+  "edGhCodeCopied": {
+    "message": "Código copiado al portapapeles"
+  },
+  "edGhCodeCopyFailed": {
+    "message": "No se pudo copiar el código"
+  },
+  "edGhCommitMessage": {
+    "message": "Mensaje del commit"
+  },
+  "edGhCommitPlaceholder": {
+    "message": "Describe tus cambios…"
+  },
+  "edGhComparing": {
+    "message": "Comparando con el repositorio…"
+  },
+  "edGhConfirm": {
+    "message": "Confirmar"
+  },
+  "edGhConnectGithub": {
+    "message": "Conectar GitHub"
+  },
+  "edGhConnectGoogle": {
+    "message": "Conectar Google"
+  },
+  "edGhConnectedAs": {
+    "message": "Conectado como $1"
+  },
+  "edGhConnecting": {
+    "message": "Conectando…"
+  },
+  "edGhCopyCode": {
+    "message": "Copiar código"
+  },
+  "edGhCreate": {
+    "message": "Crear"
+  },
+  "edGhCreateBranchItem": {
+    "message": "Crear nueva rama…"
+  },
+  "edGhCreateRepoTitle": {
+    "message": "Crear nuevo repositorio"
+  },
+  "edGhCreatingBranch": {
+    "message": "Creando la rama $1…"
+  },
+  "edGhCreatingRepo": {
+    "message": "Creando $1…"
+  },
+  "edGhDefaultBadge": {
+    "message": "predeterminada"
+  },
+  "edGhDeltaPullTitle": {
+    "message": "El pull trae $1 líneas añadidas y $2 eliminadas"
+  },
+  "edGhDeltaTitle": {
+    "message": "$1 añadidas, $2 eliminadas"
+  },
+  "edGhDeviceHint": {
+    "message": "Se abrió una ventana pequeña con la página de autorización de GitHub. Si el código no se completó solo, pégalo manualmente:"
+  },
+  "edGhDiffColGas": {
+    "message": "GAS"
+  },
+  "edGhDiffColGithub": {
+    "message": "GitHub"
+  },
+  "edGhDiffLegend": {
+    "message": "− GitHub · + GAS"
+  },
+  "edGhDiffTableLabel": {
+    "message": "Diferencias de $1"
+  },
+  "edGhDiffTooLarge": {
+    "message": "Este diff es demasiado grande para mostrarlo aquí. Ábrelo en el visor."
+  },
+  "edGhDisconnect": {
+    "message": "Desconectar"
+  },
+  "edGhDisconnectGoogleConfirmTitle": {
+    "message": "¿Desconectar Google?"
+  },
+  "edGhDisconnectGoogleMsg": {
+    "message": "La sincronización con GitHub quedará en pausa hasta que vuelvas a conectar una cuenta de Google. Tu sesión de GitHub no se ve afectada."
+  },
+  "edGhDisconnectGoogleTitle": {
+    "message": "Desconectar esta cuenta de Google"
+  },
+  "edGhDismiss": {
+    "message": "Descartar"
+  },
+  "edGhExcludedUnavailable": {
+    "message": "no disponible"
+  },
+  "edGhExcludedUncertain": {
+    "message": "comparación incompleta"
+  },
+  "edGhExcludedUnsafe": {
+    "message": "ruta no segura"
+  },
+  "edGhFilesDownloaded": {
+    "message": "$1 archivo(s) descargado(s)."
+  },
+  "edGhFilesProgress": {
+    "message": "$1/$2 archivos"
+  },
+  "edGhFilesReadFromProject": {
+    "message": "$1 archivo(s) leído(s) del proyecto."
+  },
+  "edGhGithubHint": {
+    "message": "Se abrirá una ventana pequeña. Aprueba la app para terminar. Tu token nunca sale de tu navegador."
+  },
+  "edGhGoogleAccount": {
+    "message": "Cuenta de Google"
+  },
+  "edGhGoogleConnectFailed": {
+    "message": "No se pudo conectar con Google."
+  },
+  "edGhGoogleNotConfigured": {
+    "message": "El inicio de sesión con Google no está configurado. Define manifest.oauth2.client_id y recarga la extensión."
+  },
+  "edGhGoogleRequired": {
+    "message": "Necesario para leer y escribir archivos en tu proyecto de Apps Script."
+  },
+  "edGhGoogleSessionExpired": {
+    "message": "La sesión de Google expiró. Vuelve a iniciar sesión."
+  },
+  "edGhHintFetching": {
+    "message": "Obteniendo cambios de GitHub…"
+  },
+  "edGhHintPullFirst": {
+    "message": "⚠️ Haz pull de los cambios remotos antes de hacer push para evitar conflictos"
+  },
+  "edGhHintSelectFiles": {
+    "message": "Selecciona los archivos para hacer push"
+  },
+  "edGhHintSelectRepoBranch": {
+    "message": "Selecciona el repositorio y la rama"
+  },
+  "edGhHintSending": {
+    "message": "Enviando cambios a GitHub…"
+  },
+  "edGhLoadingBranches": {
+    "message": "Cargando ramas…"
+  },
+  "edGhLoadingDiff": {
+    "message": "Cargando diferencias…"
+  },
+  "edGhLoadingRepos": {
+    "message": "Cargando tus repositorios…"
+  },
+  "edGhLocalOnlyFiles": {
+    "message": "$1 archivo(s) solo local(es)"
+  },
+  "edGhLocalOnlyIgnored": {
+    "message": "Se ignorarán $1: no están en el repositorio. Si hace falta, haz push de ellos por separado."
+  },
+  "edGhMergedSkipped": {
+    "message": "$1 fusionado(s), $2 omitido(s)."
+  },
+  "edGhName": {
+    "message": "Nombre"
+  },
+  "edGhNewBranch": {
+    "message": "Nueva rama"
+  },
+  "edGhNewRepo": {
+    "message": "Nuevo repositorio"
+  },
+  "edGhNoBranches": {
+    "message": "Sin ramas"
+  },
+  "edGhNoDiffInFile": {
+    "message": "No hay diferencias en este archivo."
+  },
+  "edGhNoDifferences": {
+    "message": "Sin diferencias"
+  },
+  "edGhNoFilesSelected": {
+    "message": "No hay archivos seleccionados"
+  },
+  "edGhNoMatches": {
+    "message": "Sin coincidencias"
+  },
+  "edGhNoMatchesFor": {
+    "message": "Sin coincidencias para \"$1\""
+  },
+  "edGhNoPendingChanges": {
+    "message": "No hay cambios pendientes"
+  },
+  "edGhNoRepos": {
+    "message": "No hay repositorios disponibles"
+  },
+  "edGhNotConnected": {
+    "message": "No conectado"
+  },
+  "edGhNotFastForward": {
+    "message": "La rama se actualizó en remoto. Haz pull primero para integrar los cambios."
+  },
+  "edGhNothingToApply": {
+    "message": "Nada que aplicar"
+  },
+  "edGhOpenInViewer": {
+    "message": "Abrir en visor"
+  },
+  "edGhOpenOnGithub": {
+    "message": "Abrir en GitHub"
+  },
+  "edGhOpenRepoOnGithub": {
+    "message": "Abrir $1 en GitHub"
+  },
+  "edGhOpeningGithubAuth": {
+    "message": "Abriendo la ventana de autorización de GitHub…"
+  },
+  "edGhOpeningGoogle": {
+    "message": "Abriendo el inicio de sesión de Google…"
+  },
+  "edGhOriginAddTitle": {
+    "message": "Solo existe en GAS. El push lo crea en GitHub."
+  },
+  "edGhOriginChangedInGas": {
+    "message": "Cambio en GAS"
+  },
+  "edGhOriginChangedOnGithub": {
+    "message": "Cambio en GitHub"
+  },
+  "edGhOriginConflict": {
+    "message": "Conflicto"
+  },
+  "edGhOriginConflictTitle": {
+    "message": "Cambió en GAS y en GitHub desde la última sincronización."
+  },
+  "edGhOriginDelTitle": {
+    "message": "Solo existe en GitHub. El pull lo trae a GAS."
+  },
+  "edGhOriginDeletedInGas": {
+    "message": "Borrado en GAS"
+  },
+  "edGhOriginDeletedOnGithub": {
+    "message": "Borrado en GitHub"
+  },
+  "edGhOriginGasOnly": {
+    "message": "Solo GAS"
+  },
+  "edGhOriginGithubOnly": {
+    "message": "Solo GitHub"
+  },
+  "edGhOriginLocalTitle": {
+    "message": "Solo cambió en GAS desde la última sincronización. El push lo envía a GitHub."
+  },
+  "edGhOriginNewInGas": {
+    "message": "Nuevo en GAS"
+  },
+  "edGhOriginNewOnGithub": {
+    "message": "Nuevo en GitHub"
+  },
+  "edGhOriginRemoteTitle": {
+    "message": "Solo cambió en GitHub desde la última sincronización. El pull lo trae a GAS."
+  },
+  "edGhOriginUnavailable": {
+    "message": "No disponible"
+  },
+  "edGhOriginUncertainTitle": {
+    "message": "No aparece en la comparación parcial del repositorio: puede que exista en GitHub."
+  },
+  "edGhOriginUnknown": {
+    "message": "Origen desconocido"
+  },
+  "edGhOriginUnknownTitle": {
+    "message": "No hay una sincronización previa registrada: no se sabe qué lado cambió."
+  },
+  "edGhPhaseBuildTree": {
+    "message": "Construyendo el árbol de Git"
+  },
+  "edGhPhaseCreateCommit": {
+    "message": "Creando el commit"
+  },
+  "edGhPhaseDownloadBlobs": {
+    "message": "Descargando blobs de archivos"
+  },
+  "edGhPhaseFilesQueued": {
+    "message": "$1 archivo(s) en cola."
+  },
+  "edGhPhaseFilesToApply": {
+    "message": "$1 archivo(s) por aplicar."
+  },
+  "edGhPhaseMerge": {
+    "message": "Fusionando en el snapshot del proyecto"
+  },
+  "edGhPhaseReadRemoteTree": {
+    "message": "Leyendo el árbol remoto"
+  },
+  "edGhPhaseReadSnapshot": {
+    "message": "Leyendo el snapshot del proyecto"
+  },
+  "edGhPhaseReadSnapshotHint": {
+    "message": "Consultando el estado actual a la API de Apps Script."
+  },
+  "edGhPhaseUpdateRef": {
+    "message": "Actualizando la referencia de la rama"
+  },
+  "edGhPhaseUploadBlobs": {
+    "message": "Subiendo blobs de archivos"
+  },
+  "edGhPhaseWriteBack": {
+    "message": "Escribiendo mediante la API de Apps Script"
+  },
+  "edGhPreparingPush": {
+    "message": "Guardando GAS y preparando el push…"
+  },
+  "edGhPrivate": {
+    "message": "Privado"
+  },
+  "edGhPrivateHint": {
+    "message": "Solo tú puedes verlo"
+  },
+  "edGhProgressPulling": {
+    "message": "Haciendo pull desde $1"
+  },
+  "edGhProgressPushing": {
+    "message": "Haciendo push a $1"
+  },
+  "edGhPublic": {
+    "message": "Público"
+  },
+  "edGhPublicHint": {
+    "message": "Cualquiera puede verlo"
+  },
+  "edGhPull": {
+    "message": "Pull"
+  },
+  "edGhPullFailed": {
+    "message": "Error en el pull"
+  },
+  "edGhPullFirst": {
+    "message": "Haz pull primero"
+  },
+  "edGhPullFromRepo": {
+    "message": "Pull desde el repositorio"
+  },
+  "edGhPullReloadHint": {
+    "message": "Recarga esta pestaña de GAS después de aplicar para que el editor muestre el contenido nuevo."
+  },
+  "edGhPullSummaryFrom": {
+    "message": "$1 desde $2"
+  },
+  "edGhPulledFiles": {
+    "message": "Pull completado: $1 archivo(s)"
+  },
+  "edGhPulledFilesReloading": {
+    "message": "Pull completado: $1 archivo(s) · recargando…"
+  },
+  "edGhPulling": {
+    "message": "Haciendo pull…"
+  },
+  "edGhPush": {
+    "message": "Push"
+  },
+  "edGhPushFailed": {
+    "message": "Error en el push"
+  },
+  "edGhPushSuccess": {
+    "message": "Push completado · commit $1"
+  },
+  "edGhPushedFiles": {
+    "message": "Push completado: $1 archivo(s) · commit $2"
+  },
+  "edGhPushing": {
+    "message": "Haciendo push…"
+  },
+  "edGhRateLimit": {
+    "message": "Se alcanzó el límite de solicitudes de GitHub. Espera 1–2 minutos y vuelve a intentarlo: los archivos ya subidos se reutilizarán."
+  },
+  "edGhRecheckChanges": {
+    "message": "Volver a comparar los cambios con el repositorio"
+  },
+  "edGhReloadRepos": {
+    "message": "Recargar repositorios"
+  },
+  "edGhRemoteHasChanges": {
+    "message": "El remoto tiene cambios. $1 para evitar conflictos."
+  },
+  "edGhRemoteLoadFailed": {
+    "message": "No se pudo cargar el repositorio remoto"
+  },
+  "edGhReopenWindow": {
+    "message": "Reabrir ventana"
+  },
+  "edGhRepoCreateFailed": {
+    "message": "No se pudo crear el repositorio"
+  },
+  "edGhRepoCreated": {
+    "message": "Repositorio creado: $1"
+  },
+  "edGhReposLoadFailed": {
+    "message": "No se pudieron cargar los repositorios"
+  },
+  "edGhRepository": {
+    "message": "Repositorio"
+  },
+  "edGhSearchBranch": {
+    "message": "Buscar rama…"
+  },
+  "edGhSearchRepo": {
+    "message": "Buscar repositorio…"
+  },
+  "edGhSelectAll": {
+    "message": "Seleccionar todo"
+  },
+  "edGhSelectBranch": {
+    "message": "Selecciona una rama…"
+  },
+  "edGhSelectRepo": {
+    "message": "Selecciona un repositorio…"
+  },
+  "edGhSelectRepoBranchChanges": {
+    "message": "Selecciona un repositorio y una rama para ver los cambios."
+  },
+  "edGhSelectRepoBranchDiff": {
+    "message": "Selecciona un repositorio y una rama para ver las diferencias."
+  },
+  "edGhSelectedCount": {
+    "message": "$1 de $2 seleccionados"
+  },
+  "edGhSendingToApi": {
+    "message": "Enviando $1 archivo(s) a la API de Apps Script…"
+  },
+  "edGhSessionExpired": {
+    "message": "La sesión expiró o fue revocada. Vuelve a iniciar sesión."
+  },
+  "edGhShowLinesMany": {
+    "message": "Mostrar $1 líneas"
+  },
+  "edGhShowLinesOne": {
+    "message": "Mostrar $1 línea"
+  },
+  "edGhShowNextLines": {
+    "message": "Mostrar $1 de $2 líneas ocultas"
+  },
+  "edGhSignInGithub": {
+    "message": "Iniciar sesión con GitHub"
+  },
+  "edGhSignInGoogle": {
+    "message": "Iniciar sesión con Google"
+  },
+  "edGhSignOut": {
+    "message": "Cerrar sesión"
+  },
+  "edGhSignOutBothMsg": {
+    "message": "Se desconectarán tus cuentas de GitHub y Google de este navegador. Puedes volver a conectar cualquiera desde el panel."
+  },
+  "edGhSignOutConfirmTitle": {
+    "message": "¿Cerrar sesión?"
+  },
+  "edGhSignOutGithub": {
+    "message": "Cerrar sesión en GitHub"
+  },
+  "edGhSignOutGithubGoogle": {
+    "message": "Cerrar sesión en GitHub y Google"
+  },
+  "edGhSignOutGithubMsg": {
+    "message": "El token de GitHub se eliminará de este navegador."
+  },
+  "edGhSignOutGoogleMsg": {
+    "message": "La cuenta de Google se desconectará de este navegador."
+  },
+  "edGhSignedInAs": {
+    "message": "Sesión iniciada como $1"
+  },
+  "edGhSkippedInvalidPath": {
+    "message": "$1 archivo(s) omitido(s) por ruta no válida: $2"
+  },
+  "edGhSkippedLocalOnly": {
+    "message": "$1 archivo(s) omitido(s) (solo locales: usa Push para ellos)."
+  },
+  "edGhSrLineGas": {
+    "message": "Solo en GAS: "
+  },
+  "edGhSrLineGithub": {
+    "message": "Solo en GitHub: "
+  },
+  "edGhSubfolder": {
+    "message": "Subcarpeta"
+  },
+  "edGhSwitchAccount": {
+    "message": "Cambiar de cuenta"
+  },
+  "edGhSyncBusy": {
+    "message": "Sincronización en curso. Espera a que termine antes de cambiar de repositorio o de rama, o de cerrar el panel."
+  },
+  "edGhTabChanges": {
+    "message": "Cambios"
+  },
+  "edGhTabDiff": {
+    "message": "Diferencias"
+  },
+  "edGhTimeout": {
+    "message": "Tiempo de espera agotado"
+  },
+  "edGhTitle": {
+    "message": "Sincronización con GitHub"
+  },
+  "edGhToggleDetails": {
+    "message": "Mostrar u ocultar detalles"
+  },
+  "edGhTreeIncomplete": {
+    "message": "El repositorio es demasiado grande para compararlo entero. Los archivos que faltan en la comparación no se tratan como borrados y el pull no los crea ni los quita."
+  },
+  "edGhUnavailableFailed": {
+    "message": "No se pudo descargar de GitHub: no se sube ni se trae. Actualiza para reintentar."
+  },
+  "edGhUnavailableTooLarge": {
+    "message": "Ocupa más de 1 MB en GitHub: no se compara, ni se sube ni se trae."
+  },
+  "edGhUpToDate": {
+    "message": "Todo está al día"
+  },
+  "edGhVerifying": {
+    "message": "Verificando la conexión…"
+  },
+  "edGhVerifyingSub": {
+    "message": "Comprobando la sesión de GitHub y la sincronización del proyecto"
+  },
+  "edGhWaitDiff": {
+    "message": "Espera a que termine la comparación con GitHub."
+  },
+  "edGhWaitSync": {
+    "message": "Espera a que termine la sincronización"
+  },
+  "edGhWaitingAuth": {
+    "message": "Esperando autorización…"
+  },
+  "edGhWriteCommitMsg": {
+    "message": "Escribe un mensaje de commit"
+  },
+  "edGhWriteContentFailed": {
+    "message": "No se pudo escribir el contenido del proyecto"
+  },
+  "edGhWrittenViaApi": {
+    "message": "$1 archivo(s) escrito(s) mediante la API de Apps Script."
+  },
+  "edMdCopyTip": {
+    "message": "Copiar al portapapeles"
+  },
+  "edMdCopy": {
+    "message": "Copiar"
+  },
+  "edMdInsertTip": {
+    "message": "Insertar en el cursor del editor"
+  },
+  "edMdInsert": {
+    "message": "Insertar"
+  },
+  "edMdReplaceTip": {
+    "message": "Reemplazar la selección del editor"
+  },
+  "edMdReplace": {
+    "message": "Reemplazar"
+  },
+  "edChatNoEditor": {
+    "message": "Abre un proyecto de Apps Script en esta pestaña para usar @selection, @file y @project."
+  },
+  "edChatNoSelection": {
+    "message": "Primero selecciona código en el editor para reemplazarlo."
+  },
+  "edSideOpenFailed": {
+    "message": "No se pudo abrir el panel lateral. Ábrelo desde el menú del panel lateral de Chrome."
+  },
+  "edSideNoEditor": {
+    "message": "Esta pestaña no es un editor de Apps Script. Abre un proyecto para usar el contexto del editor."
+  },
+  "edSideEditorConnected": {
+    "message": "Editor de Apps Script conectado"
+  },
+  "edChatAssistantLabel": {
+    "message": "Asistente"
+  },
+  "edChatEmptyTitle": {
+    "message": "¿En qué te ayudo con tu proyecto de Apps Script?"
+  },
+  "edChatSuggestExplain": {
+    "message": "Explicar el archivo activo"
+  },
+  "edChatSuggestExplainPrompt": {
+    "message": "@file Explica qué hace este archivo"
+  },
+  "edChatSuggestBugs": {
+    "message": "Buscar errores en mi selección"
+  },
+  "edChatSuggestBugsPrompt": {
+    "message": "@selection Busca errores y sugiere cómo corregirlos"
+  },
+  "edChatSuggestFunction": {
+    "message": "Escribir una función…"
+  },
+  "edChatSuggestFunctionPrompt": {
+    "message": "Escribe una función de Apps Script que "
+  },
+  "edChatSuggestDocs": {
+    "message": "Documentar el proyecto"
+  },
+  "edChatSuggestDocsPrompt": {
+    "message": "@project Escribe la documentación de este proyecto: propósito, archivos y funciones principales"
+  },
+  "edChatSectionConnection": {
+    "message": "Conexión"
+  },
+  "edChatSectionBehavior": {
+    "message": "Comportamiento"
+  },
+  "edChatCtxSelection": {
+    "message": "Selección"
+  },
+  "edChatCtxSelectionDesc": {
+    "message": "Selección actual del editor"
+  },
+  "edChatCtxFileDesc": {
+    "message": "Contenido completo del archivo abierto"
+  },
+  "edChatCtxProject": {
+    "message": "Proyecto"
+  },
+  "edChatCtxProjectDesc": {
+    "message": "Todos los archivos del proyecto (hasta el límite)"
+  },
+  "edChatNewChat": {
+    "message": "Nuevo chat"
+  },
+  "edChatAddContext": {
+    "message": "Agregar contexto"
+  },
+  "edChatCtxNoEditor": {
+    "message": "No se detectó un editor de Apps Script. Las etiquetas se quitarán al enviar."
+  },
+  "edChatDefaultModel": {
+    "message": "Modelo predeterminado"
+  },
+  "edChatAddModelPlaceholder": {
+    "message": "ID del modelo, p. ej. gpt-4o"
+  },
+  "edChatAddModel": {
+    "message": "Agregar modelo"
+  },
+  "edChatCustomModelsHint2": {
+    "message": "Se agregan a la lista de este proveedor en el selector de modelos."
+  },
+  "edChatEndpoint": {
+    "message": "Endpoint"
+  },
+  "edChatLmStudioHint": {
+    "message": "LM Studio: inicia el servidor en Developer → Start Server."
+  },
+  "edChatGeneration": {
+    "message": "Generación"
+  },
+  "edChatResetDefault": {
+    "message": "Restaurar predeterminadas"
+  },
+  "edChatSave": {
+    "message": "Guardar"
+  },
+  "edChatRetry": {
+    "message": "Reintentar"
+  },
+  "edChatRequestFailed": {
+    "message": "Error en la solicitud"
+  },
+  "edChatBadgeLocal": {
+    "message": "Local"
+  },
+  "edChatBadgeKeySaved": {
+    "message": "Clave guardada"
+  },
+  "edChatBadgeNoKey": {
+    "message": "Sin clave"
+  },
+  "edChatSetUpProvider": {
+    "message": "Configurar en Ajustes…"
+  },
+  "edChatManageModels": {
+    "message": "Administrar modelos…"
+  },
+  "edChatChooseModel": {
+    "message": "Elegir modelo"
+  },
+  "edChatProvDescGemini": {
+    "message": "Modelos de Google AI Studio"
+  },
+  "edChatProvDescOpenai": {
+    "message": "Modelos GPT-4o, GPT-4.1 y serie o"
+  },
+  "edChatProvDescAnthropic": {
+    "message": "Modelos Claude"
+  },
+  "edChatProvDescKimi": {
+    "message": "Modelos Kimi de Moonshot AI"
+  },
+  "edChatProvDescChatllm": {
+    "message": "Modelos de Abacus.AI ChatLLM"
+  },
+  "edChatProvDescNvidia": {
+    "message": "Modelos alojados en NVIDIA NIM"
+  },
+  "edChatProvDescOpenrouter": {
+    "message": "Cientos de modelos con una sola clave"
+  },
+  "edChatProvDescCustom": {
+    "message": "LM Studio, Ollama o servidor compatible"
+  },
+  "edChatRemoveModel": {
+    "message": "Quitar modelo"
+  },
+  "edChatBadgeKeyOptional": {
+    "message": "No requerida"
+  },
+  "edChatMaxTokens": {
+    "message": "Tokens máximos de salida"
+  },
+  "edChatMaxTokensHint": {
+    "message": "Limita la longitud de la respuesta (p. ej. 2048, 4096). Déjalo vacío para usar el valor predeterminado."
+  },
+  "edChatMaxTokensPlaceholder": {
+    "message": "Predeterminado (auto)"
+  },
+  "edChatFetchModels": {
+    "message": "Obtener modelos"
+  },
+  "edChatFetchModelsTooltip": {
+    "message": "Obtiene los modelos de código y chat más recientes desde la API del proveedor"
+  },
+  "edChatFetchingModels": {
+    "message": "Obteniendo…"
+  },
+  "edChatFetchingModelsStatus": {
+    "message": "Obteniendo modelos desde la API del proveedor…"
+  },
+  "edChatModelsUpdated": {
+    "message": "Listo: se agregaron $1 modelo(s) nuevo(s) a la lista"
+  },
+  "edChatNoNewModels": {
+    "message": "Todos los modelos ya están actualizados"
+  },
+  "edChatFetchModelsKeyRequired": {
+    "message": "Guarda primero tu clave de API para obtener los modelos"
+  },
+  "edChatToastRegion": {
+    "message": "Notificaciones"
+  },
+  "edChatToastClose": {
+    "message": "Cerrar"
+  },
+  "edChatConfigUpdated": {
+    "message": "Ajustes de IA actualizados desde el popup"
+  },
+  "edMdPreviewTip": {
+    "message": "Comparar los cambios con el archivo activo"
+  },
+  "edDiffNoChanges": {
+    "message": "Sin diferencias: el código propuesto es idéntico al archivo activo."
+  },
+  "edDiffStats": {
+    "message": "+$1 / −$2 líneas frente a $3"
+  },
+  "edDiffIdentical": {
+    "message": "Sin cambios"
+  },
+  "edDiffApply": {
+    "message": "Aplicar al archivo"
+  },
+  "edDiffDismiss": {
+    "message": "Descartar"
+  },
+  "edDiffLoading": {
+    "message": "Cargando archivo activo…"
+  },
+  "edDiffApplied": {
+    "message": "Cambios aplicados a $1"
+  },
+  "edChatAgentPlaceholder": {
+    "message": "Describe un cambio… escribe @ para agregar contexto"
+  },
+  "edChatMode": {
+    "message": "Modo del chat"
+  },
+  "edChatModeAsk": {
+    "message": "Preguntar"
+  },
+  "edChatModeAskTitle": {
+    "message": "Preguntar: respuestas y sugerencias de código, sin editar archivos"
+  },
+  "edChatModeAgent": {
+    "message": "Agente"
+  },
+  "edChatModeAgentTitle": {
+    "message": "Agente: edita los archivos del proyecto; tú revisas y aceptas cada cambio"
+  },
+  "edChatAgentEditing": {
+    "message": "Editando"
+  },
+  "edChatAgentPreparing": {
+    "message": "Preparando cambios…"
+  },
+  "edChatAgentChanges": {
+    "message": "Cambios propuestos"
+  },
+  "edChatAgentOneFile": {
+    "message": "1 archivo modificado"
+  },
+  "edChatAgentFilesChanged": {
+    "message": "$1 archivos modificados"
+  },
+  "edChatAgentReview": {
+    "message": "Revisar en el editor"
+  },
+  "edChatAgentAcceptAll": {
+    "message": "Aceptar todo"
+  },
+  "edChatAgentRejectAll": {
+    "message": "Rechazar todo"
+  },
+  "edChatAgentCreateUnavailable": {
+    "message": "Abre el editor de Apps Script para crear archivos"
+  },
+  "edChatAgentAcceptUnavailable": {
+    "message": "No hay cambios para aplicar"
+  },
+  "edChatAgentReviewUnavailable": {
+    "message": "Solo las ediciones de archivos existentes se pueden revisar en el editor"
+  },
+  "edChatAgentAccept": {
+    "message": "Aceptar"
+  },
+  "edChatAgentReject": {
+    "message": "Rechazar"
+  },
+  "edChatAgentView": {
+    "message": "Ver en el editor"
+  },
+  "edChatAgentAccepted": {
+    "message": "Aceptado"
+  },
+  "edChatAgentRejected": {
+    "message": "Rechazado"
+  },
+  "edChatAgentError": {
+    "message": "Error"
+  },
+  "edChatAgentNew": {
+    "message": "Nuevo"
+  },
+  "edChatAgentNoChanges": {
+    "message": "Sin cambios"
+  },
+  "edChatAgentCreateLater": {
+    "message": "La creación de archivos llegará en una próxima versión"
+  },
+  "edChatAgentUndoHint": {
+    "message": "Usa Ctrl+Z en el editor para deshacer"
+  },
+  "edChatAgentFileNotFound": {
+    "message": "Archivo no encontrado"
+  },
+  "edChatAgentApplyFailed": {
+    "message": "No se pudieron aplicar los cambios"
+  },
+  "edChatAgentApplyFailedFile": {
+    "message": "No se pudieron aplicar los cambios en $1"
+  },
+  "edChatAgentHunksFailed": {
+    "message": "$1 de $2 ediciones no se pudieron aplicar"
+  },
+  "edChatAgentAskFix": {
+    "message": "Pedir corrección"
+  },
+  "edChatAgentConflict": {
+    "message": "Conflicto"
+  },
+  "edChatAgentConflictChanged": {
+    "message": "El archivo cambió, revísalo o regenéralo"
+  },
+  "edChatAgentConflictHunks": {
+    "message": "El archivo cambió: $1 ediciones ya no coinciden. Revísalas o regenéralas."
+  },
+  "edChatAgentRegenerate": {
+    "message": "Pedir que lo regenere"
+  },
+  "edChatAgentConflictToast": {
+    "message": "Algunos archivos cambiaron después de la propuesta. Revísalos o regenéralos."
+  },
+  "edChatAgentApplyAllFailed": {
+    "message": "No se pudieron aplicar los cambios. No se modificó nada."
+  },
+  "edChatAgentAmbiguousCount": {
+    "message": "ambiguas: $1"
+  },
+  "edChatAgentFuzzyOne": {
+    "message": "1 edición coincidió de forma aproximada. Revísala antes de aceptar."
+  },
+  "edChatAgentFuzzyMany": {
+    "message": "$1 ediciones coincidieron de forma aproximada. Revísalas antes de aceptar."
+  },
+  "edChatAgentFixDisplay": {
+    "message": "Corrige las ediciones que no se pudieron aplicar en $1"
+  },
+  "edDpPreviewing": {
+    "message": "Vista previa"
+  },
+  "edDpSuggestionOf": {
+    "message": "Sugerencia $1 de $2"
+  },
+  "edDpPrevious": {
+    "message": "Sugerencia anterior"
+  },
+  "edDpNext": {
+    "message": "Sugerencia siguiente"
+  },
+  "edDpReject": {
+    "message": "Rechazar"
+  },
+  "edDpAccept": {
+    "message": "Aceptar"
+  },
+  "edDpClose": {
+    "message": "Cerrar vista previa"
+  },
+  "edDpNewFile": {
+    "message": "Archivo nuevo"
+  },
+  "edDpAccepted": {
+    "message": "Aceptado"
+  },
+  "edDpRejected": {
+    "message": "Rechazado"
+  },
+  "edChatAgentTimeout": {
+    "message": "El modelo tardó demasiado en responder."
+  },
+  "edChatAgentMaxSteps": {
+    "message": "Se detuvo después de $1 pasos. Revisa los cambios propuestos o pide que continúe."
+  },
+  "edChatAgentToolsFallback": {
+    "message": "Este modelo no admite llamadas a herramientas; se usarán bloques de edición."
+  },
+  "edChatAgentWorking": {
+    "message": "Trabajando…"
+  },
+  "edChatAgentSteps": {
+    "message": "Pasos del asistente"
+  },
+  "edChatStepListed": {
+    "message": "Listado de archivos del proyecto ($1)"
+  },
+  "edChatStepRead": {
+    "message": "Lectura de"
+  },
+  "edChatStepSearched": {
+    "message": "Búsqueda de"
+  },
+  "edChatStepResults": {
+    "message": "$1 resultados"
+  },
+  "edChatStepOneResult": {
+    "message": "1 resultado"
+  },
+  "edChatStepEdit": {
+    "message": "Cambios propuestos en"
+  },
+  "edChatStepApplied": {
+    "message": "$1 cambios aplicados"
+  },
+  "edChatStepFailed": {
+    "message": "$1 cambios con error"
+  },
+  "edChatStepCreate": {
+    "message": "Archivo nuevo propuesto:"
+  },
+  "edChatStepTool": {
+    "message": "Herramienta"
+  },
+  "edChatHistory": {
+    "message": "Historial"
+  },
+  "edChatHistoryClose": {
+    "message": "Cerrar historial"
+  },
+  "edChatHistoryEmpty": {
+    "message": "Aún no hay conversaciones guardadas"
+  },
+  "edChatHistoryEmptyHint": {
+    "message": "Las conversaciones de este proyecto se guardan automáticamente."
+  },
+  "edChatHistoryDelete": {
+    "message": "Eliminar conversación"
+  },
+  "edChatHistoryMessages": {
+    "message": "$1 mensajes"
+  },
+  "edChatHistoryOneMessage": {
+    "message": "1 mensaje"
+  },
+  "edChatAgentEngine": {
+    "message": "Motor del agente"
+  },
+  "edChatAgentEngineAuto": {
+    "message": "Automático"
+  },
+  "edChatAgentEngineTools": {
+    "message": "Herramientas (function calling)"
+  },
+  "edChatAgentEngineBlocks": {
+    "message": "Bloques de edición"
+  },
+  "edChatAgentEngineHint": {
+    "message": "Automático usa herramientas con OpenAI, Anthropic, Gemini y OpenRouter, y bloques de edición con los demás proveedores."
+  },
+  "edChatAgentNotApplied": {
+    "message": "Sin aplicar"
+  },
+  "edChatAgentCreateFile": {
+    "message": "Crear archivo"
+  },
+  "edChatAgentFileExists": {
+    "message": "El archivo ya existe"
+  },
+  "edChatAgentNoProject": {
+    "message": "No se pudo detectar el proyecto de Apps Script. Abre el editor del proyecto en esta pestaña e inténtalo de nuevo."
+  },
+  "edChatAgentSaveFailed": {
+    "message": "No se pudo guardar el proyecto antes de crear los archivos. Guárdalo en el editor (Ctrl+S) e inténtalo de nuevo."
+  },
+  "edChatAgentCreateFailed": {
+    "message": "No se pudieron crear los archivos"
+  },
+  "edChatAgentAuthFailed": {
+    "message": "No se pudo iniciar sesión con Google"
+  },
+  "edChatAgentApiHint": {
+    "message": "La API de Apps Script debe estar habilitada en"
+  },
+  "edChatAgentCreatedOne": {
+    "message": "Archivo creado. Recarga el editor para verlo."
+  },
+  "edChatAgentCreatedMany": {
+    "message": "$1 archivos creados. Recarga el editor para verlos."
+  },
+  "edChatAgentReload": {
+    "message": "Recargar editor"
+  },
+  "edChatAgentConnecting": {
+    "message": "Esperando el inicio de sesión de Google…"
+  },
+  "edChatAgentConnectGoogle": {
+    "message": "Conectar Google"
+  },
+  "edChatAgentAuthRequired": {
+    "message": "Conecta tu cuenta de Google para crear archivos en este proyecto."
+  },
+  "edSideReloadTab": {
+    "message": "Recarga esta pestaña de Apps Script para conectar el editor."
+  },
+  "edSideNotReady": {
+    "message": "Esperando al editor de Apps Script…"
+  },
+  "edChatContextOverflow": {
+    "message": "Esta solicitud (≈$1 tokens) no cabe en el contexto del modelo ($2). El modelo podría ignorar parte de ella. Aumenta la longitud de contexto o envía menos contexto."
+  },
+  "edChatContextTrimmed": {
+    "message": "Solicitud recortada para que quepa en el contexto del modelo (≈$1 de $2 tokens). Aumenta la longitud de contexto para obtener mejores respuestas."
+  },
+  "edChatTokenEstimateCtx": {
+    "message": "≈$1 / $2"
+  },
+  "edChatTokenEstimateCtxTitle": {
+    "message": "Tokens estimados de esta solicitud frente a la longitud de contexto del modelo (~4 caracteres/token). Las solicitudes más grandes se recortan."
+  },
+  "edChatPreviewOpened": {
+    "message": "Revisa los cambios en el editor y acéptalos o recházalos."
+  },
+  "edChatContextWindow": {
+    "message": "Longitud de contexto (tokens)"
+  },
+  "edChatContextWindowPlaceholder": {
+    "message": "Desconocida (sin límite)"
+  },
+  "edChatContextWindowHint": {
+    "message": "Debe coincidir con la longitud de contexto del modelo (LM Studio: Context Length). Las solicitudes más grandes se recortan."
+  },
+  "edMdApply": {
+    "message": "Aplicar"
+  },
+  "edMdApplyTip": {
+    "message": "Aplicar al archivo activo: revisa los cambios en el editor"
+  },
+  "edChatAgentConverted": {
+    "message": "Convertido a partir del código de la respuesta"
+  },
+  "edChatUnitsReplaces": {
+    "message": "reemplaza $1"
+  },
+  "edChatUnitsAdds": {
+    "message": "agrega $1"
+  },
+  "edChatApplyFullFile": {
+    "message": "versión completa de $1"
+  },
+  "edChatApplyNoMatch": {
+    "message": "No se pudo asociar este código con funciones de $1. Usa Insertar o Reemplazar."
+  },
+  "edChatApplyNoChanges": {
+    "message": "$1 ya contiene este código."
+  },
+  "edChatApplyOpened": {
+    "message": "Abierto en el editor: $1"
+  },
+  "edChatSearchModels": {
+    "message": "Buscar modelos…"
+  },
+  "edChatClearSearch": {
+    "message": "Borrar búsqueda"
+  },
+  "edChatNoModelsMatch": {
+    "message": "Ningún modelo coincide con \"$1\""
+  },
+  "edChatModelCount": {
+    "message": "$1 modelos"
+  },
+  "edChatStepAppliedOne": {
+    "message": "1 cambio aplicado"
+  },
+  "edChatStepFailedOne": {
+    "message": "1 cambio con error"
+  },
+  "edChatModelCountOne": {
+    "message": "1 modelo"
+  },
+  "edActionsConnectingGoogle": {
+    "message": "Conectando con Google…"
+  },
+  "edActionsWaitingSignIn": {
+    "message": "Completa el inicio de sesión de Google en la ventana que se abrió…"
+  },
+  "edActionsNoBridge": {
+    "message": "La extensión no responde en esta pestaña. Recarga la pestaña de Apps Script e inténtalo de nuevo."
+  },
+  "edActionsEnableApiHint": {
+    "message": "Activa la API de Google Apps Script en tus ajustes de Apps Script, espera un minuto y vuelve a intentarlo."
+  },
+  "edActionsRetry": {
+    "message": "Reintentar"
+  },
+  "tabEditor": {
+    "message": "Editor"
+  },
+  "tabTools": {
+    "message": "Herramientas"
+  },
+  "tabAi": {
+    "message": "IA"
+  },
+  "tablistLabel": {
+    "message": "Secciones de ajustes"
+  },
+  "settingsSearchPlaceholder": {
+    "message": "Buscar ajustes"
+  },
+  "searchNoResults": {
+    "message": "Sin resultados"
+  },
+  "statusActive": {
+    "message": "Activo"
+  },
+  "statusPaused": {
+    "message": "Pausado"
+  },
+  "footerAutoSave": {
+    "message": "Los cambios se guardan automáticamente"
+  },
+  "sectionEditorText": {
+    "message": "Texto"
+  },
+  "sectionEditorDisplay": {
+    "message": "Visualización"
+  },
+  "sectionEditorEditing": {
+    "message": "Edición"
+  },
+  "sectionEditorCursor": {
+    "message": "Cursor y desplazamiento"
+  },
+  "sectionToolsExplorer": {
+    "message": "Explorador de archivos"
+  },
+  "sectionToolsDiagnostics": {
+    "message": "Diagnósticos"
+  },
+  "sectionAdvanced": {
+    "message": "Avanzado"
+  },
+  "sectionAiAutocomplete": {
+    "message": "Autocompletado"
+  },
+  "sectionAiResponses": {
+    "message": "Respuestas"
+  },
+  "sectionAiGlobalContext": {
+    "message": "Contexto global"
+  },
+  "sectionAppearance": {
+    "message": "Apariencia"
+  },
+  "resetScopeDesc": {
+    "message": "Restablece solo los ajustes de Editor y Herramientas a sus valores predeterminados. Se conservan el idioma, el interruptor general, las opciones de IA, el modo oscuro, los snippets y los temas."
+  },
+  "btnResetSettings": {
+    "message": "Restablecer ajustes"
+  },
+  "confirmResetEditorTools": {
+    "message": "¿Restablecer los ajustes de Editor y Herramientas a sus valores predeterminados?"
+  },
+  "aiContextLabel": {
+    "message": "Instrucciones para el asistente"
+  },
+  "aiContextSaving": {
+    "message": "Guardando…"
+  },
+  "aiContextSaved": {
+    "message": "Guardado ✓"
+  },
+  "btnCreateSnippet": {
+    "message": "Crear snippet"
+  },
+  "btnCreateTheme": {
+    "message": "Crear tema"
+  },
+  "noCustomThemes": {
+    "message": "Aún no tienes temas personalizados"
+  },
+  "noThemesFound": {
+    "message": "No se encontraron temas"
+  },
+  "labelColor": {
+    "message": "Color"
+  }
+}

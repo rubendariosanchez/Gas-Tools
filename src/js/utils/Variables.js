@@ -1,46 +1,230 @@
 // Nombre de la propiedad raíz usada en chrome.storage
 export const G_PROPERTY_NAME = 'QualityCode';
 
-// Configuración por defecto para las opciones de usuario
-export const DEFAULT_SETTINGS_OPTIONS = {
-    // Extension
-    'global-enable': true,
-    'load-snippets': true,
-    'ai-autocomplete': false,
-    'gas-folders': true,
-    'gas-folders-color': '#5f6368',
-    'gas-file-gs-color':   '#4086f4',
-    'gas-file-html-color': '#fc490b',
-    'gas-file-json-color': '#1bb24b',
-    'gas-error-lens': true,
-    // Visuals & Layout
-    'ide-dark-mode': false,
-    'showMinimap': false,
-    'lineNumbers': 'on',
-    'wordWrap': true,
-    'renderLineHighlight': 'line',
-    'rulers': '',
-    'occurrencesHighlight': 'singleFile',
-    'renderWhitespace': 'none',
-    // Font
-    'fontFamily': 'Roboto Mono',
-    'fontSize': 13,
-    'lineHeight': 19,
-    // Code Assistance
-    'bracketPairs': true,
-    'quickSuggestions': true,
-    'autoClosingBrackets': 'always',
-    'guides-indentation': true,
-    // Navigation
-    'folding': true,
-    // Scrolling
-    'smoothScrolling': true,
-    'scrollBeyondLastLine': '',
-    // Editor Behavior
-    'tabSize': 2,
-    'cursorStyle': 'line',
-    'cursorBlinking': 'blink',
-};
+/** Convierte valores en opciones `{ value, label }` con label = value. */
+const plainOptions_ = (values) => values.map((v) => ({ value: String(v), label: String(v) }));
+
+const FONT_FAMILIES_ = [
+    'JetBrains Mono', 'Fira Code', 'Source Code Pro', 'Roboto Mono', 'Geist Mono', 'IBM Plex Mono',
+    'Space Mono', 'DM Mono', 'Azeret Mono', 'Inconsolata', 'Anonymous Pro', 'Cousine', 'PT Mono',
+    'Noto Sans Mono', 'Share Tech Mono', 'Martian Mono', 'Nova Mono', 'VT323', 'Consolas', 'Monaco', 'Menlo',
+];
+const FONT_SIZES_ = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 30, 32, 34, 36, 40, 48];
+const LINE_HEIGHTS_ = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 34, 36, 40, 48];
+
+/**
+ * Secciones del popup en orden de pintado (`icon` = nombre del registro de GasUi, `collapsible` = plegable con <details>).
+ * @type {Array<{id: string, tab: string, i18n: string, icon: string, collapsible?: boolean}>}
+ */
+export const SETTINGS_SECTIONS = [
+    { id: 'editor-text', tab: 'editor', i18n: 'sectionEditorText', icon: 'textFields' },
+    { id: 'editor-display', tab: 'editor', i18n: 'sectionEditorDisplay', icon: 'eye' },
+    { id: 'editor-editing', tab: 'editor', i18n: 'sectionEditorEditing', icon: 'editNote' },
+    { id: 'editor-cursor', tab: 'editor', i18n: 'sectionEditorCursor', icon: 'swipeVertical' },
+    { id: 'tools-explorer', tab: 'tools', i18n: 'sectionToolsExplorer', icon: 'folderOpen' },
+    { id: 'tools-diagnostics', tab: 'tools', i18n: 'sectionToolsDiagnostics', icon: 'troubleshoot' },
+    { id: 'tools-advanced', tab: 'tools', i18n: 'sectionAdvanced', icon: 'sliders', collapsible: true },
+    { id: 'ai-autocomplete', tab: 'ai', i18n: 'sectionAiAutocomplete', icon: 'autoAwesome' },
+    { id: 'ai-responses', tab: 'ai', i18n: 'sectionAiResponses', icon: 'translate' },
+    { id: 'themes-appearance', tab: 'themes', i18n: 'sectionAppearance', icon: 'contrast' },
+];
+
+/**
+ * Esquema declarativo único de las opciones del popup.
+ * - `tab: 'header'`: se pinta en la cabecera; `managed`: lo pinta un módulo propio (idioma).
+ * - `storage: 'sync'`: vive en chrome.storage.sync bajo `storageKey` (no entra en DEFAULT_SETTINGS_OPTIONS).
+ * - `parent`: opción hija; se deshabilita (no se oculta) con el padre apagado.
+ * @type {Array<Object>}
+ */
+export const SETTINGS_SCHEMA = [
+    // Cabecera
+    { key: 'ui-language', type: 'select', default: 'en', tab: 'header', section: null, managed: true,
+        i18n: { title: 'uiLanguageTitle', description: 'uiLanguageTitle' },
+        options: [{ value: 'en', label: 'English' }, { value: 'es', label: 'Español' }] },
+    { key: 'global-enable', type: 'toggle', default: true, tab: 'header', section: null,
+        i18n: { title: 'optGlobalEnableTitle', description: 'optGlobalEnableDesc' } },
+
+    // Editor · Texto
+    { key: 'fontFamily', type: 'select', default: 'Roboto Mono', tab: 'editor', section: 'editor-text',
+        i18n: { title: 'optFontFamilyTitle', description: 'optFontFamilyDesc' },
+        options: plainOptions_(FONT_FAMILIES_), keywords: ['font', 'typeface', 'fuente', 'tipografía'] },
+    { key: 'fontSize', type: 'select', default: 13, tab: 'editor', section: 'editor-text',
+        i18n: { title: 'optFontSizeTitle', description: 'optFontSizeDesc' },
+        options: plainOptions_(FONT_SIZES_), keywords: ['font', 'size', 'zoom', 'tamaño'] },
+    { key: 'lineHeight', type: 'select', default: 19, tab: 'editor', section: 'editor-text',
+        i18n: { title: 'optLineHeightTitle', description: 'optLineHeightDesc' },
+        options: plainOptions_(LINE_HEIGHTS_), keywords: ['spacing', 'interlineado'] },
+
+    // Editor · Visualización
+    { key: 'lineNumbers', type: 'toggle', default: true, tab: 'editor', section: 'editor-display',
+        i18n: { title: 'optLineNumbersTitle', description: 'optLineNumbersDesc' }, keywords: ['gutter', 'números'] },
+    { key: 'renderLineHighlight', type: 'toggle', default: true, tab: 'editor', section: 'editor-display',
+        i18n: { title: 'optLineHighlightTitle', description: 'optLineHighlightDesc' }, keywords: ['current line', 'línea actual'] },
+    { key: 'showMinimap', type: 'toggle', default: false, tab: 'editor', section: 'editor-display',
+        i18n: { title: 'optShowMinimapTitle', description: 'optShowMinimapDesc' }, keywords: ['minimap', 'minimapa', 'overview'] },
+    { key: 'rulers', type: 'toggle', default: false, tab: 'editor', section: 'editor-display',
+        i18n: { title: 'optRulersTitle', description: 'optRulersDesc' }, keywords: ['column', 'reglas', 'columna'] },
+    { key: 'renderWhitespace', type: 'toggle', default: false, tab: 'editor', section: 'editor-display',
+        i18n: { title: 'optRenderWhitespaceTitle', description: 'optRenderWhitespaceDesc' }, keywords: ['spaces', 'tabs', 'espacios'] },
+    { key: 'occurrencesHighlight', type: 'toggle', default: true, tab: 'editor', section: 'editor-display',
+        i18n: { title: 'optOccurrencesHighlightTitle', description: 'optOccurrencesHighlightDesc' }, keywords: ['matches', 'coincidencias'] },
+    { key: 'guides-indentation', type: 'toggle', default: true, tab: 'editor', section: 'editor-display',
+        i18n: { title: 'optIndentGuidesTitle', description: 'optIndentGuidesDesc' }, keywords: ['indent', 'sangría', 'guías'] },
+    { key: 'bracketPairs', type: 'toggle', default: true, tab: 'editor', section: 'editor-display',
+        i18n: { title: 'optBracketPairsTitle', description: 'optBracketPairsDesc' }, keywords: ['brackets', 'colors', 'llaves', 'corchetes'] },
+
+    // Editor · Edición
+    { key: 'tabSize', type: 'select', default: 2, tab: 'editor', section: 'editor-editing',
+        i18n: { title: 'optTabSizeTitle', description: 'optTabSizeDesc' },
+        options: plainOptions_([2, 4, 6, 8]), keywords: ['indent', 'tab', 'sangría', 'tabulación'] },
+    { key: 'wordWrap', type: 'toggle', default: true, tab: 'editor', section: 'editor-editing',
+        i18n: { title: 'optWordWrapTitle', description: 'optWordWrapDesc' }, keywords: ['wrap', 'ajuste', 'líneas largas'] },
+    { key: 'autoClosingBrackets', type: 'toggle', default: true, tab: 'editor', section: 'editor-editing',
+        i18n: { title: 'optAutoClosingBracketsTitle', description: 'optAutoClosingBracketsDesc' }, keywords: ['brackets', 'cierre', 'paréntesis'] },
+    { key: 'quickSuggestions', type: 'toggle', default: true, tab: 'editor', section: 'editor-editing',
+        i18n: { title: 'optQuickSuggestionsTitle', description: 'optQuickSuggestionsDesc' }, keywords: ['intellisense', 'autocomplete', 'sugerencias'] },
+    { key: 'folding', type: 'toggle', default: true, tab: 'editor', section: 'editor-editing',
+        i18n: { title: 'optFoldingTitle', description: 'optFoldingDesc' }, keywords: ['collapse', 'plegar', 'contraer'] },
+
+    // Editor · Cursor y desplazamiento
+    { key: 'cursorStyle', type: 'select', default: 'line', tab: 'editor', section: 'editor-cursor',
+        i18n: { title: 'optCursorStyleTitle', description: 'optCursorStyleDesc' },
+        options: [
+            { value: 'line', label: 'Line' }, { value: 'block', label: 'Block' },
+            { value: 'underline', label: 'Underline' }, { value: 'line-thin', label: 'Line thin' },
+            { value: 'block-outline', label: 'Block outline' }, { value: 'underline-thin', label: 'Underline thin' },
+        ], keywords: ['caret', 'cursor'] },
+    { key: 'cursorBlinking', type: 'select', default: 'blink', tab: 'editor', section: 'editor-cursor',
+        i18n: { title: 'optCursorBlinkingTitle', description: 'optCursorBlinkingDesc' },
+        options: [
+            { value: 'blink', label: 'Blink' }, { value: 'smooth', label: 'Smooth' },
+            { value: 'phase', label: 'Phase' }, { value: 'hidden', label: 'Hidden' },
+        ], keywords: ['caret', 'parpadeo', 'animation'] },
+    { key: 'smoothScrolling', type: 'toggle', default: true, tab: 'editor', section: 'editor-cursor',
+        i18n: { title: 'optSmoothScrollingTitle', description: 'optSmoothScrollingDesc' }, keywords: ['scroll', 'desplazamiento'] },
+    { key: 'scrollBeyondLastLine', type: 'toggle', default: false, tab: 'editor', section: 'editor-cursor',
+        i18n: { title: 'optScrollBeyondLastLineTitle', description: 'optScrollBeyondLastLineDesc' }, keywords: ['scroll', 'desplazamiento', 'final'] },
+
+    // Herramientas · Explorador de archivos
+    { key: 'gas-folders', type: 'toggle', default: true, tab: 'tools', section: 'tools-explorer',
+        i18n: { title: 'optGasFoldersTitle', description: 'optGasFoldersDesc' }, keywords: ['folders', 'tree', 'carpetas', 'árbol'] },
+    { key: 'gas-folders-color', type: 'color', default: '#5f6368', tab: 'tools', section: 'tools-explorer', parent: 'gas-folders',
+        i18n: { title: 'optFolderColorTitle', description: 'optFolderColorDesc' }, keywords: ['color', 'folder', 'carpeta'] },
+    { key: 'gas-file-gs-color', type: 'color', default: '#4086f4', tab: 'tools', section: 'tools-explorer', parent: 'gas-folders',
+        i18n: { title: 'optGsColorTitle', description: 'optGsColorDesc' }, keywords: ['color', 'gs', 'script'] },
+    { key: 'gas-file-html-color', type: 'color', default: '#fc490b', tab: 'tools', section: 'tools-explorer', parent: 'gas-folders',
+        i18n: { title: 'optHtmlColorTitle', description: 'optHtmlColorDesc' }, keywords: ['color', 'html'] },
+    { key: 'gas-file-json-color', type: 'color', default: '#1bb24b', tab: 'tools', section: 'tools-explorer', parent: 'gas-folders',
+        i18n: { title: 'optJsonColorTitle', description: 'optJsonColorDesc' }, keywords: ['color', 'json', 'manifest'] },
+    { key: 'gas-file-tabs', type: 'toggle', default: false, tab: 'tools', section: 'tools-explorer',
+        i18n: { title: 'optGasFileTabsTitle', description: 'optGasFileTabsDesc' }, keywords: ['tabs', 'pestañas', 'files', 'archivos', 'vscode'] },
+
+    // Herramientas · Diagnósticos
+    { key: 'gas-error-lens', type: 'toggle', default: true, tab: 'tools', section: 'tools-diagnostics',
+        i18n: { title: 'optErrorLensTitle', description: 'optErrorLensDesc' }, keywords: ['errors', 'lint', 'errores', 'diagnostics'] },
+    { key: 'gas-error-lens-custom-rules', type: 'toggle', default: false, tab: 'tools', section: 'tools-diagnostics', parent: 'gas-error-lens',
+        i18n: { title: 'optErrorLensCustomRulesTitle', description: 'optErrorLensCustomRulesDesc' }, keywords: ['rules', 'reglas', 'heuristics'] },
+
+    // Herramientas · Avanzado
+    { key: 'debug-mode', type: 'toggle', default: false, tab: 'tools', section: 'tools-advanced',
+        i18n: { title: 'optDebugModeTitle', description: 'optDebugModeDesc' }, keywords: ['debug', 'logs', 'console', 'depuración'] },
+
+    // IA
+    { key: 'ai-autocomplete', type: 'toggle', default: false, tab: 'ai', section: 'ai-autocomplete', experimental: true,
+        i18n: { title: 'optAiAutocompleteTitle', description: 'optAiAutocompleteDesc' }, keywords: ['ai', 'ia', 'suggestions', 'copilot'] },
+    { key: 'aiResponseLanguage', type: 'select', default: 'auto', tab: 'ai', section: 'ai-responses',
+        storage: 'sync', storageKey: 'gasToolsAiLanguage',
+        i18n: { title: 'optAiResponseLanguageTitle', description: 'optAiResponseLanguageDesc' },
+        options: [
+            { value: 'auto', label: 'Auto' }, { value: 'es', label: 'Español' }, { value: 'en', label: 'English' },
+            { value: 'pt', label: 'Português' }, { value: 'fr', label: 'Français' },
+            { value: 'de', label: 'Deutsch' }, { value: 'it', label: 'Italiano' },
+        ], keywords: ['language', 'idioma', 'chat'] },
+
+    // Temas
+    { key: 'ide-dark-mode', type: 'toggle', default: false, tab: 'themes', section: 'themes-appearance',
+        i18n: { title: 'optIdeDarkModeTitle', description: 'optIdeDarkModeDesc' }, keywords: ['dark', 'oscuro', 'night', 'noche'] },
+];
+
+/**
+ * Indica si la entrada se guarda en IndexedDB junto al resto de settings.
+ * @param {Object} entry Entrada de SETTINGS_SCHEMA.
+ * @returns {boolean}
+ */
+export function isStoredSetting(entry) {
+    return entry?.storage !== 'sync';
+}
+
+/**
+ * Defaults de las entradas guardadas en IndexedDB, opcionalmente filtradas por pestaña.
+ * @param {string[]} [tabs] Pestañas a incluir (todas si se omite).
+ * @returns {Object} Mapa clave → default.
+ */
+export function getSchemaDefaults(tabs) {
+    return Object.fromEntries(SETTINGS_SCHEMA
+        .filter((e) => isStoredSetting(e) && (!tabs || tabs.includes(e.tab)))
+        .map((e) => [e.key, e.default]));
+}
+
+// Configuración por defecto para las opciones de usuario (derivada del esquema).
+export const DEFAULT_SETTINGS_OPTIONS = Object.freeze(getSchemaDefaults());
+
+// Versión del esquema de settings; subirla obliga a re-normalizar lo guardado.
+export const SETTINGS_SCHEMA_VERSION = 2;
+
+// Claves retiradas que se eliminan al normalizar.
+const REMOVED_SETTINGS_KEYS = ['load-snippets'];
+
+// Toggles que antes guardaban texto (valores de Monaco) y ahora son booleanos.
+// Tabla duplicada en `toBool_` de extension/js/gas-tools.js (MAIN world, sin módulos ES).
+const LEGACY_BOOL_KEYS = [
+    'lineNumbers', 'renderLineHighlight', 'rulers', 'occurrencesHighlight',
+    'renderWhitespace', 'autoClosingBrackets', 'scrollBeyondLastLine',
+];
+const LEGACY_TRUE_VALUES = ['on', 'line', 'all', 'singleFile', 'always', 'selection', 'boundary', 'gutter', 'true'];
+const LEGACY_FALSE_VALUES = ['', 'off', 'none', 'never', 'false'];
+
+/**
+ * Convierte un valor heredado (booleano o texto de Monaco) en booleano.
+ * @param {*} val Valor guardado.
+ * @param {boolean} fallback Valor si el texto no se reconoce.
+ * @returns {boolean}
+ */
+export function legacyToBool(val, fallback = false) {
+    if (typeof val === 'boolean') return val;
+    if (LEGACY_TRUE_VALUES.includes(val)) return true;
+    if (LEGACY_FALSE_VALUES.includes(val) || val == null) return false;
+    return fallback;
+}
+
+/**
+ * Normaliza las opciones guardadas: rellena defaults, migra textos a booleanos y fija `schemaVersion`. Pura e idempotente.
+ * @param {Object|null|undefined} raw Opciones leídas de IndexedDB.
+ * @returns {Object} Opciones nuevas (no muta `raw`).
+ */
+export function normalizeSettings(raw) {
+    const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const out = { ...DEFAULT_SETTINGS_OPTIONS, ...source };
+    LEGACY_BOOL_KEYS.forEach((key) => {
+        out[key] = legacyToBool(out[key], DEFAULT_SETTINGS_OPTIONS[key]);
+    });
+    REMOVED_SETTINGS_KEYS.forEach((key) => delete out[key]);
+    out.schemaVersion = SETTINGS_SCHEMA_VERSION;
+    return out;
+}
+
+/**
+ * Indica si dos objetos de opciones planos difieren (comparación superficial por clave).
+ * @param {Object} a
+ * @param {Object} b
+ * @returns {boolean}
+ */
+export function settingsDiffer(a, b) {
+    const keysA = Object.keys(a || {});
+    const keysB = Object.keys(b || {});
+    if (keysA.length !== keysB.length) return true;
+    return keysA.some((k) => !Object.is(a[k], b?.[k]));
+}
 
 // Archivo de configuración para variables globales y constantes
 export const DEFAULT_SNIPPETS = [

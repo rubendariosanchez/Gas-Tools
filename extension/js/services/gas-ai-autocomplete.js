@@ -13,6 +13,8 @@
  * Comunicación con el LLM mediante CustomEvents:
  *   GAS_LLM_REQUEST  → emitido por esta clase.
  *   GAS_LLM_RESPONSE → recibido del bridge en main-functions.js.
+ *   GAS_LLM_CANCEL   → emitido al abortar, para cortar el fetch del background.
+ * La API key nunca viaja por el DOM: la inyecta el background.
  */
 
 class GasAiAutocomplete {
@@ -28,14 +30,59 @@ class GasAiAutocomplete {
   /** Tiempo máximo (ms) para esperar respuesta del bridge LLM. */
   static BRIDGE_TIMEOUT_MS = 25000;
 
-  /** Tamaño máximo del prefix enviado al LLM (chars). */
-  static MAX_PREFIX_CHARS = 1200;
+  /**
+   * Tamaño máximo del prefix enviado al LLM (chars). Con poco contexto el
+   * modelo "inventa" bloques plausibles que no aplican al archivo.
+   */
+  static MAX_PREFIX_CHARS = 3000;
 
   /** Tamaño máximo del suffix enviado al LLM (chars). */
-  static MAX_SUFFIX_CHARS = 400;
+  static MAX_SUFFIX_CHARS = 1500;
+
+  /** Máximo de líneas de una sugerencia en modo bloque. */
+  static MAX_BLOCK_LINES = 8;
+
+  /** Líneas vecinas (antes y después) contra las que se detectan duplicados. */
+  static DUPLICATE_WINDOW_LINES = 40;
 
   /** Capacidad del cache LRU de sugerencias. */
   static CACHE_SIZE = 32;
+
+  /** TTL (ms) de las respuestas vacías en cache: evita reintentar en bucle. */
+  static EMPTY_CACHE_TTL_MS = 30000;
+
+  /** Intervalo mínimo (ms) entre peticiones de red automáticas. */
+  static MIN_REQUEST_INTERVAL_MS = 800;
+
+  /**
+   * Máximo de peticiones automáticas por minuto (ventana deslizante).
+   * Con 20 el cupo se agotaba al escribir con pausas cortas y las
+   * sugerencias se descartaban en silencio.
+   */
+  static MAX_REQUESTS_PER_MINUTE = 40;
+
+  /**
+   * Espera máxima (ms) por rate limit antes de descartar un trigger
+   * automático. Esperar más haría aparecer sugerencias "tarde".
+   */
+  static MAX_RATE_LIMIT_WAIT_MS = 3000;
+
+  /** Límite de tokens de salida para sugerencias de una línea. */
+  static MAX_TOKENS_SINGLE = 128;
+
+  /** Límite de tokens de salida para bloques (multi-línea / comentarios de bloque). */
+  static MAX_TOKENS_MULTI = 256;
+
+  /** Id de la acción Monaco que fuerza la sugerencia (Ctrl+Shift+Espacio). */
+  static TRIGGER_ACTION_ID = 'qc.aiAutocomplete.trigger';
+
+  // Los providers de Monaco son globales: se registran una sola vez y
+  // delegan en la instancia activa. Así re-instanciar o re-habilitar no
+  // duplica sugerencias.
+  static providersRegistered = false;
+  static _providerDisposables = [];
+  /** @type {GasAiAutocomplete|null} Instancia que atiende los providers. */
+  static _activeInstance = null;
 
   /** Lenguajes Monaco en los que se registra el provider. */
   static SUPPORTED_LANGUAGES = [
@@ -58,8 +105,13 @@ class GasAiAutocomplete {
   constructor(editor, options = {}) {
     this._editor      = editor;
     this._enabled     = false;
-    this._disposables = [];
+    // Disposables ligados al editor actual (listener de contenido, acción).
+    this._editorDisposables = [];
     this._debounceMs  = options.debounceMs ?? GasAiAutocomplete.DEBOUNCE_MS;
+
+    // Rate limit: timestamp de la última petición de red y ventana de 60 s.
+    this._lastRequestAt = 0;
+    this._requestTimes  = [];
 
     // Timer del debounce activo.
     this._timer = null;
@@ -84,6 +136,14 @@ class GasAiAutocomplete {
     // Timestamp del último cambio de contenido del editor (ms). Lo usa el
     // debounce para verificar inactividad real antes de disparar.
     this._lastInputAt = 0;
+
+    // Config LLM pública (sin API keys) cacheada desde el background vía
+    // `GAS_LLM_GET_CONFIG`. null hasta la primera carga.
+    this._llmConfig = null;
+    // Secuencia de cargas: descarta respuestas viejas si llegan desordenadas.
+    this._configLoadSeq = 0;
+    // Listener de `GAS_LLM_CONFIG_UPDATED` (se quita en disable()).
+    this._onLlmConfigUpdated = null;
   }
 
   // ── Ciclo de vida ────────────────────────────────────────────────────────
@@ -97,56 +157,147 @@ class GasAiAutocomplete {
     if (this._enabled || !this._editor) return;
 
     if (typeof window.monaco?.languages?.registerInlineCompletionsProvider !== 'function') {
-      // Monaco aún no está disponible: reintentar en breve.
-      setTimeout(() => this.enable(), 500);
+      // Monaco aún no está disponible: reintentar en breve (un solo timer).
+      clearTimeout(this._enableRetryTimer);
+      this._enableRetryTimer = setTimeout(() => this.enable(), 500);
       return;
     }
 
     this._enabled = true;
+    GasAiAutocomplete._activeInstance = this;
+    GasAiAutocomplete._registerProviders_();
+    this._attachEditor_();
+    this._bindConfigUpdates_();
+    this._loadConfig_();
+  }
+
+  /**
+   * Desactiva el autocompletado: cancela peticiones en vuelo, libera los
+   * listeners del editor, los providers globales (si esta instancia era la
+   * activa) y limpia el cache.
+   */
+  disable() {
+    clearTimeout(this._enableRetryTimer);
+    if (!this._enabled) return;
+    this._enabled = false;
+    this._cancel_();
+    this._detachEditor_();
+    this._unbindConfigUpdates_();
+    if (GasAiAutocomplete._activeInstance === this) {
+      GasAiAutocomplete._activeInstance = null;
+      GasAiAutocomplete._disposeProviders_();
+    }
+    this._cache.clear();
+  }
+
+  /** Teardown completo de la instancia (alias de `disable`). */
+  dispose() {
+    this.disable();
+  }
+
+  /**
+   * Cambia el editor Monaco al que está atado el autocompletado. Idempotente:
+   * si es el mismo editor no hace nada. Libera los listeners del editor
+   * anterior y, si está habilitado, se engancha al nuevo.
+   * @param {object} editor
+   */
+  setEditor(editor) {
+    if (!editor || editor === this._editor) return;
+    this._cancel_();
+    this._detachEditor_();
+    this._editor     = editor;
+    this._lastShown  = '';
+    if (this._enabled) this._attachEditor_();
+  }
+
+  /**
+   * Registra los inline completion providers una sola vez (Monaco es
+   * global). El callback consulta la instancia activa en cada llamada.
+   * @private
+   */
+  static _registerProviders_() {
+    if (GasAiAutocomplete.providersRegistered) return;
+    GasAiAutocomplete.providersRegistered = true;
 
     GasAiAutocomplete.SUPPORTED_LANGUAGES.forEach(lang => {
       try {
         const d = window.monaco.languages.registerInlineCompletionsProvider(lang, {
-          provideInlineCompletions: (model, position, context, token) =>
-            this._provideInline_(model, position, context, token),
+          provideInlineCompletions: (model, position, context, token) => {
+            const inst = GasAiAutocomplete._activeInstance;
+            // Sin sugerencias en los modelos de la vista previa de cambios.
+            if (!inst || model?.uri?.scheme === 'gas-preview' || model?.uri?.scheme === 'gas-ghdiff') return { items: [], dispose() {} };
+            return inst._provideInline_(model, position, context, token);
+          },
           freeInlineCompletions(c) { c?.dispose?.(); },
         });
-        this._disposables.push(d);
+        if (d) GasAiAutocomplete._providerDisposables.push(d);
       } catch (_) { /* lenguaje no registrable: ignorar */ }
-    });
-
-    // Atajo Ctrl+Shift+Espacio: fuerza la sugerencia ignorando el debounce.
-    if (this._editor.addCommand && window.monaco?.KeyMod) {
-      this._editor.addCommand(
-        window.monaco.KeyMod.CtrlCmd | window.monaco.KeyMod.Shift | window.monaco.KeyCode.Space,
-        () => this._editor.trigger('keyboard', 'editor.action.inlineSuggest.trigger', {})
-      );
-    }
-
-    // Listener único para dos cosas: registrar timestamp de actividad y
-    // detectar aceptación (inserción literal del texto que mostrábamos).
-    this._editor.onDidChangeModelContent((ev) => {
-      this._lastInputAt = Date.now();
-      if (!this._lastShown) return;
-      const accepted = ev?.changes?.some(c => c.text === this._lastShown);
-      if (accepted) {
-        this._lastAcceptedAt = Date.now();
-        this._lastShown      = '';
-      }
     });
   }
 
   /**
-   * Desactiva el provider, libera disposables, cancela peticiones en vuelo
-   * y limpia el cache.
+   * Libera los providers globales y resetea el flag de registro.
+   * @private
    */
-  disable() {
-    if (!this._enabled) return;
-    this._enabled = false;
-    this._cancel_();
-    this._disposables.forEach(d => d?.dispose?.());
-    this._disposables = [];
-    this._cache.clear();
+  static _disposeProviders_() {
+    GasAiAutocomplete._providerDisposables.forEach(d => {
+      try { d?.dispose?.(); } catch (_) { /* ignorar */ }
+    });
+    GasAiAutocomplete._providerDisposables = [];
+    GasAiAutocomplete.providersRegistered  = false;
+  }
+
+  /**
+   * Engancha atajo y listener de contenido al editor actual. Siempre libera
+   * los previos para no apilar listeners al re-habilitar.
+   * @private
+   */
+  _attachEditor_() {
+    this._detachEditor_();
+    const editor = this._editor;
+    if (!editor) return;
+
+    // Atajo Ctrl+Shift+Espacio: fuerza la sugerencia ignorando el debounce.
+    // `addAction` devuelve un disposable (a diferencia de `addCommand`).
+    if (typeof editor.addAction === 'function' && window.monaco?.KeyMod) {
+      try {
+        const d = editor.addAction({
+          id:          GasAiAutocomplete.TRIGGER_ACTION_ID,
+          label:       'AI: Trigger inline suggestion',
+          keybindings: [
+            window.monaco.KeyMod.CtrlCmd | window.monaco.KeyMod.Shift | window.monaco.KeyCode.Space,
+          ],
+          run: (ed) => ed.trigger('keyboard', 'editor.action.inlineSuggest.trigger', {}),
+        });
+        if (d) this._editorDisposables.push(d);
+      } catch (_) { /* acción ya registrada en este editor: ignorar */ }
+    }
+
+    // Listener único para dos cosas: registrar timestamp de actividad y
+    // detectar aceptación (inserción literal del texto que mostrábamos).
+    if (typeof editor.onDidChangeModelContent === 'function') {
+      const d = editor.onDidChangeModelContent((ev) => {
+        this._lastInputAt = Date.now();
+        if (!this._lastShown) return;
+        const accepted = ev?.changes?.some(c => c.text === this._lastShown);
+        if (accepted) {
+          this._lastAcceptedAt = Date.now();
+          this._lastShown      = '';
+        }
+      });
+      if (d) this._editorDisposables.push(d);
+    }
+  }
+
+  /**
+   * Libera los disposables ligados al editor actual.
+   * @private
+   */
+  _detachEditor_() {
+    this._editorDisposables.forEach(d => {
+      try { d?.dispose?.(); } catch (_) { /* ignorar */ }
+    });
+    this._editorDisposables = [];
   }
 
   /**
@@ -184,20 +335,74 @@ class GasAiAutocomplete {
       return empty;
     }
 
+    // El provider es global: si el modelo no es el del editor atado, la
+    // posición del editor no aplica y no sugerimos.
+    const editorModel = this._editor?.getModel?.() || null;
+    if (editorModel && editorModel !== model) return empty;
+
     if (isExplicit) {
       this._cancel_();
-      return (await this._request_(model, position, token)) || empty;
+      return (await this._request_(model, position, token, true)) || empty;
     }
 
     const result = await this._debounce_(() => {
       // La posición y el modelo pueden haber cambiado durante el debounce;
-      // los recapturamos para enviar el contexto exacto del momento actual.
+      // los recapturamos del editor actual para enviar el contexto exacto.
+      const mdl = this._editor?.getModel?.() || model;
+      if (mdl !== model) return null;
       const pos = this._editor?.getPosition?.() || position;
-      const mdl = this._editor?.getModel?.()    || model;
-      return this._request_(mdl, pos, token);
+      return this._request_(mdl, pos, token, false);
     });
 
     return result || empty;
+  }
+
+  /**
+   * Rate limit para triggers automáticos. Devuelve los ms a esperar para
+   * respetar el intervalo mínimo y el cupo por minuto (siempre ≥ 0).
+   * Antes devolvía -1 al agotar el cupo y la petición se descartaba sin
+   * aviso; ahora el debounce espera a que se libere un hueco.
+   * @returns {number}
+   * @private
+   */
+  _rateLimitWait_() {
+    const now = Date.now();
+    this._requestTimes = this._requestTimes.filter(t => now - t < 60000);
+    const intervalWait = Math.max(0, this._lastRequestAt + GasAiAutocomplete.MIN_REQUEST_INTERVAL_MS - now);
+    if (this._requestTimes.length < GasAiAutocomplete.MAX_REQUESTS_PER_MINUTE) return intervalWait;
+    const quotaWait = this._requestTimes[0] + 60000 - now;
+    return Math.max(intervalWait, quotaWait);
+  }
+
+  /**
+   * Log de diagnóstico (solo con la opción "Debug mode" del popup).
+   * @param {string} message
+   * @param {...*} args
+   * @private
+   */
+  _log_(message, ...args) {
+    if (typeof DomUtils !== 'undefined' && typeof DomUtils.debug === 'function') {
+      DomUtils.debug('AI Autocomplete', message, ...args);
+    }
+  }
+
+  /**
+   * Avisa en consola de errores reales del LLM (permiso, key, red). Se
+   * muestra siempre, pero cada mensaje distinto como mucho una vez por
+   * minuto para no inundar la consola mientras se escribe.
+   * @param {Error} err
+   * @private
+   */
+  _warnError_(err) {
+    const msg = String(err?.message || err);
+    const now = Date.now();
+    this._warnedAt = this._warnedAt || new Map();
+    if (now - (this._warnedAt.get(msg) || 0) < 60000) return;
+    this._warnedAt.set(msg, now);
+    const hint = err?.permissionOrigin
+      ? ` → Concede acceso a ${err.permissionOrigin} en el popup: AI Context → Provider access.`
+      : '';
+    console.warn(`[GASTools] AI Autocomplete: ${msg}${hint}`);
   }
 
   /**
@@ -222,7 +427,17 @@ class GasAiAutocomplete {
 
       const tick = () => {
         const elapsed   = Date.now() - this._lastInputAt;
-        const remaining = this._debounceMs - elapsed;
+        // Además de la inactividad, respetamos el intervalo mínimo entre
+        // peticiones de red (el cupo por minuto lo valida `_request_`).
+        const rateWait  = this._rateLimitWait_();
+        if (rateWait > GasAiAutocomplete.MAX_RATE_LIMIT_WAIT_MS) {
+          this._log_(`Omitido: cupo de ${GasAiAutocomplete.MAX_REQUESTS_PER_MINUTE} peticiones/min agotado (libre en ${Math.ceil(rateWait / 1000)} s). Ctrl+Shift+Espacio lo ignora.`);
+          this._timer = null;
+          this._pendingResolve = null;
+          resolve(null);
+          return;
+        }
+        const remaining = Math.max(this._debounceMs - elapsed, rateWait);
         if (remaining > 0) {
           this._timer = setTimeout(tick, remaining);
           return;
@@ -246,48 +461,64 @@ class GasAiAutocomplete {
    * @param {object} model
    * @param {object} position
    * @param {object} token
+   * @param {boolean} [isExplicit=false] Trigger manual (omite guards de contexto y rate limit).
    * @returns {Promise<object|null>}
    * @private
    */
-  async _request_(model, position, token) {
+  async _request_(model, position, token, isExplicit = false) {
     if (!this._enabled || token?.isCancellationRequested) return null;
 
-    const ctx = this._buildContext_(model, position);
+    const ctx = this._buildContext_(model, position, isExplicit);
     if (!ctx) return null;
 
-    const cacheKey = this._cacheKey_(ctx.prefix, ctx.suffix, ctx.language);
-    if (this._cache.has(cacheKey)) {
-      const cached = this._cache.get(cacheKey);
-      // Refrescar orden LRU.
-      this._cache.delete(cacheKey);
-      this._cache.set(cacheKey, cached);
+    const cacheKey = this._cacheKey_(ctx.prefix, ctx.suffix, `${ctx.language}|${ctx.mode}`);
+    const cached   = this._cacheGet_(cacheKey);
+    if (cached !== undefined) {
+      this._log_(cached ? 'Sugerencia desde cache.' : 'Cache: esta posición ya respondió vacío (se reintenta en 30 s o con Ctrl+Shift+Espacio).');
       if (!cached) return null;
       this._lastShown = cached;
       return this._toCompletion_(cached, position);
     }
 
     const config = this._readConfig_(ctx.language);
-    if (!config) return null;
+    if (!config) {
+      this._log_('Omitido: falta configurar proveedor/API key en el chat (Settings).');
+      return null;
+    }
+
+    // Rate limit solo para triggers automáticos (el debounce ya esperó; esto
+    // cubre carreras entre peticiones casi simultáneas).
+    if (!isExplicit && this._rateLimitWait_() > 50) {
+      this._log_('Omitido por rate limit.');
+      return null;
+    }
 
     const prompt = this._buildPrompt_(ctx);
     this._reqCount++;
+    this._lastRequestAt = Date.now();
+    this._requestTimes.push(this._lastRequestAt);
 
     this._abort_();
-    this._abortCtrl = new AbortController();
-    const signal = this._abortCtrl.signal;
+    const ctrl = new AbortController();
+    this._abortCtrl = ctrl;
+    const signal = ctrl.signal;
 
     let cancelReg = null;
     if (typeof token?.onCancellationRequested === 'function') {
-      cancelReg = token.onCancellationRequested(() => this._abortCtrl?.abort());
+      cancelReg = token.onCancellationRequested(() => ctrl.abort());
     }
+
+    const maxTokens = this._maxTokensFor_(ctx);
+    this._log_(`Petición (${isExplicit ? 'manual' : 'auto'}) modo=${ctx.mode} maxTokens=${maxTokens} prefix=${ctx.prefix.length} suffix=${ctx.suffix.length}`);
+    if (typeof DomUtils !== 'undefined' && DomUtils.isDebug?.()) this._log_('Prompt:', prompt);
 
     try {
       const raw = await this._callBridge_({
         provider:    config.provider,
-        apiKey:      config.apiKey,
         model:       config.model,
         endpointUrl: config.endpointUrl,
         temperature: config.temperature,
+        maxTokens,
         messages: [
           { role: 'system', content: config.systemPrompt },
           { role: 'user',   content: prompt              },
@@ -303,20 +534,196 @@ class GasAiAutocomplete {
         ? ctx.comment.text
         : ctx.linePrefix;
       text = this._stripOverlap_(text, overlapPrefix, ctx.lineSuffix);
+      if (!ctx.isComment) text = this._postProcessCode_(text, ctx);
 
       this._cacheSet_(cacheKey, text);
 
-      if (!text) return null;
+      if (!text) {
+        this._log_(raw
+          ? 'Respuesta descartada por los filtros (repetía o redefinía código existente).'
+          : 'El modelo respondió vacío (no ve nada que completar).', { raw });
+        return null;
+      }
+      this._log_('Sugerencia:', text);
       this._lastShown = text;
       return this._toCompletion_(text, position);
 
     } catch (err) {
-      if (err?.name === 'AbortError') return null;
+      // AbortError: el usuario siguió escribiendo (normal). El resto son
+      // errores reales (permiso, key, red, timeout) y se avisan.
+      if (err?.name === 'AbortError') this._log_('Cancelada: el usuario siguió escribiendo.');
+      else this._warnError_(err);
       return null;
     } finally {
       cancelReg?.dispose?.();
-      this._abortCtrl = null;
+      // Solo limpiamos si no lo reemplazó una petición más nueva.
+      if (this._abortCtrl === ctrl) this._abortCtrl = null;
     }
+  }
+
+  /**
+   * Límite de tokens de salida según el contexto: bloques (comentario de
+   * bloque, línea vacía o tras `{`/`(`/`[`/`=>`) admiten más que una línea.
+   * @param {object} ctx
+   * @returns {number}
+   * @private
+   */
+  _maxTokensFor_(ctx) {
+    const multi = ctx.isComment
+      ? ctx.comment?.type !== 'line'
+      : ctx.mode === 'block';
+    return multi ? GasAiAutocomplete.MAX_TOKENS_MULTI : GasAiAutocomplete.MAX_TOKENS_SINGLE;
+  }
+
+  /**
+   * Decide cuánto puede sugerir el modelo en esta posición:
+   *  - `inline`: hay código en la línea → solo terminar la línea actual.
+   *  - `block`:  bloque vacío recién abierto (`{` arriba y `}` debajo) o
+   *              trigger manual → varias líneas (hasta MAX_BLOCK_LINES).
+   *  - `line`:   línea vacía entre código existente → como mucho UNA línea.
+   *              Es el caso en el que el modelo tendía a inventar bloques
+   *              enteros que ya existían más abajo.
+   *
+   * @param {string} linePrefix
+   * @param {string} prevLine  Línea no vacía anterior.
+   * @param {string} nextLine  Línea no vacía siguiente.
+   * @param {boolean} isExplicit
+   * @returns {'inline'|'line'|'block'}
+   * @private
+   */
+  _completionMode_(linePrefix, prevLine, nextLine, isExplicit) {
+    const lp = linePrefix || '';
+    const OPENER_RE   = /(?:[{([]|=>)\s*$/;
+    const closesBelow = /^\s*[})\]]/.test(nextLine || '');
+    if (lp.trim()) {
+      // Código en la línea: solo es bloque si acaba en apertura y el cierre
+      // está justo después (`{|}` autocerrado o `}` en la línea siguiente).
+      return OPENER_RE.test(lp) && closesBelow ? 'block' : 'inline';
+    }
+    if (isExplicit) return 'block';
+    return OPENER_RE.test(prevLine || '') && closesBelow ? 'block' : 'line';
+  }
+
+  /**
+   * Post-procesado de sugerencias de código (puro, testeable):
+   *  1. Limita líneas según el modo (`inline`/`line` → 1, `block` → N).
+   *  2. Corta donde un cierre `}`/`)`/`]` excede lo abierto por la propia
+   *     sugerencia: ese cierre ya existe en el suffix.
+   *  3. Corta en la primera línea que ya existe cerca del cursor
+   *     (el modelo repite código de arriba o de abajo).
+   *  4. Descarta la sugerencia si su primera línea define un nombre que ya
+   *     está definido en el contexto (`accent:` cuando `accent:` ya existe).
+   *  5. Ajusta la indentación de las líneas siguientes a la del cursor.
+   *
+   * @param {string} text
+   * @param {{mode:string, linePrefix:string, prefix:string, suffix:string}} ctx
+   * @returns {string}
+   * @private
+   */
+  _postProcessCode_(text, ctx) {
+    if (!text) return '';
+    let lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+
+    // 1. Límite de líneas por modo.
+    const maxLines = ctx.mode === 'block' ? GasAiAutocomplete.MAX_BLOCK_LINES : 1;
+    lines = lines.slice(0, maxLines);
+
+    // Si el cursor está en una línea solo con indentación, la primera línea
+    // no debe traer su propia indentación (se duplicaría).
+    const cursorAtIndent = !(ctx.linePrefix || '').trim();
+    if (cursorAtIndent) lines[0] = lines[0].replace(/^\s+/, '');
+
+    // 2. Balance de brackets: cortar donde se cierra más de lo abierto.
+    if (ctx.mode === 'block') {
+      let depth = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const code = this._stripStringsAndComments_(lines[i]);
+        let overflow = false;
+        for (const ch of code) {
+          if ('{(['.includes(ch)) depth++;
+          else if ('})]'.includes(ch)) { depth--; if (depth < 0) { overflow = true; break; } }
+        }
+        if (overflow) { lines = lines.slice(0, i); break; }
+      }
+    }
+
+    // 3. Duplicados con el código cercano.
+    const nearby = this._nearbyLineSet_(ctx.prefix, ctx.suffix, ctx.linePrefix);
+    const dupIdx = lines.findIndex((l) => nearby.has(this._normalizeLine_(l)));
+    if (dupIdx !== -1) lines = lines.slice(0, dupIdx);
+
+    // 4. Definición ya existente.
+    const firstName = this._definedName_(lines[0] || '', ctx.linePrefix);
+    if (firstName && this._isAlreadyDefined_(firstName, ctx.prefix, ctx.suffix)) return '';
+
+    // 5. Indentación de las líneas 2..n relativa a la del cursor.
+    if (lines.length > 1) {
+      const baseIndent = (ctx.linePrefix || '').match(/^\s*/)[0];
+      const rest = lines.slice(1);
+      const minIndent = Math.min(...rest.filter((l) => l.trim()).map((l) => l.match(/^\s*/)[0].length), Infinity);
+      const strip = Number.isFinite(minIndent) ? minIndent : 0;
+      // Las líneas que abren bloque añaden un nivel a las siguientes; aquí
+      // preservamos la indentación relativa que trae el modelo.
+      lines = [lines[0], ...rest.map((l) => (l.trim() ? baseIndent + l.slice(strip) : ''))];
+    }
+
+    const out = lines.join('\n').replace(/\s+$/, '');
+    return out.trim() ? out : '';
+  }
+
+  /** Normaliza una línea para comparar duplicados (sin espacios ni `;`/`,` final). */
+  _normalizeLine_(line) {
+    return String(line || '').trim().replace(/\s+/g, ' ').replace(/[;,]$/, '');
+  }
+
+  /**
+   * Conjunto de líneas normalizadas (≥ 6 chars) alrededor del cursor:
+   * las últimas N del prefix (sin la línea actual) y las primeras N del suffix.
+   * @private
+   */
+  _nearbyLineSet_(prefix, suffix, linePrefix) {
+    const N = GasAiAutocomplete.DUPLICATE_WINDOW_LINES;
+    const before = String(prefix || '').slice(0, prefix.length - (linePrefix || '').length).split('\n').slice(-N);
+    const after  = String(suffix || '').split('\n').slice(0, N);
+    const set = new Set();
+    for (const l of [...before, ...after]) {
+      const n = this._normalizeLine_(l);
+      if (n.length >= 6) set.add(n);
+    }
+    return set;
+  }
+
+  /**
+   * Nombre que define una línea de código: `const x`, `let x`, `var x`,
+   * `function x`, `class x`, `x:` (propiedad) o `x(...) {` (método).
+   * Solo cuando la línea empieza una declaración (cursor al inicio).
+   * @private
+   */
+  _definedName_(firstLine, linePrefix) {
+    if ((linePrefix || '').trim()) return null;
+    const m = String(firstLine).match(
+      /^\s*(?:(?:export\s+)?(?:const|let|var|function\*?|class|async\s+function)\s+([A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)\s*:(?!:)|([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{)/
+    );
+    return m ? (m[1] || m[2] || m[3]) : null;
+  }
+
+  /** `true` si `name` ya se define (declaración, propiedad o método) en el contexto. */
+  _isAlreadyDefined_(name, prefix, suffix) {
+    const esc = name.replace(/[$]/g, '\\$');
+    const re = new RegExp(
+      `(?:\\b(?:const|let|var|function\\*?|class)\\s+${esc}\\b)|(?:^|[\\s{,])${esc}\\s*:(?!:)|(?:^\\s*${esc}\\s*\\([^)]*\\)\\s*\\{)`,
+      'm'
+    );
+    const strip_ = (s) => String(s || '').split('\n').map((l) => this._stripStringsAndComments_(l)).join('\n');
+    return re.test(strip_(prefix)) || re.test(strip_(suffix));
+  }
+
+  /** Quita strings y comentarios de una línea (aproximado, suficiente para brackets/nombres). */
+  _stripStringsAndComments_(line) {
+    return String(line || '')
+      .replace(/\/\/.*$/, '')
+      .replace(/\/\*.*?\*\//g, '')
+      .replace(/(["'`])(?:\\.|(?!\1).)*\1/g, '""');
   }
 
   /**
@@ -351,10 +758,11 @@ class GasAiAutocomplete {
    *
    * @param {object} model
    * @param {object} position
+   * @param {boolean} [isExplicit=false] Trigger manual: relaja los guards de contexto mínimo.
    * @returns {object|null} Contexto FIM o `null` si no se debe sugerir.
    * @private
    */
-  _buildContext_(model, position) {
+  _buildContext_(model, position, isExplicit = false) {
     const fullText = model.getValue();
     const offset   = model.getOffsetAt(position);
     const before   = fullText.slice(0, offset);
@@ -376,6 +784,7 @@ class GasAiAutocomplete {
       trimmedLinePrefix.endsWith('-->') ||
       trimmedLinePrefix.endsWith('}}')
     ) {
+      this._log_('Omitido: cursor justo después de un cierre (*/, -->, }}).');
       return null;
     }
 
@@ -386,7 +795,22 @@ class GasAiAutocomplete {
     if (!isComment) {
       const onlyWhitespaceLine = linePrefix.trim().length === 0;
       const noPriorContext     = before.replace(linePrefix, '').trim().length === 0;
-      if (onlyWhitespaceLine && noPriorContext) return null;
+      if (onlyWhitespaceLine && noPriorContext) { this._log_('Omitido: archivo vacío.'); return null; }
+
+      // Contexto mínimo para triggers automáticos (evita peticiones inútiles):
+      //  - menos de 3 caracteres de código antes del cursor;
+      //  - línea actual vacía y línea anterior también vacía;
+      //  - cursor pegado a una palabra a la derecha (edición a mitad de token).
+      if (!isExplicit) {
+        if (before.trim().length < 3) { this._log_('Omitido: muy poco código antes del cursor.'); return null; }
+        if (onlyWhitespaceLine) {
+          const prevLine = position.lineNumber > 1
+            ? model.getLineContent(position.lineNumber - 1)
+            : '';
+          if (prevLine.trim().length === 0) { this._log_('Omitido: línea vacía tras otra línea vacía.'); return null; }
+        }
+        if (/^\w/.test(lineSuffix)) { this._log_('Omitido: cursor a mitad de palabra.'); return null; }
+      }
     }
 
     // Recortes para mantener el prompt en un tamaño razonable.
@@ -397,10 +821,34 @@ class GasAiAutocomplete {
       ? after.slice(0, GasAiAutocomplete.MAX_SUFFIX_CHARS)
       : after;
 
+    // Líneas no vacías vecinas: deciden si estamos rellenando un bloque vacío
+    // o insertando entre código existente (ver `_completionMode_`).
+    const prevLine = before.slice(0, before.length - linePrefix.length)
+      .split('\n').reverse().find((l) => l.trim()) || '';
+    const nextLine = after.slice(lineSuffix.length)
+      .split('\n').find((l) => l.trim()) || '';
+    // Lo que sigue al cursor: el resto de la línea si tiene algo, si no la
+    // siguiente línea no vacía.
+    const following = lineSuffix.trim() ? lineSuffix : nextLine;
+    const mode = isComment ? 'comment' : this._completionMode_(linePrefix, prevLine, following, isExplicit);
+
+    // Línea vacía justo antes de un comentario/JSDoc existente (separación
+    // de secciones, como en la captura del bug): el trigger automático no
+    // aporta nada y el modelo tiende a inventar. Sigue disponible con
+    // Ctrl+Shift+Espacio.
+    if (!isExplicit && mode === 'line' && !linePrefix.trim() && /^\s*(?:\/\*\*|\/\/|\*)/.test(nextLine)) {
+      this._log_('Omitido: línea vacía antes de un comentario existente (usa Ctrl+Shift+Espacio).');
+      return null;
+    }
+
+    let fileName = '';
+    try { fileName = window.gasFileMap?.get?.(String(model.uri)) || ''; } catch (_) { /* opcional */ }
+
     return {
       prefix, suffix, linePrefix, lineSuffix,
       language, embedded: embedded.context,
       isComment, comment,
+      prevLine, nextLine, mode, fileName,
     };
   }
 
@@ -492,12 +940,24 @@ class GasAiAutocomplete {
       return this._buildCommentPrompt_(ctx, langLabel, embeddedHint);
     }
 
+    const scope = {
+      inline: 'Complete ONLY the rest of the current line. Never add a new line.',
+      line:   'Insert AT MOST one new line of code at <CURSOR>.',
+      block:  `Insert the missing code at <CURSOR> (at most ${GasAiAutocomplete.MAX_BLOCK_LINES} lines).`,
+    }[ctx.mode] || 'Complete the code at <CURSOR>.';
+
     return [
-      `Inline ${langLabel} completion.${embeddedHint ? ' ' + embeddedHint : ''}`,
-      `Output only the code that goes between <PREFIX> and <SUFFIX>. Do not repeat any character of either side. No fences, no markdown.`,
+      `Inline ${langLabel} completion${ctx.fileName ? ` in file "${ctx.fileName}"` : ''}.${embeddedHint ? ' ' + embeddedHint : ''}`,
+      scope,
+      `Rules:`,
+      `- Everything after <CURSOR> ALREADY EXISTS in the file. Never repeat, rewrite or move it.`,
+      `- Only write code that is clearly implied by the surrounding code. Never invent configuration values, data, colors, messages or names that do not appear in the context.`,
+      `- If nothing is clearly missing at <CURSOR>, return an empty string.`,
+      `- Keep the existing style and indentation. Output raw code only: no fences, no markdown, no explanations.`,
       ``,
-      `<PREFIX>${ctx.prefix}</PREFIX>`,
-      `<SUFFIX>${ctx.suffix}</SUFFIX>`,
+      `<CODE>`,
+      `${ctx.prefix}<CURSOR>${ctx.suffix}`,
+      `</CODE>`,
     ].join('\n');
   }
 
@@ -647,35 +1107,80 @@ class GasAiAutocomplete {
   // ── Configuración ────────────────────────────────────────────────────────
 
   /**
-   * Lee la configuración LLM desde `<gas-chat-panel>`. El system prompt se
-   * arma aquí con un default por lenguaje + reglas estrictas, en lugar de
-   * heredar el prompt del chat (que está orientado a conversación).
+   * Pide la config LLM pública al background (vía content script) y la
+   * guarda en `_llmConfig`. Si falla o expira, se conserva la anterior.
+   * @private
+   */
+  async _loadConfig_() {
+    const seq = ++this._configLoadSeq;
+    try {
+      const res = await DomUtils.bridgeRequest(
+        'GAS_LLM_GET_CONFIG', 'GAS_LLM_CONFIG_RESULT', {}, { timeoutMs: 10000 }
+      );
+      if (seq !== this._configLoadSeq || !this._enabled) return;
+      if (res?.data && typeof res.data === 'object') {
+        this._llmConfig = res.data;
+        this._cache.clear();
+      } else {
+        this._log_('No se pudo cargar la config LLM (timeout o respuesta vacía).');
+      }
+    } catch (err) {
+      this._log_('Error cargando la config LLM:', err);
+    }
+  }
+
+  /**
+   * Escucha `GAS_LLM_CONFIG_UPDATED` (lo despacha el content script cuando
+   * cambia la config desde el Side Panel/popup) y vuelve a pedirla.
+   * @private
+   */
+  _bindConfigUpdates_() {
+    if (this._onLlmConfigUpdated) return;
+    this._onLlmConfigUpdated = () => this._loadConfig_();
+    document.addEventListener('GAS_LLM_CONFIG_UPDATED', this._onLlmConfigUpdated);
+  }
+
+  /** Quita el listener de `GAS_LLM_CONFIG_UPDATED`. @private */
+  _unbindConfigUpdates_() {
+    if (!this._onLlmConfigUpdated) return;
+    document.removeEventListener('GAS_LLM_CONFIG_UPDATED', this._onLlmConfigUpdated);
+    this._onLlmConfigUpdated = null;
+    // Invalida cualquier carga en vuelo.
+    this._configLoadSeq++;
+  }
+
+  /**
+   * Arma la configuración de la petición desde la config LLM cacheada
+   * (`_llmConfig`). El system prompt se arma aquí con un default por
+   * lenguaje + reglas estrictas, en lugar de heredar el prompt del chat
+   * (que está orientado a conversación).
    *
    * @param {string} languageId
-   * @returns {object|null}
+   * @returns {object|null} null si la config aún no está cargada o falta la API key.
    * @private
    */
   _readConfig_(languageId) {
-    const panel = document.querySelector('gas-chat-panel');
-    if (!panel?._config) return null;
+    const cfg = this._llmConfig;
+    if (!cfg) return null;
 
-    const cfg      = panel._config;
     const provider = cfg.provider || 'gemini';
     const model    = cfg.model    || '';
-    const apiKey   = cfg.apiKeys?.[provider] || '';
 
-    if (!apiKey && provider !== 'custom') return null;
+    // La API key vive solo en el background; la config expone únicamente
+    // qué providers la tienen configurada. `custom` puede no requerirla.
+    if (provider !== 'custom' && !cfg.apiKeysSet?.[provider]) return null;
 
     const provSettings = (cfg.providerSettings || {})[provider] || {};
-    // Limitamos la temperatura a 0.3: queremos completados deterministas.
-    const temperature  = Math.min(provSettings.temperature ?? 0.2, 0.3);
+    // Completar código debe ser determinista: temperatura 0 (independiente
+    // de la que use el chat). Más temperatura = más "invención".
+    const temperature  = 0;
     const endpointUrl  = provSettings.endpointUrl || '';
 
     const systemPrompt =
 `${this._defaultSystemPrompt_(languageId)}
 Return ONLY the requested text. No fences, no quotes, no explanation. Empty string is valid. Match the language of the surrounding context (default English).`;
 
-    return { provider, model, apiKey, endpointUrl, temperature, systemPrompt };
+    return { provider, model, endpointUrl, temperature, systemPrompt };
   }
 
   /**
@@ -700,54 +1205,48 @@ Return ONLY the requested text. No fences, no quotes, no explanation. Empty stri
   // ── Bridge LLM ───────────────────────────────────────────────────────────
 
   /**
-   * Despacha la petición al background mediante CustomEvent y espera la
-   * respuesta correlacionada por `requestId`. Soporta cancelación vía
-   * AbortSignal y timeout duro.
+   * Despacha la petición al background (vía `DomUtils.bridgeRequest`) y
+   * espera la respuesta correlacionada por `requestId`. Al abortar (señal
+   * o token de Monaco) o al vencer el timeout, emite `GAS_LLM_CANCEL` para
+   * que el background corte el fetch en vuelo.
    *
-   * @param {object} payload
+   * @param {object} payload Cuerpo de `GAS_LLM_REQUEST` (sin apiKey) + `signal`.
    * @param {AbortSignal} payload.signal
    * @returns {Promise<string>}
    * @private
    */
-  _callBridge_(payload) {
+  async _callBridge_(payload) {
     const { signal, ...body } = payload;
-    return new Promise((resolve, reject) => {
-      const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      let settled = false;
-
-      const cleanup = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeoutId);
-        document.removeEventListener('GAS_LLM_RESPONSE', onResponse);
-        signal.removeEventListener('abort', onAbort);
-      };
-
-      const timeoutId = setTimeout(() => {
-        cleanup();
-        reject(new Error('LLM bridge timeout'));
-      }, GasAiAutocomplete.BRIDGE_TIMEOUT_MS);
-
-      const onResponse = (e) => {
-        let data;
-        try { data = JSON.parse(e.detail); } catch { return; }
-        if (data.requestId !== requestId) return;
-        cleanup();
-        if (data.ok) resolve(data.content || '');
-        else reject(new Error(data.error || 'LLM error'));
-      };
-
-      const onAbort = () => {
-        cleanup();
-        reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
-      };
-
-      document.addEventListener('GAS_LLM_RESPONSE', onResponse);
-      signal.addEventListener('abort', onAbort, { once: true });
-      document.dispatchEvent(new CustomEvent('GAS_LLM_REQUEST', {
-        detail: JSON.stringify({ requestId, ...body }),
+    const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const sendCancel = () => {
+      document.dispatchEvent(new CustomEvent('GAS_LLM_CANCEL', {
+        detail: JSON.stringify({ requestId }),
       }));
-    });
+    };
+
+    let data;
+    try {
+      data = await DomUtils.bridgeRequest('GAS_LLM_REQUEST', 'GAS_LLM_RESPONSE', body, {
+        timeoutMs: GasAiAutocomplete.BRIDGE_TIMEOUT_MS,
+        signal,
+        requestId,
+      });
+    } catch (err) {
+      if (err?.name === 'AbortError') sendCancel();
+      throw err;
+    }
+
+    if (!data) {
+      sendCancel();
+      throw new Error('LLM bridge timeout');
+    }
+    if (!data.ok) {
+      const err = new Error(data.error || 'LLM error');
+      if (data.permissionOrigin) err.permissionOrigin = data.permissionOrigin;
+      if (data.aborted) err.name = 'AbortError';
+      throw err;
+    }
+    return data.content || '';
   }
 
   // ── Post-procesado ───────────────────────────────────────────────────────
@@ -929,17 +1428,35 @@ Return ONLY the requested text. No fences, no quotes, no explanation. Empty stri
   }
 
   /**
+   * Lee una entrada del cache refrescando su orden LRU. Las respuestas
+   * vacías caducan tras `EMPTY_CACHE_TTL_MS`.
+   * @param {string} key
+   * @returns {string|undefined} Texto (posiblemente vacío) o `undefined` si no hay hit.
+   * @private
+   */
+  _cacheGet_(key) {
+    const entry = this._cache.get(key);
+    if (!entry) return undefined;
+    if (!entry.text && Date.now() - entry.at > GasAiAutocomplete.EMPTY_CACHE_TTL_MS) {
+      this._cache.delete(key);
+      return undefined;
+    }
+    this._cache.delete(key);
+    this._cache.set(key, entry);
+    return entry.text;
+  }
+
+  /**
    * Inserta una entrada en el cache respetando la capacidad máxima.
-   * No se cachean respuestas vacías para no devolver `null` silencioso
-   * la próxima vez que se pida lo mismo.
+   * También se cachean respuestas vacías (con TTL corto) para no repetir
+   * la misma petición inútil en cada pausa.
    * @param {string} key
    * @param {string} value
    * @private
    */
   _cacheSet_(key, value) {
-    if (!value) return;
     if (this._cache.has(key)) this._cache.delete(key);
-    this._cache.set(key, value);
+    this._cache.set(key, { text: value || '', at: Date.now() });
     while (this._cache.size > GasAiAutocomplete.CACHE_SIZE) {
       const firstKey = this._cache.keys().next().value;
       this._cache.delete(firstKey);

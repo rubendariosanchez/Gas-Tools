@@ -2,23 +2,30 @@
 
 /**
  * @fileoverview Error Lens para Monaco en el editor de Google Apps Script.
- * Solo lintea archivos JavaScript / TypeScript / GAS. Inspirado en
- * https://github.com/usernamehw/vscode-error-lens.
+ * Inspirado en https://github.com/usernamehw/vscode-error-lens.
  *
- * Tres responsabilidades:
- *  - Linter: reglas regex sobre cada línea + parser nativo `new Function`.
- *  - Decoraciones: subrayado ondulado y barra en la canaleta por severidad.
- *  - Overlay: mensaje al final de la línea como Monaco content widget.
+ * Responsabilidades:
+ *  - Renderer (siempre activo con la lens): muestra los diagnósticos que
+ *    ya tiene Monaco (markers del worker JS/TS de GAS y de cualquier otro
+ *    owner) con subrayado, barra en la canaleta y mensaje al final de la
+ *    línea como content widget.
+ *  - Reglas personalizadas (opt-in, desactivadas por defecto): linter
+ *    regex por línea (sin `new Function`: la CSP con Trusted Types de GAS
+ *    lo bloquea). Publica markers con owner propio (`MARKER_SOURCE`), que
+ *    el renderer muestra como cualquier otro diagnóstico.
  */
 class GasErrorLens {
 
   // ── Configuración ──────────────────────────────────────────────────────
 
-  /** Lenguajes soportados. */
+  /** Lenguajes soportados por las reglas personalizadas. */
   static LANGUAGES = new Set(['javascript', 'typescript', 'google apps script']);
 
-  /** Source publicado en los markers. */
+  /** Owner/source publicado en los markers de las reglas personalizadas. */
   static MARKER_SOURCE = 'gas-tools';
+
+  /** Debounce de `onDidChangeMarkers` antes de re-renderizar. */
+  static MARKERS_DEBOUNCE_MS = 150;
 
   /** Severidades Monaco. */
   static SEVERITY = { Error: 8, Warning: 4, Info: 2, Hint: 1 };
@@ -41,15 +48,36 @@ class GasErrorLens {
   /** Severidad mínima a renderizar. */
   static MIN_SEVERITY = 1;
 
-  /** Palabras reservadas que no pueden ser identificadores. */
+  /** Debounce del overlay ante cambios de contenido / layout. */
+  static OVERLAY_DEBOUNCE_MS = 200;
+
+  /**
+   * Palabras reservadas que no pueden ser identificadores en un script
+   * (modo no estricto, como los `.gs`). Se excluyen las contextuales
+   * válidas como nombre (`get`, `set`, `of`, `from`, `as`, `async`,
+   * `await`, `static`, `yield`, `undefined`) y las reservadas solo en
+   * modo estricto (`implements`, `interface`, `package`, `private`,
+   * `protected`, `public`).
+   */
   static RESERVED_WORDS = new Set([
     'class','const','let','var','function','return','if','else','for','while',
     'do','switch','case','break','continue','default','try','catch','finally',
-    'throw','new','delete','typeof','instanceof','in','of','extends','super',
-    'this','async','await','yield','import','export','from','as','static',
-    'get','set','null','true','false','undefined','void','enum','implements',
-    'interface','package','private','protected','public',
+    'throw','new','delete','typeof','instanceof','in','extends','super',
+    'this','import','export','null','true','false','void','enum',
+    'debugger','with',
   ]);
+
+  /** Operadores de asignación / actualización para la regla de const. */
+  static ASSIGN_OPS_SOURCE =
+    String.raw`(?:=|\+=|-=|\*=|\/=|%=|\*\*=|<<=|>>=|>>>=|&=|\|=|\^=|&&=|\|\|=|\?\?=|\+\+|--)`;
+
+  /**
+   * Inicio de línea que continúa la expresión de la línea anterior
+   * (`.`, `?.`, operadores binarios, `,`, `)`, `]`, ternario). `++`/`--`
+   * no cuentan: ASI los asocia a la línea siguiente.
+   */
+  static CONTINUATION_START_RE =
+    /^(?:\?\.|\.|,|\)|\]|\?|:|&&|\|\||\?\?|[+-](?![+-])|[*/%&|^<>=]|instanceof\b|in\b)/;
 
   // ── Constructor ────────────────────────────────────────────────────────
 
@@ -62,6 +90,15 @@ class GasErrorLens {
    */
   constructor() {
     this._enabled = false;
+    /** Intención de estar activo (cubre el reintento mientras carga Monaco). */
+    this._wantEnabled = false;
+    this._enableRetryTimer = 0;
+    /** Reglas regex personalizadas (opt-in). */
+    this._customRulesEnabled = false;
+
+    /** URIs pendientes de re-render tras `onDidChangeMarkers`. */
+    this._pendingMarkerUris = new Set();
+    this._markersTimer = 0;
 
     /** @type {Map<string, {timer:number, dispose:Function}>} */
     this._modelHooks = new Map();
@@ -79,53 +116,54 @@ class GasErrorLens {
     /** Editores trackeados. @type {Set<object>} */
     this._editors = new Set();
 
-    // Trusted Types bloquea `new Function`. Si el host lo aplica,
-    // desactivamos el parser nativo de entrada (regex sigue activo).
-    this._syntaxParserAvailable =
-      (typeof window !== 'undefined' && window.trustedTypes) ? false : null;
+    /** Regex combinada de reasignación de const, cacheada por set de nombres. */
+    this._constRegexCache = { key: '', re: null };
   }
 
   // ── Ciclo de vida ──────────────────────────────────────────────────────
 
   /**
-   * Activa el linter, las decoraciones y el overlay. Si Monaco aún no
-   * está cargado, reintenta en 500 ms. Es idempotente: llamadas
-   * sucesivas no duplican listeners ni decoraciones.
+   * Activa el renderer de diagnósticos (y las reglas personalizadas si
+   * están habilitadas). Si Monaco aún no está cargado, reintenta en
+   * 500 ms. Es idempotente: no duplica listeners ni decoraciones.
    */
   enable() {
+    this._wantEnabled = true;
     if (this._enabled) return;
     if (!window.monaco?.editor) {
-      setTimeout(() => this.enable(), 500);
+      clearTimeout(this._enableRetryTimer);
+      this._enableRetryTimer = setTimeout(() => {
+        if (this._wantEnabled) this.enable();
+      }, 500);
       return;
     }
     this._enabled = true;
     this._injectStyles_();
 
-    this._markersDisposable = monaco.editor.onDidChangeMarkers((uris) => {
-      uris.forEach((uri) => this._refreshDecorationsForUri_(uri));
-      this._refreshAllOverlays_();
-    });
+    this._markersDisposable = monaco.editor.onDidChangeMarkers((uris) => this._onMarkersChanged_(uris));
     this._disposeModelDisposable = monaco.editor.onWillDisposeModel((m) => {
       this._decorationIds.delete(String(m.uri));
+      this._detachLinter_(m);
     });
-
-    monaco.editor.getModels().forEach((m) => this._attachLinter_(m));
-    this._createDisposable = monaco.editor.onDidCreateModel((m) => this._attachLinter_(m));
-    this._removeDisposable = monaco.editor.onWillDisposeModel((m) => this._detachLinter_(m));
+    this._createDisposable = monaco.editor.onDidCreateModel((m) => {
+      if (this._customRulesEnabled) this._attachLinter_(m);
+    });
 
     this._editorCreateDisposable = monaco.editor.onDidCreateEditor((ed) => this._attachEditor_(ed));
     if (window.jsWireMonacoEditor) this._attachEditor_(window.jsWireMonacoEditor);
 
-    monaco.editor.getModels().forEach((m) => this._refreshDecorationsForUri_(m.uri));
-    this._refreshAllOverlays_();
+    if (this._customRulesEnabled) this._startCustomRules_();
+    this._refreshActiveModels_();
+    this._debug_('enabled', { customRules: this._customRulesEnabled });
   }
 
   /**
-   * Desactiva el linter, libera todas las decoraciones, widgets y
-   * listeners. Limpia el `<style>` inyectado solo si nadie más lo está
-   * usando. Es idempotente.
+   * Desactiva la lens: libera decoraciones, widgets, listeners y los
+   * markers publicados por las reglas personalizadas. Es idempotente.
    */
   disable() {
+    this._wantEnabled = false;
+    clearTimeout(this._enableRetryTimer);
     if (!this._enabled) return;
     this._enabled = false;
 
@@ -142,13 +180,10 @@ class GasErrorLens {
     this._removeDisposable = null;
     this._editorCreateDisposable = null;
 
-    this._modelHooks.forEach((hook, uriStr) => {
-      clearTimeout(hook.timer);
-      hook.dispose?.();
-      const m = monaco.editor.getModels().find((x) => String(x.uri) === uriStr);
-      if (m) monaco.editor.setModelMarkers(m, GasErrorLens.MARKER_SOURCE, []);
-    });
-    this._modelHooks.clear();
+    clearTimeout(this._markersTimer);
+    this._pendingMarkerUris.clear();
+
+    this._stopCustomRules_();
 
     this._decorationIds.forEach((ids, uriStr) => {
       const m = monaco.editor.getModels().find((x) => String(x.uri) === uriStr);
@@ -160,6 +195,158 @@ class GasErrorLens {
     this._editors.clear();
 
     document.getElementById(GasErrorLens.STYLE_ID)?.remove();
+    this._debug_('disabled');
+  }
+
+  /**
+   * Activa o desactiva las reglas regex personalizadas. Seguro de llamar
+   * antes o después de `enable()`: si la lens no está activa solo guarda
+   * la preferencia. Al desactivar limpia los markers del owner propio.
+   * @param {boolean} enabled
+   */
+  setCustomRulesEnabled(enabled) {
+    const next = enabled === true;
+    if (next === this._customRulesEnabled) return;
+    this._customRulesEnabled = next;
+    this._debug_('custom rules', next ? 'on' : 'off');
+    if (!this._enabled || !window.monaco?.editor) return;
+    if (next) this._startCustomRules_();
+    else      this._stopCustomRules_();
+  }
+
+  /** @returns {boolean} Si las reglas personalizadas están activas. */
+  isCustomRulesEnabled() {
+    return this._customRulesEnabled;
+  }
+
+  /**
+   * Lintea texto plano con las reglas personalizadas y devuelve los
+   * markers (no publica nada en Monaco). Útil para tests.
+   * @param {string} text
+   * @returns {Array<object>}
+   */
+  lintText(text) {
+    const markers = [];
+    this._lintLines_(String(text ?? '').split(/\r?\n/), markers);
+    return markers;
+  }
+
+  // ── Selección de markers (pura) ────────────────────────────────────────
+
+  /**
+   * Elimina markers repetidos (mismo rango y mensaje), típico cuando
+   * varios owners reportan el mismo diagnóstico.
+   * @param {Array<object>} markers
+   * @returns {Array<object>}
+   */
+  static dedupeMarkers(markers) {
+    const seen = new Set();
+    const out = [];
+    for (const m of markers || []) {
+      if (!m) continue;
+      const key = [
+        m.startLineNumber, m.startColumn, m.endLineNumber, m.endColumn,
+        GasErrorLens.cleanMessage(m.message),
+      ].join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(m);
+    }
+    return out;
+  }
+
+  /**
+   * Escoge un marker por línea para el mensaje inline: el de mayor
+   * severidad (empate → el primero). Filtra por severidad mínima.
+   * Devuelve el resultado ordenado por línea.
+   * @param {Array<object>} markers
+   * @param {number} [minSeverity]
+   * @returns {Array<object>}
+   */
+  static selectInlineMarkers(markers, minSeverity = GasErrorLens.MIN_SEVERITY) {
+    const byLine = new Map();
+    for (const m of markers || []) {
+      if (!m || (m.severity ?? 0) < minSeverity) continue;
+      const cur = byLine.get(m.startLineNumber);
+      if (!cur || (m.severity ?? 0) > (cur.severity ?? 0)) byLine.set(m.startLineNumber, m);
+    }
+    return Array.from(byLine.values()).sort((a, b) => a.startLineNumber - b.startLineNumber);
+  }
+
+  /** Colapsa whitespace y recorta puntos finales. */
+  static cleanMessage(message) {
+    return String(message || '').replace(/\s+/g, ' ').replace(/\.+\s*$/, '').trim();
+  }
+
+  // ── Renderer: reacción a cambios de markers ────────────────────────────
+
+  /**
+   * Acumula las URIs cambiadas y re-renderiza con debounce, solo para
+   * los modelos activos en algún editor trackeado.
+   * @param {Array<object>} uris
+   * @private
+   */
+  _onMarkersChanged_(uris) {
+    const active = this._activeModelUris_();
+    (uris || []).forEach((uri) => {
+      const uriStr = String(uri);
+      if (active.has(uriStr)) this._pendingMarkerUris.add(uriStr);
+    });
+    if (!this._pendingMarkerUris.size) return;
+    clearTimeout(this._markersTimer);
+    this._markersTimer = setTimeout(() => {
+      this._markersTimer = 0;
+      if (!this._enabled) return;
+      const pending = Array.from(this._pendingMarkerUris);
+      this._pendingMarkerUris.clear();
+      pending.forEach((uriStr) => this._refreshDecorationsForUri_(uriStr));
+      this._refreshAllOverlays_();
+    }, GasErrorLens.MARKERS_DEBOUNCE_MS);
+  }
+
+  /** URIs (string) de los modelos activos en editores trackeados. @private */
+  _activeModelUris_() {
+    const set = new Set();
+    this._editors.forEach((ed) => {
+      const model = ed.getModel?.();
+      if (model) set.add(String(model.uri));
+    });
+    return set;
+  }
+
+  /** Refresca decoraciones y overlays de los modelos activos. @private */
+  _refreshActiveModels_() {
+    this._activeModelUris_().forEach((uriStr) => this._refreshDecorationsForUri_(uriStr));
+    this._refreshAllOverlays_();
+  }
+
+  // ── Reglas personalizadas: arranque / parada ───────────────────────────
+
+  /** Engancha el linter a todos los modelos existentes. @private */
+  _startCustomRules_() {
+    monaco.editor.getModels().forEach((m) => this._attachLinter_(m));
+  }
+
+  /** Desengancha el linter y limpia los markers propios. @private */
+  _stopCustomRules_() {
+    if (!window.monaco?.editor) {
+      this._modelHooks.clear();
+      return;
+    }
+    this._modelHooks.forEach((hook, uriStr) => {
+      clearTimeout(hook.timer);
+      hook.dispose?.();
+      const m = monaco.editor.getModels().find((x) => String(x.uri) === uriStr);
+      if (m) monaco.editor.setModelMarkers(m, GasErrorLens.MARKER_SOURCE, []);
+    });
+    this._modelHooks.clear();
+  }
+
+  /** Log de estado vía `DomUtils.debug` si existe. @private */
+  _debug_(...args) {
+    if (typeof DomUtils !== 'undefined' && typeof DomUtils.debug === 'function') {
+      DomUtils.debug('ErrorLens', ...args);
+    }
   }
 
   // ── Linter: enganche por modelo ────────────────────────────────────────
@@ -170,6 +357,9 @@ class GasErrorLens {
    * @private
    */
   _attachLinter_(model) {
+    if (!this._enabled || !this._customRulesEnabled) return;
+    // Modelos temporales de la vista previa de cambios: nunca se lintean.
+    if (model?.uri?.scheme === 'gas-preview' || model?.uri?.scheme === 'gas-ghdiff') return;
     const lang = model.getLanguageId?.();
     if (!GasErrorLens.LANGUAGES.has(lang)) return;
     const uriStr = String(model.uri);
@@ -207,7 +397,8 @@ class GasErrorLens {
    * @private
    */
   _lintModel_(model) {
-    if (!this._enabled) return;
+    if (!this._enabled || !this._customRulesEnabled) return;
+    if (model.isDisposed?.()) return;
     if (!GasErrorLens.LANGUAGES.has(model.getLanguageId?.())) return;
     /** @type {Array<object>} */
     const markers = [];
@@ -238,26 +429,45 @@ class GasErrorLens {
   // ── Linter JS ──────────────────────────────────────────────────────────
 
   /**
-   * Lint completo: una pasada por línea con tokenización ligera y un
-   * parse global con `new Function` cuando el runtime lo permite.
+   * Lint completo en dos pasadas: primero se "limpian" todas las líneas
+   * (sin strings, comentarios ni regex) y luego se aplican las reglas.
    * @param {object} model
    * @param {Array}  markers
    * @private
    */
   _lintJs_(model, markers) {
-    const fullText = model.getValue();
-    const constNames = this._collectConstNames_(fullText);
     const lineCount = model.getLineCount();
+    const rawLines = new Array(lineCount);
+    for (let i = 0; i < lineCount; i++) rawLines[i] = model.getLineContent(i + 1);
+    this._lintLines_(rawLines, markers);
+  }
+
+  /**
+   * Núcleo del linter sobre un array de líneas (sin dependencia de Monaco).
+   * @param {string[]} rawLines Texto original por línea (índice 0 = línea 1).
+   * @param {Array}    markers
+   * @private
+   */
+  _lintLines_(rawLines, markers) {
+    const lineCount = rawLines.length;
+    /** @type {string[]} Texto sin strings/comentarios/regex por línea. */
+    const bareLines = new Array(lineCount);
+    let stripState = { inBlockComment: false, inTemplate: false };
+    for (let i = 0; i < lineCount; i++) {
+      const result = this._stripCodeFromLine_(rawLines[i], stripState);
+      stripState = { inBlockComment: result.inBlockComment, inTemplate: result.inTemplate };
+      bareLines[i] = result.bare;
+    }
+
+    const constRe = this._getConstReassignRegex_(this._collectConstNames_(bareLines.join('\n')));
     const counts = { '{': 0, '(': 0, '[': 0 };
     /** @type {Array<{ch:string, line:number, col:number}>} */
     const stack = [];
-    let stripState = { inBlockComment: false, inTemplate: false };
     let scanState  = { inBlockComment: false, inTemplate: false };
 
     for (let line = 1; line <= lineCount; line++) {
-      const text = model.getLineContent(line);
-      const result = this._stripCodeFromLine_(text, stripState);
-      stripState = { inBlockComment: result.inBlockComment, inTemplate: result.inTemplate };
+      const text = rawLines[line - 1];
+      const result = { bare: bareLines[line - 1] };
 
       // Contexto al INICIO de la línea. Si el tope del stack es:
       //  - `{` de bloque (función, if, while, ...) → SÍ se marca falta de `;`.
@@ -278,13 +488,16 @@ class GasErrorLens {
       this._checkLooseEquality_(result.bare, line, markers);
       this._checkReservedAsIdentifier_(result.bare, line, markers);
       this._checkEmptyBlock_(result.bare, line, markers);
-      this._checkConstReassignment_(result.bare, line, markers, constNames);
+      this._checkConstReassignment_(result.bare, line, markers, constRe);
       this._checkDuplicateParams_(result.bare, line, markers);
       this._checkEmptyCatch_(result.bare, line, markers);
       this._checkUnreachableCode_(result.bare, line, markers);
       this._checkTypeofVsUndefined_(result.bare, line, markers);
       this._checkNaNComparison_(result.bare, line, markers);
-      this._checkMissingSemicolon_(result.bare, line, markers, { insideExpression });
+      this._checkMissingSemicolon_(result.bare, line, markers, {
+        insideExpression,
+        nextBare: this._nextNonEmptyLine_(bareLines, line),
+      });
     }
 
     while (stack.length) {
@@ -297,23 +510,39 @@ class GasErrorLens {
         code: 'unclosed-bracket',
       });
     }
+  }
 
-    this._runSyntaxParser_(fullText, model, markers);
+  /**
+   * Devuelve la siguiente línea "limpia" no vacía (sin espacios iniciales)
+   * tras `line`, o `''` si no hay más.
+   * @param {string[]} bareLines
+   * @param {number} line Línea actual (1-based).
+   * @returns {string}
+   * @private
+   */
+  _nextNonEmptyLine_(bareLines, line) {
+    for (let i = line; i < bareLines.length; i++) {
+      const t = bareLines[i].trim();
+      if (t) return t;
+    }
+    return '';
   }
 
   /**
    * Recoge nombres declarados con `const` (incluye destructuring básico).
-   * @param {string} text
+   * Recibe el texto ya limpio de comentarios, strings, plantillas y
+   * regex literals para no capturar `const` dentro de ellos.
+   * @param {string} bareText
    * @returns {Set<string>}
    * @private
    */
-  _collectConstNames_(text) {
+  _collectConstNames_(bareText) {
     const names = new Set();
     const reSimple = /\bconst\s+([A-Za-z_$][\w$]*)/g;
     const reDestr  = /\bconst\s*\{([^}]*)\}/g;
     let m;
-    while ((m = reSimple.exec(text)) !== null) names.add(m[1]);
-    while ((m = reDestr.exec(text)) !== null) {
+    while ((m = reSimple.exec(bareText)) !== null) names.add(m[1]);
+    while ((m = reDestr.exec(bareText)) !== null) {
       m[1].split(',').forEach((part) => {
         const name = part.split(':').pop().trim().replace(/=.*$/, '').trim();
         if (/^[A-Za-z_$][\w$]*$/.test(name)) names.add(name);
@@ -323,75 +552,27 @@ class GasErrorLens {
   }
 
   /**
-   * Parser nativo. Si Trusted Types o CSP bloquea `new Function`, se
-   * desactiva permanentemente para no spamear la consola.
-   * @param {string} text
-   * @param {object} model
-   * @param {Array}  markers
+   * Construye (o reutiliza del caché) una única regex combinada para
+   * detectar reasignaciones de cualquiera de los nombres `const`.
+   * @param {Set<string>} constNames
+   * @returns {RegExp|null}
    * @private
    */
-  _runSyntaxParser_(text, model, markers) {
-    if (this._syntaxParserAvailable === false) return;
-    let err = null;
-    try {
-      // eslint-disable-next-line no-new-func
-      new Function(text);
-      this._syntaxParserAvailable = true;
-    } catch (e) {
-      err = e;
-      if (this._isParserBlockedByCsp_(e)) {
-        this._syntaxParserAvailable = false;
-        return;
-      }
-      this._syntaxParserAvailable = true;
+  _getConstReassignRegex_(constNames) {
+    if (!constNames.size) return null;
+    // Más largos primero para que la alternancia no corte prefijos.
+    const sorted = Array.from(constNames).sort((a, b) => b.length - a.length || (a < b ? -1 : 1));
+    const key = sorted.join(',');
+    if (this._constRegexCache.key === key && this._constRegexCache.re) {
+      return this._constRegexCache.re;
     }
-    if (!err || !(err instanceof SyntaxError)) return;
-    const info = this._parseSyntaxError_(err, model);
-    if (!info) return;
-    const dup = markers.find(
-      (m) => m.startLineNumber === info.line && Math.abs(m.startColumn - info.col) <= 1
+    const alternation = sorted.map((n) => this._escapeRegex_(n)).join('|');
+    const re = new RegExp(
+      String.raw`(^|[^.\w$?])(${alternation})\s*${GasErrorLens.ASSIGN_OPS_SOURCE}`,
+      'g'
     );
-    if (dup) return;
-    this._addMarker_(markers, {
-      line: info.line, col: info.col, length: 1,
-      message: `Syntax error: ${info.message}`,
-      severity: GasErrorLens.SEVERITY.Error,
-      code: 'syntax-error',
-    });
-  }
-
-  /**
-   * Extrae línea/col del `SyntaxError`. `new Function` agrega 2 líneas
-   * de envoltura, así que las restamos.
-   * @param {SyntaxError} err
-   * @param {object} model
-   * @returns {{line:number, col:number, message:string}|null}
-   * @private
-   */
-  _parseSyntaxError_(err, model) {
-    const message = String(err.message || 'Invalid syntax').replace(/\s+/g, ' ').trim();
-    const stack = String(err.stack || '');
-    const m = stack.match(/<anonymous>:(\d+):(\d+)/) || stack.match(/at .+:(\d+):(\d+)/);
-    if (m) {
-      const line = Math.max(1, Math.min(model.getLineCount(), parseInt(m[1], 10) - 2));
-      const col  = Math.max(1, parseInt(m[2], 10));
-      return { line, col, message };
-    }
-    return { line: 1, col: 1, message };
-  }
-
-  /**
-   * Detecta si un error proviene de Trusted Types u otra política CSP.
-   * @param {*} err
-   * @returns {boolean}
-   * @private
-   */
-  _isParserBlockedByCsp_(err) {
-    if (!err) return false;
-    const msg = String(err.message || err);
-    if (/TrustedScript|requires 'TrustedScript'|trusted-types/i.test(msg)) return true;
-    if (err.name === 'EvalError' && /CSP|Content Security Policy/i.test(msg)) return true;
-    return false;
+    this._constRegexCache = { key, re };
+    return re;
   }
 
   // ── Stripping y scanner estructural ────────────────────────────────────
@@ -744,44 +925,40 @@ class GasErrorLens {
    * Reasignación de constante a nivel de archivo (sin scope). Excluye
    * accesos a propiedad (`.PI`, `?.PI`), propiedades en objetos
    * literales (`{ PI: 3 }`) y patrones de destructuring (`const { a = 5 }`).
-   * @param {Set<string>} constNames
+   * @param {RegExp|null} re Regex combinada de `_getConstReassignRegex_`.
    * @private
    */
-  _checkConstReassignment_(bare, line, out, constNames) {
-    if (!constNames.size) return;
+  _checkConstReassignment_(bare, line, out, re) {
+    if (!re) return;
     // Si la línea declara destructuring (`const {...}` o `const [...]`),
     // saltamos toda la línea: los `name = default` son valores por defecto.
     if (/\b(const|let|var)\s*[{[]/.test(bare)) return;
-    for (const name of constNames) {
-      const re = new RegExp(
-        `(^|[^.\\w$?])(${this._escapeRegex_(name)})\\s*(?:=|\\+=|-=|\\*=|/=|%=|\\*\\*=|<<=|>>=|>>>=|&=|\\|=|\\^=|&&=|\\|\\|=|\\?\\?=|\\+\\+|--)`,
-        'g'
-      );
-      let m;
-      while ((m = re.exec(bare)) !== null) {
-        // Saltar la propia declaración: `const NAME = ...` o `let NAME = ...`.
-        const upTo = bare.slice(0, m.index + (m[1] ? m[1].length : 0));
-        if (/\b(const|let|var)\s+$/.test(upTo)) continue;
-        // Saltar propiedad (después de `:` o `?`).
-        const before = m[1];
-        if (before === ':' || before === '?') continue;
-        // Saltar `==`, `===` y `=>` (arrow): nuestra regex usa `=` simple
-        // como ancla de asignación.
-        const after = bare.slice(m.index + m[0].length, m.index + m[0].length + 1);
-        if (m[0].endsWith('=') && (after === '=' || after === '>')) continue;
-        // Saltar parámetros de arrow function: `(NAME)` o `NAME` justo
-        // antes de `=>` no son asignaciones aunque la regex los matchee
-        // porque tras el nombre puede venir `=>` con espacios intermedios.
-        const restAfter = bare.slice(m.index + m[1].length + name.length).trimStart();
-        if (restAfter.startsWith('=>')) continue;
-        const col = m.index + (m[1] ? m[1].length : 0) + 1;
-        this._addMarker_(out, {
-          line, col, length: name.length,
-          message: `Cannot reassign constant '${name}'`,
-          severity: GasErrorLens.SEVERITY.Error,
-          code: 'const-reassignment',
-        });
-      }
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(bare)) !== null) {
+      const name = m[2];
+      // Saltar la propia declaración: `const NAME = ...` o `let NAME = ...`.
+      const upTo = bare.slice(0, m.index + (m[1] ? m[1].length : 0));
+      if (/\b(const|let|var)\s+$/.test(upTo)) continue;
+      // Saltar propiedad (después de `:` o `?`).
+      const before = m[1];
+      if (before === ':' || before === '?') continue;
+      // Saltar `==`, `===` y `=>` (arrow): nuestra regex usa `=` simple
+      // como ancla de asignación.
+      const after = bare.slice(m.index + m[0].length, m.index + m[0].length + 1);
+      if (m[0].endsWith('=') && (after === '=' || after === '>')) continue;
+      // Saltar parámetros de arrow function: `(NAME)` o `NAME` justo
+      // antes de `=>` no son asignaciones aunque la regex los matchee
+      // porque tras el nombre puede venir `=>` con espacios intermedios.
+      const restAfter = bare.slice(m.index + m[1].length + name.length).trimStart();
+      if (restAfter.startsWith('=>')) continue;
+      const col = m.index + (m[1] ? m[1].length : 0) + 1;
+      this._addMarker_(out, {
+        line, col, length: name.length,
+        message: `Cannot reassign constant '${name}'`,
+        severity: GasErrorLens.SEVERITY.Error,
+        code: 'const-reassignment',
+      });
     }
   }
 
@@ -824,19 +1001,27 @@ class GasErrorLens {
 
   /**
    * Código inalcanzable inmediatamente después de `return`/`throw`/`break`/
-   * `continue`. Solo marca cuando hay otra sentencia ejecutable después
-   * en la misma línea (no comentarios ni cierre de bloque).
+   * `continue`. Solo marca cuando la sentencia es independiente en su
+   * bloque (inicio de línea, tras `;` o tras `{`), no cuando depende de
+   * `if (...)`, `else`, `for (...)` o una etiqueta `case ...:` en la misma
+   * línea, y solo si lo que sigue no es cierre de bloque ni otro `case`.
    * @private
    */
   _checkUnreachableCode_(bare, line, out) {
     const re = /\b(return|throw|break|continue)\b[^;]*;/g;
     let m;
     while ((m = re.exec(bare)) !== null) {
+      // Debe ser sentencia independiente: nada antes, o tras `;` / `{`.
+      const before = bare.slice(0, m.index).trimEnd();
+      if (before && !/[;{]$/.test(before)) continue;
+      // `return function () { a(); b(); }` → el `;` cae dentro de llaves:
+      // la sentencia no terminó ahí.
+      if (!this._bracketsBalanced_(m[0])) continue;
       const after = bare.slice(m.index + m[0].length).trim();
-      // Permitidos: nada, cierre de bloque/expresión, comentarios.
+      // Permitidos: nada, cierre de bloque/expresión, nueva etiqueta.
       if (!after) continue;
       if (/^[)\]}]/.test(after)) continue;
-      if (after.startsWith('//') || after.startsWith('/*')) continue;
+      if (/^(case\b|default\s*:)/.test(after)) continue;
       const col = m.index + m[0].length + 1;
       this._addMarker_(out, {
         line, col, length: Math.min(20, after.length),
@@ -898,11 +1083,15 @@ class GasErrorLens {
    * @param {string} bare
    * @param {number} line
    * @param {Array}  out
-   * @param {{insideExpression:boolean}} ctx Contexto al inicio de la línea.
+   * También descarta la línea si la siguiente línea no vacía continúa la
+   * expresión (`.method()`, `?.x`, `+ y`, `&& z`, `, w`, `)` ...).
+   *
+   * @param {{insideExpression:boolean, nextBare?:string}} ctx Contexto al inicio de la línea.
    * @private
    */
   _checkMissingSemicolon_(bare, line, out, ctx) {
     if (ctx && ctx.insideExpression) return;
+    if (ctx?.nextBare && GasErrorLens.CONTINUATION_START_RE.test(ctx.nextBare)) return;
 
     const trimmed = bare.replace(/\s+$/, '');
     if (!trimmed || !trimmed.trim()) return;
@@ -995,7 +1184,8 @@ class GasErrorLens {
       this._decorationIds.delete(uriStr);
       return;
     }
-    const filtered = this._filterMarkers_(monaco.editor.getModelMarkers({ resource: uri }) || []);
+    const all      = monaco.editor.getModelMarkers({ resource: model.uri }) || [];
+    const filtered = GasErrorLens.dedupeMarkers(this._filterMarkers_(all));
     const decors   = filtered.map((m) => this._buildInlineDecoration_(m));
     const oldIds   = this._decorationIds.get(uriStr) || [];
     const newIds   = model.deltaDecorations(oldIds, decors);
@@ -1009,14 +1199,7 @@ class GasErrorLens {
 
   /** Devuelve un solo marker por línea, el de mayor severidad. @private */
   _dedupePerLine_(markers) {
-    const byLine = new Map();
-    for (const m of markers) {
-      const cur = byLine.get(m.startLineNumber);
-      if (!cur || GasErrorLens.SEVERITY_RANK[m.severity] < GasErrorLens.SEVERITY_RANK[cur.severity]) {
-        byLine.set(m.startLineNumber, m);
-      }
-    }
-    return Array.from(byLine.values());
+    return GasErrorLens.selectInlineMarkers(markers, 0);
   }
 
   /** Decoración con subrayado y acento de canaleta. @private */
@@ -1059,14 +1242,33 @@ class GasErrorLens {
    */
   _attachEditor_(editor) {
     if (!editor || this._editorOverlays.has(editor)) return;
+    // Editores internos del visor del diff de GitHub (modelos gas-ghdiff:): no son del proyecto.
+    if (editor.getContainerDomNode?.()?.closest?.('.qc__dv-editor')) return;
     /** @type {Map<string, object>} */
     const widgets = new Map();
+    // Contenido y layout cambian en ráfagas (keystrokes, resize): el
+    // overlay se reconcilia con debounce. Los markers nuevos ya disparan
+    // `_refreshAllOverlays_` desde `onDidChangeMarkers`.
+    const scheduleRender = DomUtils.debounce(
+      () => this._renderOverlay_(editor),
+      GasErrorLens.OVERLAY_DEBOUNCE_MS
+    );
     const subs = [
-      editor.onDidChangeModel(() => this._renderOverlay_(editor)),
-      editor.onDidChangeModelContent(() => this._renderOverlay_(editor)),
-      editor.onDidLayoutChange(() => this._renderOverlay_(editor)),
+      editor.onDidChangeModel(() => {
+        scheduleRender.cancel();
+        // Solo se decoran modelos activos: al cambiar de archivo se refresca el nuevo.
+        const model = editor.getModel?.();
+        if (model) this._refreshDecorationsForUri_(model.uri);
+        this._renderOverlay_(editor);
+      }),
+      editor.onDidChangeModelContent(scheduleRender),
+      editor.onDidLayoutChange(scheduleRender),
+      editor.onDidDispose?.(() => {
+        this._detachEditor_(editor);
+        this._editors.delete(editor);
+      }),
     ];
-    this._editorOverlays.set(editor, { widgets, subs });
+    this._editorOverlays.set(editor, { widgets, subs, scheduleRender });
     this._editors.add(editor);
     this._renderOverlay_(editor);
   }
@@ -1075,8 +1277,11 @@ class GasErrorLens {
   _detachEditor_(editor) {
     const state = this._editorOverlays.get(editor);
     if (!state) return;
+    state.scheduleRender?.cancel();
     state.subs.forEach((s) => s?.dispose?.());
-    state.widgets.forEach((w) => editor.removeContentWidget(w));
+    state.widgets.forEach((w) => {
+      try { editor.removeContentWidget(w); } catch (_) { /* editor ya liberado */ }
+    });
     state.widgets.clear();
     this._editorOverlays.delete(editor);
   }
@@ -1101,8 +1306,8 @@ class GasErrorLens {
       return;
     }
 
-    const filtered = this._filterMarkers_(monaco.editor.getModelMarkers({ resource: model.uri }) || []);
-    const perLine  = this._dedupePerLine_(filtered);
+    const all     = monaco.editor.getModelMarkers({ resource: model.uri }) || [];
+    const perLine = GasErrorLens.selectInlineMarkers(all);
     /** @type {Map<string, object>} */
     const desired = new Map();
     for (const m of perLine) desired.set(`qc-gel-${m.startLineNumber}`, m);
@@ -1154,7 +1359,7 @@ class GasErrorLens {
 
   /** Colapsa whitespace y recorta puntos finales. @private */
   _cleanMessage_(message) {
-    return String(message || '').replace(/\s+/g, ' ').replace(/\.+\s*$/, '').trim();
+    return GasErrorLens.cleanMessage(message);
   }
 
   /** Trunca el mensaje para preservar el layout. @private */
@@ -1171,6 +1376,13 @@ class GasErrorLens {
     const style = document.createElement('style');
     style.id = GasErrorLens.STYLE_ID;
     style.textContent = `
+      /* Colores del tema activo de Monaco (--vscode-*) con fallback. */
+      .monaco-editor {
+        --qc-gel-error: var(--vscode-editorError-foreground, #e06c75);
+        --qc-gel-warning: var(--vscode-editorWarning-foreground, #d19a66);
+        --qc-gel-info: var(--vscode-editorInfo-foreground, #61afef);
+        --qc-gel-hint: var(--vscode-editorHint-foreground, #98c379);
+      }
       .qc__gel-msg {
         font-family: var(--monaco-monospace-font, monospace);
         font-size: 12px;
@@ -1180,13 +1392,12 @@ class GasErrorLens {
         margin-left: 16px;
         pointer-events: none;
         white-space: nowrap;
-        opacity: 0.9;
         user-select: none;
       }
-      .qc__gel-msg-error    { color: #e06c75; }
-      .qc__gel-msg-warning  { color: #d19a66; }
-      .qc__gel-msg-info     { color: #61afef; }
-      .qc__gel-msg-hint     { color: #98c379; }
+      .qc__gel-msg-error    { color: var(--qc-gel-error); }
+      .qc__gel-msg-warning  { color: var(--qc-gel-warning); }
+      .qc__gel-msg-info     { color: var(--qc-gel-info); }
+      .qc__gel-msg-hint     { color: var(--qc-gel-hint); }
 
       .qc__gel-inline {
         text-decoration-line: underline;
@@ -1194,16 +1405,20 @@ class GasErrorLens {
         text-decoration-skip-ink: none;
         text-underline-offset: 3px;
       }
-      .qc__gel-inline-error    { text-decoration-color: rgba(224,108,117,.85); }
-      .qc__gel-inline-warning  { text-decoration-color: rgba(209,154,102,.85); }
-      .qc__gel-inline-info     { text-decoration-color: rgba(97,175,239,.85); }
-      .qc__gel-inline-hint     { text-decoration-color: rgba(152,195,121,.85); }
+      .qc__gel-inline-error    { text-decoration-color: color-mix(in srgb, var(--qc-gel-error) 85%, transparent); }
+      .qc__gel-inline-warning  { text-decoration-color: color-mix(in srgb, var(--qc-gel-warning) 85%, transparent); }
+      .qc__gel-inline-info     { text-decoration-color: color-mix(in srgb, var(--qc-gel-info) 85%, transparent); }
+      .qc__gel-inline-hint     { text-decoration-color: color-mix(in srgb, var(--qc-gel-hint) 85%, transparent); }
 
       .qc__gel-gutter { width: 3px !important; margin-left: 3px; }
-      .qc__gel-gutter-error    { background: #e06c75; }
-      .qc__gel-gutter-warning  { background: #d19a66; }
-      .qc__gel-gutter-info     { background: #61afef; }
-      .qc__gel-gutter-hint     { background: #98c379; }
+      .qc__gel-gutter-error    { background: var(--qc-gel-error); }
+      .qc__gel-gutter-warning  { background: var(--qc-gel-warning); }
+      .qc__gel-gutter-info     { background: var(--qc-gel-info); }
+      .qc__gel-gutter-hint     { background: var(--qc-gel-hint); }
+
+      /* Modo oscuro: Monaco va invertido; hue-rotate recupera el tono semántico. */
+      body.qc__is-dark-mode .qc__gel-msg,
+      body.qc__is-dark-mode .qc__gel-gutter { filter: hue-rotate(180deg); }
     `;
     document.head.appendChild(style);
   }
@@ -1216,6 +1431,9 @@ class GasErrorLens {
 (() => {
   const errorLens = new GasErrorLens();
   let initialConfigApplied = false;
+  // Pausa global propia: los deltas no deben reactivar el servicio en pausa.
+  let paused = false;
+  const isPaused_ = () => paused || window.__gasGloballyDisabled === true;
 
   const applyToggle = (enabled) => {
     if (enabled) errorLens.enable();
@@ -1228,17 +1446,30 @@ class GasErrorLens {
     try {
       const data     = JSON.parse(e.detail);
       const settings = data.settings || {};
-      applyToggle(settings['gas-error-lens'] !== false);
+      if (settings['global-enable'] === false) paused = true;
+      errorLens.setCustomRulesEnabled(settings['gas-error-lens-custom-rules'] === true);
+      applyToggle(!paused && settings['gas-error-lens'] !== false);
     } catch (_) { /* payload inválido */ }
   });
 
   document.addEventListener('GAS_SettingsUpdated', (e) => {
     try {
       const options = JSON.parse(e.detail);
+      if ('global-enable' in options) {
+        paused = !options['global-enable'];
+        if (paused) { applyToggle(false); return; }
+      } else if (isPaused_()) {
+        return;
+      }
+      if ('gas-error-lens-custom-rules' in options) {
+        errorLens.setCustomRulesEnabled(options['gas-error-lens-custom-rules'] === true);
+      }
       if ('gas-error-lens' in options) applyToggle(!!options['gas-error-lens']);
-      if ('global-enable' in options && !options['global-enable']) applyToggle(false);
     } catch (_) { /* payload inválido */ }
   });
+
+  document.addEventListener('GAS_GlobalDisable', () => { paused = true; applyToggle(false); });
+  document.addEventListener('GAS_GlobalEnable',  () => { paused = false; });
 
   window.gasErrorLens = errorLens;
 })();

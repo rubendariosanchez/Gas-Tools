@@ -1,9 +1,10 @@
 {
-  "name": "Google Apps Script Tools",
-  "version": "0.0.3",
+  "name": "__MSG_extName__",
+  "version": "0.1.0",
   "manifest_version": 3,
+  "default_locale": "en",
   "author": "Rubén Sánchez",
-  "description": "Enhanced development environment for Google Apps Script with custom themes and tools.",
+  "description": "__MSG_extDescription__",
   "icons": {
     "16": "resources/icons/icon16.png",
     "48": "resources/icons/icon48.png",
@@ -20,6 +21,7 @@
         "https://script.google.com/u/*/home/projects/*/edit"
       ],
       "js": [
+        "extension/js/shared/llm-bridge.js",
         "extension/js/main-functions.js"
       ],
       "all_frames": false,
@@ -29,23 +31,43 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "extension/*.*",
-        "extension/js/*.*",
-        "extension/js/services/*.*",
-        "extension/js/components/*.*",
-        "extension/html/*.html",
-        "themes/*.json",
-        "src/vendor/codemirror/*",
-        "src/vendor/diff/*",
-        "src/vendor/diff2html/*"
+        "extension/html/chatButton.html",
+        "extension/html/currentFileButton.html",
+        "extension/html/actionsButton.html",
+        "extension/html/githubButton.html",
+        "extension/js/services/dom-utils.js",
+        "extension/js/shared/gas-ui.js",
+        "extension/js/services/gas-file-map.js",
+        "extension/js/services/gas-ai-autocomplete.js",
+        "extension/js/services/gas-folders.js",
+        "extension/js/services/gas-file-tabs.js",
+        "extension/js/services/gas-error-lens.js",
+        "extension/js/services/gas-native-search.js",
+        "src/vendor/diff/diff.min.js",
+        "extension/js/components/gas-current-file.js",
+        "extension/js/components/gas-actions-panel.js",
+        "extension/js/components/gas-github-panel-styles.js",
+        "extension/js/components/gas-github-panel-auth.js",
+        "extension/js/components/gas-github-panel-sync.js",
+        "extension/js/components/gas-github-panel-diff.js",
+        "extension/js/components/gas-github-panel-modals.js",
+        "extension/js/components/gas-github-panel-progress.js",
+        "extension/js/components/gas-github-panel.js",
+        "extension/js/shared/line-diff.js",
+        "extension/js/shared/edit-applier.js",
+        "extension/js/services/gas-diff-preview.js",
+        "extension/js/services/gas-diff-viewer.js",
+        "extension/js/gas-tools.js",
+        "extension/js/gas-tools-main.js"
       ],
       "matches": [
-        "<all_urls>"
-      ]
+        "https://script.google.com/*"
+      ],
+      "use_dynamic_url": true
     }
   ],
   "action": {
-    "default_title": "Google Apps Script Tools",
+    "default_title": "__MSG_actionTitle__",
     "default_popup": "src/html/index.html",
     "default_icon": {
       "16": "resources/icons/icon16.png",
@@ -57,9 +79,11 @@
       "https://script.google.com/u/*/home/projects/*/edit"
     ]
   },
+  "side_panel": {
+    "default_path": "extension/html/sidepanel.html"
+  },
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
-    "sandbox": "sandbox allow-scripts; script-src 'self' 'https://apis.google.com/' 'https://www.gstatic.com/' 'https://*.firebaseio.com' 'https://www.googleapis.com' 'https://ajax.googleapis.com'; object-src 'self'"
+    "extension_pages": "script-src 'self'; object-src 'self'"
   },
   "permissions": [
     "declarativeContent",
@@ -69,17 +93,8 @@
     "alarms"
   ],
   "host_permissions": [
-    "http://localhost:11434/*",
-    "http://localhost:1234/*",
-    "http://127.0.0.1:11434/*",
-    "http://127.0.0.1:1234/*",
     "https://script.google.com/*",
     "https://*.googleusercontent.com/*",
-    "https://api.openai.com/*",
-    "https://api.anthropic.com/*",
-    "https://generativelanguage.googleapis.com/*",
-    "https://apps.abacus.ai/*",
-    "https://integrate.api.nvidia.com/*",
     "https://api.github.com/*",
     "https://github.com/login/*",
     "https://script.googleapis.com/*",
@@ -87,8 +102,18 @@
     "https://oauth2.googleapis.com/*",
     "https://accounts.google.com/*"
   ],
+  "optional_host_permissions": [
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://openrouter.ai/*",
+    "https://apps.abacus.ai/*",
+    "https://integrate.api.nvidia.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
   "oauth2": {
-    "client_id": "1013353101079-ld3pd7p0q1qmarjekbmtvg53dedf09aq.apps.googleusercontent.com",
+    "client_id": "1013353101079-6hdb0u6ee0qqpv1h332tma9f6622etf9.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/script.projects",
       "https://www.googleapis.com/auth/userinfo.email",

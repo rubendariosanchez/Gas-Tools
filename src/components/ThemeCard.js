@@ -1,3 +1,7 @@
+import { tr } from '../js/utils/I18n.js';
+import { escapeHtml, safeColor } from '../js/utils/Html.js';
+import { icon } from '../js/utils/Icons.js';
+
 /**
  * Componente Web que representa una tarjeta de tema visual.
  * Muestra el nombre, tipo, paleta de colores y acciones dinámicas (duplicar/editar/borrar).
@@ -10,6 +14,8 @@ export class ThemeCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Hoja base de GasUi (clase .gt-icon de los SVG).
+    globalThis.GasUi?.adopt(this.shadowRoot);
   }
 
   /**
@@ -42,162 +48,125 @@ export class ThemeCard extends HTMLElement {
    * @private
    */
   render_() {
-    const name_ = this.getAttribute('name') || 'Theme';
-    const type_ = this.getAttribute('type') || 'vs-dark';
-    const colors_ = (this.getAttribute('colors') || '').split(',');
+    // Nombre escapado y colores validados (hex) antes de interpolarlos.
+    const name_ = escapeHtml(this.getAttribute('name') || 'Theme');
+    const colors_ = (this.getAttribute('colors') || '').split(',').map((c) => safeColor(c));
     const selected_ = this.hasAttribute('selected');
     const isProtected_ = this.hasAttribute('protected');
 
     this.shadowRoot.innerHTML = `
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0');
-        
         :host { display: block; }
-        
+
         .qc__card {
           position: relative;
-          border-radius: 10px;
-          border: 1px solid #333;
-          padding: 14px;
+          padding: var(--gt-space-3, 12px);
+          border: 2px solid transparent;
+          border-radius: var(--gt-shape-l, 16px);
+          background: var(--gt-surface, #ffffff);
+          box-shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 1px 3px 1px rgba(0, 0, 0, .03);
+          color: var(--gt-on-surface, #1f1f1f);
+          font-family: var(--gt-font-plain, Arial, sans-serif);
           cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-          background: #1e1e1e;
           user-select: none;
           overflow: hidden;
+          transition: background var(--gt-motion-duration, 150ms) var(--gt-motion-standard, ease),
+                      box-shadow var(--gt-motion-duration, 150ms) var(--gt-motion-standard, ease),
+                      transform var(--gt-motion-duration, 150ms) var(--gt-motion-standard, ease);
         }
-
-        .qc__card:hover {
-          background: #252526;
-          border-color: #444;
-          transform: translateY(-2px);
-        }
+        .qc__card:hover { box-shadow: var(--gt-elevation-2, 0 2px 6px rgba(0, 0, 0, .15)); transform: translateY(-1px); }
+        .qc__card:focus-visible { outline: 2px solid var(--gt-primary, #0b57d0); outline-offset: 2px; }
 
         .qc__card.selected {
-          border: 2px solid #4ade80;
-          padding: 13px;
-          background: rgba(74, 222, 128, 0.05);
+          border-color: var(--gt-primary, #0b57d0);
+          background: color-mix(in srgb, var(--gt-primary, #0b57d0) 6%, var(--gt-surface, #ffffff));
         }
 
         /* Menú de acciones flotante */
         .qc__actions {
-          position: absolute;
-          top: 8px;
-          right: 8px;
-          display: flex;
-          gap: 4px;
+          position: absolute; top: 6px; right: 6px; z-index: 10;
+          display: flex; gap: 2px;
           opacity: 0;
-          transition: opacity 0.2s ease;
-          z-index: 10;
+          transition: opacity var(--gt-motion-duration, 150ms) var(--gt-motion-standard, ease);
         }
-
-        .qc__card:hover .qc__actions {
-          opacity: 1;
-        }
+        .qc__card:hover .qc__actions,
+        .qc__card:focus-within .qc__actions { opacity: 1; }
+        .qc__card:hover .qc__check-mark { opacity: 0; }
 
         .qc__action-btn {
-          background: #333;
-          color: #fff;
-          border: none;
-          width: 26px;
-          height: 26px;
-          border-radius: 6px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          transition: background 0.2s;
+          display: flex; align-items: center; justify-content: center;
+          width: 26px; height: 26px; padding: 0; border: none; cursor: pointer;
+          border-radius: var(--gt-shape-full, 9999px);
+          background: var(--gt-surface, #ffffff);
+          color: var(--gt-on-surface-variant, #444746);
+          box-shadow: var(--gt-elevation-1, 0 1px 3px rgba(0, 0, 0, .2));
         }
+        .qc__action-btn:hover { color: var(--gt-primary, #0b57d0); }
+        .qc__action-btn.delete:hover { color: var(--gt-error, #b3261e); }
+        .qc__action-btn:focus-visible { outline: 2px solid var(--gt-primary, #0b57d0); }
 
-        .qc__action-btn:hover { background: #3b82f6; }
-        .qc__action-btn.delete:hover { background: #ef4444; }
-
-        .qc__header {
-          display: flex;
-          flex-direction: column;
-          margin-bottom: 10px;
-        }
-
+        .qc__header { display: flex; flex-direction: column; margin-bottom: var(--gt-space-2, 8px); }
         .qc__title {
-          font-size: 13px;
-          font-weight: 600;
-          color: #e5e7eb;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
           max-width: 120px;
+          font: var(--gt-type-title-s, 500 14px/20px Arial, sans-serif);
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
+        .qc__badge { font: var(--gt-type-label-s, 500 11px/16px Arial, sans-serif); opacity: .75; }
 
-        .qc__badge {
-          font-size: 9px;
-          color: #9ca3af;
-          text-transform: lowercase;
-        }
-
-        .qc__palette {
-          display: flex;
-          gap: 4px;
-          margin-bottom: 12px;
-        }
-
+        .qc__palette { display: flex; margin-bottom: var(--gt-space-2, 8px); }
         .qc__dot {
-          width: 14px;
-          height: 14px;
-          border-radius: 50%;
-          border: 2px solid #1e1e1e;
+          width: 16px; height: 16px; border-radius: 50%;
+          box-shadow: 0 0 0 2px var(--gt-surface, #ffffff);
         }
+        .qc__dot + .qc__dot { margin-left: -4px; }
 
+        /* Vista previa sobre el fondo del propio tema */
         .qc__preview {
-          font-family: 'Fira Code', monospace;
-          font-size: 10px;
-          padding-top: 8px;
-          border-top: 1px solid #333;
+          padding: 8px 10px;
+          border-radius: var(--gt-shape-s, 8px);
+          background: ${colors_[0] || 'var(--gt-code-surface, #1e1e1e)'};
+          font: 400 10px/16px var(--gt-font-mono, monospace);
+          color: ${colors_[2] || 'var(--gt-code-on-surface, #d4d4d4)'};
         }
-
-        .qc__kw { color: ${colors_[1] || '#c586c0'}; }
-        .qc__st { color: ${colors_[3] || '#ce9178'}; }
+        .qc__kw { color: ${colors_[1] || 'var(--gt-code-on-surface, #d4d4d4)'}; }
+        .qc__st { color: ${colors_[3] || 'var(--gt-code-on-surface, #d4d4d4)'}; }
 
         .qc__check-mark {
-          position: absolute;
-          bottom: 0;
-          right: 0;
-          width: 0;
-          height: 0;
-          border-style: solid;
-          border-width: 0 0 24px 24px;
-          border-color: transparent transparent #4ade80 transparent;
+          position: absolute; right: 8px; top: 10px;
+          color: var(--gt-primary, #0b57d0);
           display: ${selected_ ? 'block' : 'none'};
         }
       </style>
 
-      <div class="qc__card ${selected_ ? 'selected' : ''}">
+      <div class="qc__card ${selected_ ? 'selected' : ''}" role="button" tabindex="0" aria-pressed="${selected_}" aria-label="${name_}">
         <div class="qc__actions">
-          <button class="qc__action-btn duplicate" title="Duplicate Theme">
-            <span class="material-symbols-outlined" style="font-size: 16px;">content_copy</span>
+          <button type="button" class="qc__action-btn duplicate" title="${tr('themeDuplicate', 'Duplicate theme')}" aria-label="${tr('themeDuplicate', 'Duplicate theme')}">
+            ${icon('copy', 16)}
           </button>
           ${!isProtected_ ? `
-            <button class="qc__action-btn edit" title="Edit Theme">
-              <span class="material-symbols-outlined" style="font-size: 16px;">edit</span>
+            <button type="button" class="qc__action-btn edit" title="${tr('themeEdit', 'Edit theme')}" aria-label="${tr('themeEdit', 'Edit theme')}">
+              ${icon('pencil', 16)}
             </button>
-            <button class="qc__action-btn delete" title="Delete Theme">
-              <span class="material-symbols-outlined" style="font-size: 16px;">delete</span>
+            <button type="button" class="qc__action-btn delete" title="${tr('themeDelete', 'Delete theme')}" aria-label="${tr('themeDelete', 'Delete theme')}">
+              ${icon('trash', 16)}
             </button>
           ` : ''}
         </div>
 
         <div class="qc__header">
           <span class="qc__title">${name_}</span>
-          <span class="qc__badge">${isProtected_ ? 'system' : 'custom'}</span>
+          <span class="qc__badge">${isProtected_ ? tr('badgeSystem', 'system') : tr('badgeCustom', 'custom')}</span>
         </div>
 
-        <div class="qc__palette">
-          ${colors_.map(c => `<div class="qc__dot" style="background:${c}"></div>`).join('')}
+        <div class="qc__palette" aria-hidden="true">
+          ${colors_.filter(Boolean).map(c => `<div class="qc__dot" style="background:${c}"></div>`).join('')}
         </div>
 
-        <div class="qc__preview">
+        <div class="qc__preview" aria-hidden="true">
           <div><span class="qc__kw">class</span> <span class="qc__st">Theme</span> {}</div>
         </div>
 
-        <div class="qc__check-mark"></div>
+        <span class="qc__check-mark" aria-hidden="true">${icon('checkCircleFill', 20)}</span>
       </div>
     `;
   }
@@ -222,6 +191,12 @@ export class ThemeCard extends HTMLElement {
         detail: { value: this.getAttribute('value'), name: this.getAttribute('name') },
         bubbles: true, composed: true
       }));
+    };
+
+    card.onkeydown = (e) => {
+      if (e.target !== card || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      card.click();
     };
 
     // Eventos de botones (Duplicate, Edit, Delete)

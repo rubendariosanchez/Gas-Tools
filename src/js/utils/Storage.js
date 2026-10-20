@@ -8,33 +8,28 @@
  *  - `snippets`: snippets personalizados.
  *  - `themes`: temas personalizados (los protegidos viven en `THEME_LIST`).
  *
- * Maneja reaperturas tras cierre por inactividad de Chrome (la base
- * puede invalidarse cuando el service worker duerme).
+ * Cachea la conexión y la invalida en `onclose`/`onversionchange` (Chrome
+ * puede cerrarla cuando el service worker duerme); la siguiente operación reabre.
  */
 export class StorageAPI {
     constructor(dbName = 'QualityCodeDB', version = 2) {
         this.dbName = dbName;
         this.version = version;
         this.db = null;
+        // Apertura en curso: llamadas concurrentes comparten la misma petición.
+        this._opening = null;
     }
 
     /**
-     * Abre la conexión con la base de datos.
+     * Abre (o reutiliza) la conexión con la base de datos.
+     * @returns {Promise<IDBDatabase>}
+     * @throws {DOMException} Si IndexedDB rechaza la apertura.
      */
     async open() {
-        // Si la conexión fue cerrada por Chrome, reabrimos
-        if (this.db) {
-            try {
-                // Prueba rápida para ver si la conexión sigue viva
-                this.db.transaction('settings', 'readonly').abort();
-                return this.db;
-            } catch {
-                this.db = null; // conexión muerta, forzamos reapertura
-            }
-        }
+        if (this.db) return this.db;
+        if (this._opening) return this._opening;
 
-        // Si no hay conexión, abrimos una nueva
-        return new Promise((resolve, reject) => {
+        this._opening = new Promise((resolve, reject) => {
             const request = indexedDB.open(this.dbName, this.version);
 
             request.onupgradeneeded = (e) => {
@@ -52,28 +47,53 @@ export class StorageAPI {
             };
 
             request.onsuccess = () => {
-                this.db = request.result;
-                resolve(this.db);
+                const db = request.result;
+                // Conexión cerrada por Chrome u otra pestaña sube la versión: se descarta la caché.
+                const invalidate = () => { if (this.db === db) this.db = null; };
+                db.onclose = invalidate;
+                db.onversionchange = () => { invalidate(); db.close(); };
+                this.db = db;
+                resolve(db);
             };
 
             request.onerror = () => reject(request.error);
-        });
+        }).finally(() => { this._opening = null; });
+
+        return this._opening;
+    }
+
+    /**
+     * Abre una transacción; si la conexión cacheada murió, reabre una vez.
+     * @param {string} storeName
+     * @param {IDBTransactionMode} mode
+     * @returns {Promise<IDBTransaction>}
+     * @throws {DOMException} Si la transacción no puede crearse tras reabrir.
+     * @private
+     */
+    async _tx(storeName, mode) {
+        const db = await this.open();
+        try {
+            return db.transaction(storeName, mode);
+        } catch (err) {
+            if (err?.name !== 'InvalidStateError') throw err;
+            if (this.db === db) this.db = null;
+            return (await this.open()).transaction(storeName, mode);
+        }
     }
 
     /**
      * Guarda o actualiza un registro en un store específico.
      */
     async set(storeName, data) {
-        const db = await this.open();
+        const tx = await this._tx(storeName, 'readwrite');
         return new Promise((resolve, reject) => {
-            const tx = db.transaction(storeName, 'readwrite');
-            const store = tx.objectStore(storeName);
-
             // Si el objeto tiene un 'id', lo usamos como clave, sino se asume que el store es de tipo key-value
-            const request = store.put(data);
+            tx.objectStore(storeName).put(data);
 
-            request.onsuccess = () => resolve(true);
-            request.onerror = () => reject(request.error);
+            // Se resuelve al confirmarse la transacción (datos ya persistidos).
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error);
+            tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
         });
     }
 
@@ -81,9 +101,8 @@ export class StorageAPI {
      * Obtiene todos los registros de un store.
      */
     async getAll(storeName) {
-        const db = await this.open();
+        const tx = await this._tx(storeName, 'readonly');
         return new Promise((resolve, reject) => {
-            const tx = db.transaction(storeName, 'readonly');
             const store = tx.objectStore(storeName);
             const request = store.getAll();
 
@@ -96,14 +115,13 @@ export class StorageAPI {
      * Elimina un registro por ID.
      */
     async delete(storeName, id) {
-        const db = await this.open();
+        const tx = await this._tx(storeName, 'readwrite');
         return new Promise((resolve, reject) => {
-            const tx = db.transaction(storeName, 'readwrite');
-            const store = tx.objectStore(storeName);
-            const request = store.delete(id);
+            tx.objectStore(storeName).delete(id);
 
-            request.onsuccess = () => resolve(true);
-            request.onerror = () => reject(request.error);
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error);
+            tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
         });
     }
 
@@ -112,9 +130,8 @@ export class StorageAPI {
      * Si el store es de tipo key-value, se debe pasar la clave como segundo argumento.
      */
     async get(storeName, key) {
-      const db = await this.open();
+      const tx = await this._tx(storeName, 'readonly');
       return new Promise((resolve, reject) => {
-          const tx = db.transaction(storeName, 'readonly');
           const store = tx.objectStore(storeName);
           const request = store.get(key);
 

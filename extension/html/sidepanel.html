@@ -1,18 +1,38 @@
-<!-- sidepanel.html -->
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>GAS Tools</title>
-  <link rel="stylesheet" href="sidepanel.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Google Apps Script Tools — AI</title>
+  <link rel="stylesheet" href="../css/sidepanel.css">
 </head>
 <body>
-
-  <div class="header">
-    Google Apps Script Tools
+  <!-- Barra de contexto: archivo activo del editor de Apps Script al que
+       apuntan @selection/@file/@project e Insert/Replace. -->
+  <div class="qc__side-context" id="sideContext" data-state="none">
+    <svg class="qc__side-icon" width="14" height="14" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true" focusable="false"><path d="M320-240h320v-80H320v80Zm0-160h320v-80H320v80ZM240-80q-33 0-56.5-23.5T160-160v-640q0-33 23.5-56.5T240-880h320l240 240v480q0 33-23.5 56.5T720-80H240Zm280-520v-200H240v640h480v-440H520ZM240-800v200-200 640-640Z"/></svg>
+    <span class="qc__side-label" id="sideContextLabel" data-i18n="edSideNoEditor">This tab isn't an Apps Script editor. Open a project to use the editor context.</span>
+    <span class="qc__side-dot" aria-hidden="true"></span>
   </div>
 
-  <div id="app"></div>
+  <!-- El bootstrap crea <gas-chat-panel mode="sidepanel"> aquí, después de
+       cargar tema e idioma (el componente los lee al conectarse). -->
+  <main class="qc__side-main" id="sideMain"></main>
 
-  <!-- <script src="sidepanel.js"></script> -->
+  <script src="../js/services/dom-utils.js"></script>
+  <script src="../js/shared/gas-ui.js"></script>
+  <script src="../../src/vendor/markdown-it/markdown-it.min.js"></script>
+  <script src="../js/services/markdown-render.js"></script>
+  <script src="../js/shared/llm-bridge.js"></script>
+  <script src="../js/sidepanel/remote-editor.js"></script>
+  <script src="../js/shared/line-diff.js"></script>
+  <script src="../js/shared/edit-applier.js"></script>
+  <script src="../js/shared/edit-blocks.js"></script>
+  <script src="../js/sidepanel/agent-tools.js"></script>
+  <script src="../js/sidepanel/project-files.js"></script>
+  <script src="../js/sidepanel/chat-store.js"></script>
+  <script src="../js/shared/code-merge.js"></script>
+  <script src="../js/components/gas-chat-panel.js"></script>
+  <script src="../js/sidepanel/sidepanel.js"></script>
 </body>
 </html>
